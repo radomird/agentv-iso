@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>The installer for AgenTV, a TV OS whose own agent builds the apps it is missing.</b><br>
+  <b>The installer for AgenTV, the world's first open-source agentic TV OS.</b><br>
   Powered by <a href="https://omarchy.org">Omarchy</a>.
 </p>
 
