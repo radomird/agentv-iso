@@ -12,9 +12,11 @@
 
 ---
 
-This repo builds the AgenTV installer ISO. Boot it from a USB stick and answer Omarchy's own installer questions. The box then restarts into AgenTV's TV setup, which you finish from your phone. The installer shows the AgenTV logo, with "powered by omarchy" underneath.
+This is where the AgenTV USB stick comes from.
 
-**Status:** early. No ISO has been built yet. Each ISO will be built and install-tested in GitHub Actions: an unattended install in a VM, then a boot of the installed system.
+It's Omarchy's installer, pointed at [`agentv-os`](https://github.com/radomird/agentv-os) instead of plain Omarchy. Same questions, AgenTV's logo up top. When it's done, the box reboots into TV setup and you take it from there on your phone.
+
+No ISO yet. Each one will pass a test run in GitHub Actions before you see it: a VM installs it by itself, then boots what it installed.
 
 ## Powered by Omarchy
 
