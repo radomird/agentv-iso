@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Turns a new Omarchy stable release into a pull request (ADR-026). The same
+# file lives in agentv-os and agentv-iso; keep the two copies identical.
+#
+#   agentv-os   merges Omarchy's release tag, such as v4.5.0.
+#   agentv-iso  merges the head of omarchy-iso's quattro, which has no tags,
+#               once Omarchy tags a new stable release.
+#
+# It merges, never rebases, because agentv is public, and AgenTV only adds
+# files, so the merge can't conflict unless a file of upstream's was edited.
+# Then it moves .github/omarchy-base (and, in agentv-iso, the release it
+# followed in .github/omarchy-release), pushes omarchy-sync/<tag> and opens a
+# pull request. Release candidates never count.
+#
+# It writes what it decided to $GITHUB_OUTPUT (or stdout): opened, pr,
+# branch, tag, automerge, and reason when automerge is false. Auto-merge is
+# only for a pull request whose every change is upstream's or the base files,
+# and never for a new major version: that one waits for Radomir.
+#
+# Usage: .github/scripts/omarchy-sync [--tag <vX.Y.Z>] [--base <branch>] [--dry-run]
+# Needs: GH_TOKEN that can push and open pull requests (SYNC_TOKEN in CI).
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+tag=""
+target=agentv
+dry_run=0
+while (( $# )); do
+  case "$1" in
+    --tag) tag="${2:?--tag needs a tag}"; shift ;;
+    --base) target="${2:?--base needs a branch}"; shift ;;
+    --dry-run) dry_run=1 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+output() {
+  printf '%s=%s\n' "$1" "$2" >>"${GITHUB_OUTPUT:-/dev/stdout}"
+}
+
+upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
+# Where releases and upstream's code come from. Tests point these elsewhere.
+releases_url=${OMARCHY_RELEASES_URL:-https://github.com/omacom/omarchy.git}
+upstream_url=${OMARCHY_UPSTREAM_URL:-https://github.com/$upstream.git}
+release_file=.github/omarchy-base
+[[ -f .github/omarchy-release ]] && release_file=.github/omarchy-release
+current=$(sed -n '1{s/[[:space:]]//g;p;}' "$release_file")
+
+stable_release() {
+  [[ $1 =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+# Omarchy's newest stable release, whichever fork this is.
+if [[ -z $tag ]]; then
+  tag=$(git ls-remote --tags --refs "$releases_url" 'refs/tags/v*' |
+    sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+fi
+stable_release "$tag" || { echo "$tag isn't a stable release" >&2; exit 2; }
+
+output tag "$tag"
+if [[ $tag == "$current" || $(printf '%s\n%s\n' "$tag" "$current" | sort -V | tail -n 1) != "$tag" ]]; then
+  echo "Already on Omarchy $current, and $tag is no newer. Nothing to do."
+  output opened false
+  exit 0
+fi
+
+branch="omarchy-sync/$tag"
+output branch "$branch"
+if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+  echo "A sync to $tag is open already ($branch)."
+  output opened false
+  exit 0
+fi
+
+git fetch --quiet origin "$target"
+git switch --quiet -c "$branch" "origin/$target"
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+if [[ $upstream == "omacom/omarchy" ]]; then
+  git fetch --quiet --no-tags "$upstream_url" "+refs/tags/$tag:refs/tags/$tag"
+  upstream_ref=$(git rev-parse "refs/tags/$tag^{commit}")
+  new_base="$tag"
+else
+  git fetch --quiet --no-tags "$upstream_url" quattro
+  upstream_ref=$(git rev-parse FETCH_HEAD)
+  new_base="$upstream_ref"
+fi
+
+if ! git merge --quiet --no-ff --no-edit -m "Merge Omarchy $tag" "$upstream_ref"; then
+  echo "Merging Omarchy $tag conflicts. That only happens when a file of upstream's was edited here:" >&2
+  git diff --name-only --diff-filter=U >&2
+  exit 3
+fi
+
+printf '%s\n' "$new_base" >.github/omarchy-base
+[[ $release_file == .github/omarchy-release ]] && printf '%s\n' "$tag" >.github/omarchy-release
+git add .github/omarchy-base "$release_file"
+git commit --quiet -m "Move the Omarchy base to $tag"
+
+# Every change this pull request makes has to be upstream's own, file for
+# file, or the base files. Anything else turns auto-merge off.
+foreign=""
+while IFS= read -r file; do
+  [[ $file == .github/omarchy-base || $file == .github/omarchy-release ]] && continue
+  git diff --quiet "$upstream_ref" HEAD -- "$file" || foreign+="$file"$'\n'
+done < <(git diff --name-only "origin/$target" HEAD)
+
+# Upstream's new workflows, which the sync workflow switches off after the
+# merge unless .github/upstream-workflows-kept lists them.
+new_workflows=$(git diff --name-only --diff-filter=A "origin/$target" HEAD -- .github/workflows/ || true)
+
+current_major=${current#v}
+current_major=${current_major%%.*}
+new_major=${tag#v}
+new_major=${new_major%%.*}
+
+automerge=true
+reason=""
+if (( new_major > current_major )); then
+  automerge=false
+  reason="Omarchy $tag is a new major version, so it waits for Radomir."
+elif [[ -n $foreign ]]; then
+  automerge=false
+  reason="These files differ from upstream's $tag: ${foreign//$'\n'/ }"
+fi
+
+body=$(cat <<BODY
+Merges Omarchy $tag into \`$target\` and moves \`.github/omarchy-base\` (ADR-026).
+
+- Upstream: \`$upstream\` at \`$upstream_ref\`
+- Was: $current
+- Merges itself when every gate is green: $automerge
+${reason:+- Why not: $reason}
+${new_workflows:+- New upstream workflows, switched off after the merge: $(echo "$new_workflows" | tr '\n' ' ')}
+
+Opened by the daily Omarchy sync.
+BODY
+)
+
+if (( dry_run )); then
+  echo "Dry run: would push $branch and open a pull request:"
+  echo "$body"
+  output opened false
+  output automerge "$automerge"
+  exit 0
+fi
+
+git push --quiet origin "$branch"
+pr=$(gh pr create --base "$target" --head "$branch" --title "Merge Omarchy $tag" --body "$body")
+
+output opened true
+output pr "${pr##*/}"
+output automerge "$automerge"
+output reason "$reason"
+echo "Opened $pr"

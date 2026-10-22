@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Switches off the workflows that came with upstream's code, except the ones
+# .github/upstream-workflows-kept names: they publish to Omarchy's own places,
+# use runners AgenTV doesn't have, or need Omarchy's secrets. Through the API,
+# so no file of upstream's is edited. The same file lives in agentv-os and
+# agentv-iso; keep the two copies identical.
+#
+# Needs: GH_TOKEN with actions: write, GITHUB_REPOSITORY
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
+base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
+kept=$(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' .github/upstream-workflows-kept 2>/dev/null || true)
+
+names=$(gh api "repos/$upstream/contents/.github/workflows?ref=$base" --jq '.[].name' 2>/dev/null || true)
+for name in $names; do
+  grep -qxF "$name" <<<"$kept" && continue
+  state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$name" --jq .state 2>/dev/null) || continue
+  if [[ $state == "active" ]]; then
+    gh workflow disable "$name" -R "$GITHUB_REPOSITORY"
+    echo "Switched off upstream's $name"
+  fi
+done

@@ -1,0 +1,154 @@
+name: Omarchy sync
+
+# Every day: when Omarchy has a new stable release, open a pull request that
+# merges the head of omarchy-iso's quattro (it has no tags of its own) and
+# moves .github/omarchy-base and .github/omarchy-release (ADR-026). The pull
+# request runs every gate, the Check workflow's and a full ISO build and
+# install, and merges itself only when they're all green. A new major version
+# never merges itself, and neither does a change that isn't upstream's own.
+# A sync that can't merge opens an issue that says why.
+#
+# It needs SYNC_TOKEN, a fine-grained token that can push branches, open pull
+# requests and push upstream's own workflow files, which GitHub's built-in
+# token can't, and whose pull requests run the checks.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Omarchy tag to sync to (empty: the newest stable release)"
+        type: string
+        default: ""
+      base:
+        description: "Branch to sync (a rehearsal can use its own)"
+        type: string
+        default: agentv
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: omarchy-sync
+  cancel-in-progress: false
+
+jobs:
+  open:
+    name: Open a pull request for a new Omarchy release
+    runs-on: ubuntu-26.04
+    outputs:
+      opened: ${{ steps.sync.outputs.opened }}
+      pr: ${{ steps.sync.outputs.pr }}
+      tag: ${{ steps.sync.outputs.tag }}
+      automerge: ${{ steps.sync.outputs.automerge }}
+      reason: ${{ steps.sync.outputs.reason }}
+      sha: ${{ steps.sync.outputs.sha }}
+      channel: ${{ steps.channel.outputs.channel }}
+    steps:
+      - name: SYNC_TOKEN is set
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [[ -z $SYNC_TOKEN ]]; then
+            echo "::error::SYNC_TOKEN isn't set, so the Omarchy sync can't open a pull request. Add a fine-grained token with Contents, Pull requests and Workflows read and write on agentv-os and agentv-iso as the SYNC_TOKEN Actions secret."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.base || 'agentv' }}
+          fetch-depth: 0
+          filter: blob:none
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - id: sync
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          BASE: ${{ inputs.base || 'agentv' }}
+        run: |
+          args=(--base "$BASE")
+          [[ -n $TAG ]] && args+=(--tag "$TAG")
+          .github/scripts/omarchy-sync "${args[@]}"
+          echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      # The ISO carries AgenTV's current release, or edge until there is one.
+      - id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKGS: ${{ github.repository_owner }}/agentv-pkgs
+        run: |
+          if gh release view stable -R "$PKGS" --json assets --jq '.assets[].name' 2>/dev/null | grep -q '^agentv-[0-9]'; then
+            echo "channel=stable" >>"$GITHUB_OUTPUT"
+          else
+            echo "channel=edge" >>"$GITHUB_OUTPUT"
+          fi
+
+  image:
+    needs: open
+    if: needs.open.outputs.opened == 'true'
+    uses: ./.github/workflows/iso.yml
+    with:
+      ref: ${{ needs.open.outputs.sha }}
+      channel: ${{ needs.open.outputs.channel }}
+
+  decide:
+    name: Merge itself, or say why not
+    needs: [open, image]
+    if: always() && needs.open.outputs.opened == 'true'
+    runs-on: ubuntu-26.04
+    env:
+      PR: ${{ needs.open.outputs.pr }}
+      TAG: ${{ needs.open.outputs.tag }}
+      AUTOMERGE: ${{ needs.open.outputs.automerge }}
+      REASON: ${{ needs.open.outputs.reason }}
+      IMAGE: ${{ needs.image.result }}
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Wait for the pull request's own checks
+        id: checks
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          sleep 30
+          if gh pr checks "$PR" -R "$GITHUB_REPOSITORY" --required --watch --interval 60; then
+            echo "result=success" >>"$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge, or open an issue
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          CHECKS: ${{ steps.checks.outputs.result }}
+        run: |
+          why=""
+          [[ $CHECKS == "success" ]] || why="The Check workflow failed."
+          [[ $IMAGE == "success" ]] || why="$why The ISO build and install failed ($IMAGE)."
+          [[ $AUTOMERGE == "true" ]] || why="$why $REASON"
+          if [[ -z $why ]]; then
+            GH_TOKEN="$SYNC_TOKEN" gh pr merge "$PR" -R "$GITHUB_REPOSITORY" --merge --auto
+            echo "Every gate is green: Omarchy $TAG merges itself." >>"$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "Omarchy $TAG didn't merge itself" \
+              --body "The sync pull request #$PR stays open, and boxes stay where they are.$why Run: $RUN"
+            echo "Not merged:$why" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: success()
+        with:
+          ref: ${{ inputs.base || 'agentv' }}
+          persist-credentials: false
+
+      - name: Switch off upstream's own workflows
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 60
+          .github/scripts/upstream-workflows-off
