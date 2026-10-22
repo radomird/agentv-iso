@@ -60,6 +60,10 @@ concurrency:
 jobs:
   iso:
     name: "Build the ISO, install it, boot it, check it"
+    # A sync pull request's ISO is built by omarchy-sync.yml, which calls this
+    # workflow itself; building it a second time for the pull request would
+    # only double the wait before it merges.
+    if: ${{ !startsWith(github.head_ref, 'omarchy-sync/') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 150
     env:
