@@ -113,8 +113,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
+          # Every check on the pull request, not only the ones a ruleset
+          # requires: a sync that merges itself should pass all of them, and
+          # a branch without a ruleset (the rehearsal's) has none required.
           sleep 30
-          if gh pr checks "$PR" -R "$GITHUB_REPOSITORY" --required --watch --interval 60; then
+          if gh pr checks "$PR" -R "$GITHUB_REPOSITORY" --watch --interval 60; then
             echo "result=success" >>"$GITHUB_OUTPUT"
           else
             echo "result=failure" >>"$GITHUB_OUTPUT"
