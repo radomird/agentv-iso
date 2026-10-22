@@ -68,6 +68,14 @@ check "About shows AgenTV's logo" \
   ssh_guest "cmp -s ~/.config/omarchy/branding/about.txt /usr/share/agentv/branding/logo.txt"
 check "first boot left no passwordless sudo behind" ssh_sudo "! ls /etc/sudoers.d/ | grep -q nopasswd"
 
+# The box's own boot menu (ADR-027): Limine's header and the entry say
+# AgenTV, and no entry is left under Omarchy's name.
+check "the box's boot menu header says AgenTV" \
+  ssh_sudo "grep -q '^interface_branding: AgenTV$' /boot/limine.conf"
+check "the box's boot menu entry is AgenTV" \
+  ssh_sudo "grep -qE '^/\\+?AgenTV' /boot/limine.conf && ! grep -qE '^/\\+?Omarchy' /boot/limine.conf"
+ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf" 2>&1 || true
+
 ssh_sudo "cat /var/log/agentv-firstboot.log" >"$RUN_DIR/agentv-firstboot.log" 2>&1 || true
 ssh_guest "ls -la ~/.config/omarchy/branding/" >"$RUN_DIR/branding-files.txt" 2>&1 || true
 
