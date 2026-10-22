@@ -7,13 +7,16 @@ name: ISO
 # install test (an unattended install in QEMU with KVM and a boot of the
 # installed system), then AgenTV's image checks in test/agentv/image/.
 #
+# It runs on pull requests that touch the build, on release tags and by hand.
+# A merge to agentv doesn't rebuild it: the nightly run in agentv-os builds
+# the edge ISO every night, from this branch.
+#
 # The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
 # 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
 # workflow artifact instead.
 
 on:
   push:
-    branches: [agentv]
     tags: ["v*"]
   pull_request:
     paths:
