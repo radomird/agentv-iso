@@ -117,16 +117,29 @@ fi
 
 # --- What AgenTV added ------------------------------------------------------
 
+# -z, so git hands over every name exactly as it is. Without it, git quotes a
+# name with unusual characters, and that file would slip past every scan.
 {
-  git diff --no-renames --name-only --diff-filter=A "$base_commit"
-  git ls-files --others --exclude-standard
-} | sort -u >"$WORK/all-added"
+  git diff -z --no-renames --name-only --diff-filter=A "$base_commit"
+  git ls-files -z --others --exclude-standard
+} >"$WORK/all-added.z"
 
-# Regular text files only: no symlinks, no images, nothing empty.
+# Below, the lists hold one name per line, so a name with a newline or another
+# control character in it can't be listed. It fails the gate instead.
+# shellcheck disable=SC2016 # the single quotes hold perl, not shell
+perl -0 -ne 'chomp; print "$_\n" if /[\x00-\x1f\x7f]/' "$WORK/all-added.z" >"$WORK/odd-names"
+if [[ -s $WORK/odd-names ]]; then
+  fail "file names have no control characters" "$(cat -v "$WORK/odd-names")"
+fi
+# shellcheck disable=SC2016 # the single quotes hold perl, not shell
+perl -0 -ne 'chomp; print "$_\n" unless /[\x00-\x1f\x7f]/' "$WORK/all-added.z" | sort -u >"$WORK/all-added"
+
+# Regular text files only: no symlinks, no images, nothing empty. The -- keeps
+# a name that starts with a dash from passing for an option.
 : >"$WORK/ours"
 while IFS= read -r file; do
   [[ -f $file && ! -L $file ]] || continue
-  grep -Iq . "$file" 2>/dev/null || continue
+  grep -Iq -e . -- "$file" 2>/dev/null || continue
   printf '%s\n' "$file" >>"$WORK/ours"
 done <"$WORK/all-added"
 
@@ -138,20 +151,32 @@ pass "AgenTV added $added_count files"
 
 # Prints file:line for every line of the listed files that matches the perl
 # pattern. The pattern sees decoded UTF-8 when the second argument is "utf8".
+#
+# The names come in on stdin and each file is opened with a three-argument
+# open. perl -n over @ARGV would open them the two-argument way, where a name
+# like "x|cmd|" runs cmd: anyone who can add a file to a pull request could run
+# a command in CI. The pattern travels in the environment, so a slash in it
+# can't end the regex early. A scan that breaks reports itself rather than
+# finding nothing.
 scan() {
   local pattern="$1" mode="${2:-bytes}" list="$3"
-  local flags=()
 
   [[ -s $list ]] || return 0
-  [[ $mode == "utf8" ]] && flags=(-CSD)
-  # The pattern travels in the environment, so a slash in it can't end the
-  # regex early. A scan that breaks reports itself rather than finding nothing.
-  # The +-expansion keeps bash 3.2 from calling an empty array unbound.
   # shellcheck disable=SC2016 # the single quotes hold perl, not shell
-  tr '\n' '\0' <"$list" |
-    AGENTV_PATTERN="$pattern" xargs -0 perl ${flags[@]+"${flags[@]}"} -ne \
-      'BEGIN { $re = qr/$ENV{AGENTV_PATTERN}/ } print "$ARGV:$.\n" if /$re/; close ARGV if eof' ||
-    echo "(the scan for $pattern failed)"
+  AGENTV_PATTERN="$pattern" AGENTV_MODE="$mode" perl -e '
+    my $re = qr/$ENV{AGENTV_PATTERN}/;
+    my $layer = $ENV{AGENTV_MODE} eq "utf8" ? "<:encoding(UTF-8)" : "<:raw";
+    my $failed = 0;
+    while (my $file = <STDIN>) {
+      chomp $file;
+      open(my $fh, $layer, $file) or do { warn "cannot read $file: $!\n"; $failed = 1; next };
+      while (my $line = <$fh>) {
+        print "$file:$.\n" if $line =~ $re;
+      }
+      close $fh;
+    }
+    exit $failed;
+  ' <"$list" || echo "(the scan for $pattern failed)"
 }
 
 # --- No em dashes, in files or commit messages ------------------------------
@@ -227,7 +252,7 @@ fi
 # Sourced leaves and Omarchy hooks have no shebang, so they're named by place.
 : >"$WORK/shell"
 while IFS= read -r file; do
-  first=$(head -n 1 "$file")
+  first=$(head -n 1 -- "$file")
   if [[ $file == *.sh || $file == */PKGBUILD || $file == PKGBUILD || $first =~ ^#!.*(bash|/sh) ]]; then
     printf '%s\n' "$file" >>"$WORK/shell"
   elif [[ $file =~ ^(install/tv|migrations/agentv|config/omarchy/hooks)/ ]]; then
@@ -246,7 +271,7 @@ else
   while IFS= read -r file; do
     args=(--shell=bash --exclude=SC1091)
     [[ $file == *PKGBUILD ]] && args+=("--exclude=SC2034,SC2154,SC2164")
-    shellcheck "${args[@]}" "$file" >>"$WORK/shellcheck.log" 2>&1 || true
+    shellcheck "${args[@]}" -- "$file" >>"$WORK/shellcheck.log" 2>&1 || true
   done <"$WORK/shell"
   if [[ -s $WORK/shellcheck.log ]]; then
     fail "shell scripts pass shellcheck" "$(cat "$WORK/shellcheck.log")"
@@ -264,8 +289,8 @@ else
   # a secret that was added and later removed still counts.
   mkdir -p "$WORK/tree"
   while IFS= read -r file; do
-    mkdir -p "$WORK/tree/$(dirname "$file")"
-    cp "$file" "$WORK/tree/$file"
+    mkdir -p "$WORK/tree/$(dirname -- "$file")"
+    cp -- "$file" "$WORK/tree/$file"
   done <"$WORK/ours"
 
   # -v prints each finding, redacted, so the log says where it is.

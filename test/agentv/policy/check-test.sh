@@ -169,4 +169,23 @@ else
   printf 'skip - secret cases (gitleaks is not installed)\n'
 fi
 
+# --- File names can't run code or hide from the scans -----------------------
+
+# perl's two-argument open runs a name like this as a command.
+printf 'a pause \xe2\x80\x94 here\n' >'x|touch PWNED|'
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) && fail "a file named like a pipe is still scanned" "$output"
+[[ ! -e PWNED ]] || fail "a file name can't run a command"
+[[ $output == *"not ok - no em dashes"* ]] || fail "a file named like a pipe is still scanned" "$output"
+pass "a file name can't run a command, and that file is still scanned"
+reset_fork
+
+printf 'a pause \xe2\x80\x94 here\n' >-n
+expect_fail "a file whose name starts with a dash is still scanned" "no em dashes"
+
+printf 'a pause \xe2\x80\x94 here\n' >"$(printf 'caf\xc3\xa9 notes.md')"
+expect_fail "a file with an unusual name is still scanned" "no em dashes"
+
+printf 'fine\n' >"$(printf 'two\nlines')"
+expect_fail "a file name with a newline fails" "file names have no control characters"
+
 printf '\nThe fast gate catches what it should.\n'
