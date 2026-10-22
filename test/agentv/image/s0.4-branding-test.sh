@@ -38,6 +38,16 @@ greeter_says_agentv() {
 }
 check "the installer's tagline is AgenTV's, not Omarchy's by DHH" greeter_says_agentv
 
+# The logo in AgenTV's colours (ADR-028): the greeter's screen has "agen"'s
+# #c0caf5 and "tv"'s #7aa2f7, and none of Omarchy's green #9ece6a.
+greeter_in_agentv_colours() {
+  local colours
+  [[ -f $RUN_DIR/success-S0.4-installer.png ]] || return 1
+  colours=$(magick "$RUN_DIR/success-S0.4-installer.png" -unique-colors txt:- 2>/dev/null)
+  grep -qi '#C0CAF5' <<<"$colours" && grep -qi '#7AA2F7' <<<"$colours" && ! grep -qi '#9ECE6A' <<<"$colours"
+}
+check "the installer draws the logo in AgenTV's colours, not Omarchy's green" greeter_in_agentv_colours
+
 # The ISO itself (ADR-027): the volume label a PC's boot menu lists, and the
 # ISO's own boot menus.
 volume_label_is_agentv() {

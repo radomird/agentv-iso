@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Draws AgenTV's logo in its own colours on the installer's console (ADR-028):
+# "agen" in Tokyo Night's #c0caf5, "tv" in #7aa2f7 and "powered by omarchy" in
+# grey, where omarchy-iso draws logo.txt all in green. logo.ansi comes from
+# agentv-os's branding/build.py: logo.txt with indexed colours baked in.
+#
+# Usage: agentv-logo [--top <blank lines>] [--pad <columns>] [--prefix <string>]
+
+set -euo pipefail
+
+top=0
+pad=0
+prefix=""
+while (( $# )); do
+  case "$1" in
+    --top) top="${2:?}"; shift ;;
+    --pad) pad="${2:?}"; shift ;;
+    --prefix) prefix="${2:?}"; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+for (( i = 0; i < top; i++ )); do
+  echo
+done
+while IFS= read -r line; do
+  printf '%b%*s%s\n' "$prefix" "$pad" '' "$line"
+done </usr/local/share/agentv/logo.ansi

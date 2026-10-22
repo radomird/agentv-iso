@@ -63,4 +63,49 @@ if ! grep -q '^  tagline="Beautiful, Fun & Agentic Linux by DHH"$' /root/configu
 fi
 perl -pi -e 's/^  tagline="Beautiful, Fun & Agentic Linux by DHH"$/  tagline="$ENV{AGENTV_TAGLINE}"/' /root/configurator
 
+# The logo in AgenTV's colours (ADR-028). The greeter, every step's header
+# and the install dashboard's finish screen draw logo.txt all in Omarchy's
+# green; they draw it with agentv-logo instead. The greeter's green colour
+# shift animation goes, and the finish screen's laser etch settles on AgenTV's
+# blue before the two-colour logo is drawn over it. Each change stops the
+# build if upstream has moved the line it replaces.
+install -D -m 644 "$here/logo.ansi" /usr/local/share/agentv/logo.ansi
+install -D -m 755 "$here/agentv-logo" /usr/local/bin/agentv-logo
+
+# patch <file> <description> <perl substitution, -0 so it can span lines>
+patch() {
+  local file="$1" what="$2" expression="$3" before
+  before=$(mktemp)
+  cp "$file" "$before"
+  perl -0pi -e "$expression" "$file"
+  if cmp -s "$before" "$file"; then
+    rm -f "$before"
+    echo "agentv-iso: $what in $file has moved upstream" >&2
+    exit 1
+  fi
+  rm -f "$before"
+}
+
+configurator=/root/configurator
+dashboard=/usr/local/bin/omarchy-install-dashboard
+
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the step header's logo" \
+  's/^  gum style --foreground 2 --padding "1 0 0 \$PADDING_LEFT" "\$\(<"\$LOGO_PATH"\)"$/  agentv-logo --top 1 --pad "\$PADDING_LEFT"/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the greeter's logo" \
+  's/^  gum style --foreground 2 --padding "0 0 0 \$PADDING_LEFT" "\$\(<"\$LOGO_PATH"\)"$/  agentv-logo --pad "\$PADDING_LEFT"/m'
+# The greeter waits for Return and then stops $anim, so something has to run.
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the greeter's animation" \
+  's/^  ttfx -i "\$LOGO_PATH" \\\n.*?^    <\/dev\/null >\/dev\/tty 2>\/dev\/null &$/  sleep infinity <\/dev\/null >\/dev\/null 2>&1 &/ms'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the dashboard's logo" \
+  's/^    while IFS= read -r line; do\n      printf .\\r%s%s%b%s%b\\n. "\$CLEAR_LINE" "\$pad" "\$GREEN" "\$line" "\$RESET"\n    done <"\$LOGO_PATH"$/    agentv-logo --prefix "\\r\$CLEAR_LINE\$pad"/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the finish screen's effect" \
+  's/^      --final-gradient-stops 2 \\\n      >"\$TTY_PATH" 2>\/dev\/null \|\| \{\n        dashboard_log "logo effect skipped \(ttfx exited \$\?\)"$/      --final-gradient-stops 4 \\\n      >"\$TTY_PATH" 2>\/dev\/null || true; {\n        dashboard_log "AgenTV redraws its logo in its own colours"/m'
+patch "$dashboard" "the finish screen's title" \
+  's/title="Installed Omarchy"/title="Installed AgenTV"/'
+
 echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, and AgenTV's logo and tagline"
