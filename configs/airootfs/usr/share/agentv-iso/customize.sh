@@ -45,4 +45,11 @@ if ! pacman --dbpath "$dbpath" -S --print --print-format '%n %v' agentv-keyring 
 fi
 rm -rf "$dbpath"
 
-echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install"
+# The installer's logo (ADR-021): the greeter, the configurator and the
+# install dashboard read /usr/share/omarchy/logo.txt. This changes the live
+# ISO only; on the installed box Omarchy's own package owns that file.
+# logo.txt comes from agentv-os's branding/build.py and keeps its 81 columns,
+# which the dashboard takes its width from.
+install -D -m 644 "$here/logo.txt" /usr/share/omarchy/logo.txt
+
+echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, and AgenTV's logo"
