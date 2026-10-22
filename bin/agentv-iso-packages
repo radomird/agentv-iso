@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# agentv:summary=Fetch AgenTV's signed packages for the ISO's build step
+# agentv:args=<stable|edge> [<packages-dir>]
+
+# Downloads agentv and agentv-keyring from the agentv-pkgs release for a
+# channel and checks every signature against AgenTV's key, whose fingerprint
+# is pinned in configs/airootfs/usr/share/agentv-iso/key-fingerprint. They
+# land where the ISO's build step (customize.sh) picks them up. The owner
+# comes from AGENTV_OWNER, which CI sets from GitHub's own context, so moving
+# the repos changes no code.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+channel="${1:?usage: agentv-iso-packages <stable|edge> [<packages-dir>]}"
+dest="${2:-$ROOT/configs/airootfs/usr/share/agentv-iso/packages}"
+: "${AGENTV_OWNER:?set AGENTV_OWNER to the GitHub owner of agentv-pkgs}"
+
+url="https://github.com/$AGENTV_OWNER/agentv-pkgs/releases/download/$channel"
+pinned=$(tr -d '[:space:]' <"$ROOT/configs/airootfs/usr/share/agentv-iso/key-fingerprint")
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+export GNUPGHOME="$work/gnupg"
+mkdir -m 700 "$GNUPGHOME"
+
+fetch() {
+  curl -fsSL --retry 3 -o "$work/$1" "$url/$1"
+}
+
+fetch agentv.db
+fetch agentv.db.sig
+
+# The packages the repository lists now, by file name.
+mkdir "$work/db"
+tar -xzf "$work/agentv.db" -C "$work/db"
+files=()
+while IFS= read -r file; do
+  files+=("$file")
+done < <(awk '/^%FILENAME%$/ { getline; print }' "$work"/db/*/desc)
+(( ${#files[@]} == 2 )) || { echo "expected agentv and agentv-keyring in $url, found: ${files[*]}" >&2; exit 1; }
+
+for file in "${files[@]}"; do
+  fetch "$file"
+  fetch "$file.sig"
+done
+
+# The key comes out of agentv-keyring itself, and counts only if it's the
+# one pinned here.
+keyring=$(printf '%s\n' "${files[@]}" | grep '^agentv-keyring-')
+tar -xf "$work/$keyring" -C "$work" usr/share/pacman/keyrings/agentv.gpg
+gpg --batch --quiet --import "$work/usr/share/pacman/keyrings/agentv.gpg"
+fpr=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr:/ { print $10; exit }')
+if [[ $fpr != "$pinned" ]]; then
+  echo "agentv-keyring carries key $fpr, but this ISO trusts only $pinned" >&2
+  exit 1
+fi
+
+# gpgv accepts a signature only from a key in the keyring it's given, and
+# that keyring holds the pinned key alone.
+gpg --batch --export "$pinned" >"$work/trusted.gpg"
+gpgv --quiet --keyring "$work/trusted.gpg" "$work/agentv.db.sig" "$work/agentv.db"
+for file in "${files[@]}"; do
+  gpgv --quiet --keyring "$work/trusted.gpg" "$work/$file.sig" "$work/$file"
+done
+
+mkdir -p "$dest"
+rm -f "$dest"/*.pkg.tar.zst
+for file in "${files[@]}"; do
+  cp "$work/$file" "$dest/"
+done
+echo "AgenTV packages for the ISO, signatures checked against $pinned:"
+printf '  %s\n' "${files[@]}"

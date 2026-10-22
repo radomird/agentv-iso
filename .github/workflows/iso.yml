@@ -1,0 +1,173 @@
+name: ISO
+
+# Builds AgenTV's ISO and installs it in a VM (ADR-019, layer 5). The ISO is
+# omarchy-iso's own build with Omarchy's own packages; the only addition is
+# AgenTV's signed packages, which configs/airootfs/root/customize_airootfs.sh
+# adds to the offline mirror and the install (ADR-025). Then upstream's own
+# install test (an unattended install in QEMU with KVM and a boot of the
+# installed system), then AgenTV's image checks in test/agentv/image/.
+#
+# The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
+# 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
+# workflow artifact instead.
+
+on:
+  push:
+    branches: [agentv]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "bin/**"
+      - "builder/**"
+      - "configs/**"
+      - "test/**"
+      - "archiso"
+      - ".github/workflows/iso.yml"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "AgenTV package channel the ISO carries"
+        type: choice
+        options: [edge, stable]
+        default: edge
+      keep-iso:
+        description: "Keep the ISO as an artifact"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        default: edge
+      keep-iso:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iso-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iso:
+    name: "Build the ISO, install it, boot it, check it"
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    env:
+      # A release tag carries stable packages; everything else edge.
+      CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && 'stable') || 'edge' }}
+      KEEP_ISO: ${{ inputs.keep-iso || startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # The build and the install need about 40 GB. GitHub's runner ships
+      # toolchains this job never uses, so make room when it's short.
+      - name: Make room on the disk
+        run: |
+          avail() { df -BG --output=avail / | tail -1 | tr -dc 0-9; }
+          echo "Free: $(avail) GB"
+          if (( $(avail) < 45 )); then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/boost
+            sudo docker image prune -af >/dev/null
+            echo "Free after clean-up: $(avail) GB"
+          fi
+          (( $(avail) >= 40 )) || { echo "::error::only $(avail) GB free, the build and install test need about 40 GB"; exit 1; }
+
+      - name: Fetch AgenTV's signed packages
+        env:
+          AGENTV_OWNER: ${{ github.repository_owner }}
+        run: bin/agentv-iso-packages "$CHANNEL"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the ISO
+        run: |
+          start=$(date +%s)
+          NO_BOOT_OFFER=1 ./bin/omarchy-iso-make
+          mkdir -p test-runs && echo $(( $(date +%s) - start )) >test-runs/build-seconds
+          ls -l release/
+
+      # Upstream's harness, the same way its install-test.yml runs it, then
+      # AgenTV's checks against the base image it leaves behind.
+      - name: Install unattended, boot, then AgenTV's checks
+        run: |
+          sudo chmod 0666 /dev/kvm
+          docker run --rm --device /dev/kvm -v "$PWD:/w" -w /w \
+            -e OMARCHY_INTEGRATION_DISK_CACHE=none \
+            ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
+              if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
+                printf "#!/bin/sh\nexec /usr/bin/pacman --disable-sandbox \"\$@\"\n" >/usr/local/bin/pacman
+                chmod 0755 /usr/local/bin/pacman
+              fi
+              sed -i "1i Server = https://mirror.omarchy.org/\$repo/os/\$arch" /etc/pacman.d/mirrorlist
+              for attempt in 1 2 3; do
+                pacman -Syu --noconfirm --needed qemu-system-x86 qemu-hw-display-virtio-gpu qemu-hw-display-virtio-vga qemu-img edk2-ovmf socat \
+                  imagemagick tesseract tesseract-data-eng mtools dosfstools jq openssh openssl python curl >/dev/null && break
+                [ "$attempt" -lt 3 ] || { echo "::error::the test container could not install its tools"; exit 1; }
+                echo "pacman failed, attempt $attempt of 3; trying again in 15 s"; sleep 15
+              done
+              printf "#!/bin/sh\nexit 0\n" >/usr/local/bin/omarchy-pkg-add
+              chmod 0755 /usr/local/bin/omarchy-pkg-add
+              iso=$(ls release/*.iso)
+              ./test/integration "$iso" boot --no-preview --memory 8192 --timeout 1800
+              ./test/agentv/image/run "$iso"
+            '
+
+      - name: Hand the results to the runner's user
+        if: always()
+        run: |
+          mkdir -p test-runs
+          sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true
+          echo "${{ job.status }}" >test-runs/status
+
+      - name: Report
+        if: always()
+        run: |
+          base=$(ls -d test-runs/*-integration 2>/dev/null | head -1 || true)
+          {
+            echo "## ISO"
+            echo
+            echo "AgenTV packages: \`$CHANNEL\`. Build: $(cat test-runs/build-seconds 2>/dev/null || echo ?) s."
+            if [[ -n $base && -f $base/omarchy-install-timing.json ]]; then
+              jq -r '"Install: \((.finished_at - .started_at) | round) s."' "$base/omarchy-install-timing.json"
+            fi
+            for versions in "$base"/runs/*/versions.txt; do
+              [[ -f $versions ]] && { echo; echo '```'; cat "$versions"; echo '```'; }
+            done
+            echo
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-test-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-runs/status
+            test-runs/build-seconds
+            test-runs/*/*.png
+            test-runs/*/serial.log
+            test-runs/*/omarchy-install-timing.json
+            test-runs/*/omarchy-install.log
+            test-runs/*/first-boot-systemd-analyze.txt
+            test-runs/*/runs/**/*.png
+            test-runs/*/runs/**/*.txt
+            test-runs/*/runs/**/*.json
+            test-runs/*/runs/**/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Keep the ISO
+        if: success() && env.KEEP_ISO == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agentv-iso-${{ github.sha }}
+          path: release/*.iso
+          compression-level: 0
+          retention-days: 30

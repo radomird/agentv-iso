@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Runs AgenTV's image checks (ADR-019, layer 5) against the base image that
+# upstream's ./test/integration <iso> made: every *-test.sh here, each in its
+# own VM, even after one fails.
+#
+# Usage: test/agentv/image/run <iso>
+
+set -euo pipefail
+
+DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+iso="${1:?usage: test/agentv/image/run <iso>}"
+
+# What ./test/integration exports for its own scenarios.
+export OMARCHY_INTEGRATION_ISO
+OMARCHY_INTEGRATION_ISO=$(realpath "$iso")
+export OMARCHY_INTEGRATION_SSH_PORT="${OMARCHY_INTEGRATION_SSH_PORT:-2322}"
+export OMARCHY_INTEGRATION_MEMORY="${OMARCHY_INTEGRATION_MEMORY:-8192}"
+export OMARCHY_INTEGRATION_NO_PREVIEW=true
+
+failed=()
+for test in "$DIR"/*-test.sh; do
+  printf '\033[1;35m==> %s\033[0m\n' "${test##*/}"
+  env -u SCENARIO bash "$test" || failed+=("${test##*/}")
+done
+
+if (( ${#failed[@]} > 0 )); then
+  printf '\n%d AgenTV image check(s) failed:\n' "${#failed[@]}" >&2
+  printf '  %s\n' "${failed[@]}" >&2
+  exit 1
+fi
