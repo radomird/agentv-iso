@@ -1,0 +1,18 @@
+# Hosts of the services whose automation never goes into a public repo
+# (CLAUDE.md, ADR-017). bin/agentv-check fails on any of these in a file
+# AgenTV adds. Perl regular expressions, matched without regard to case.
+
+disneyplus\.com
+disney-plus\.net
+bamgrid\.com
+dssott\.com
+primevideo\.com
+amazon\.[a-z.]+/(gp/video|amazon-video)
+aiv-cdn\.net
+netflix\.com
+nflxvideo\.net
+nflximg\.net
+nflxext\.com
+spotify\.com
+spotifycdn\.com
+scdn\.co

@@ -1,0 +1,9 @@
+# The same services by name. These count in code and config only, since the
+# docs have to be able to say what the rule is about.
+
+disney
+disneyplus
+netflix
+prime ?video
+primevideo
+spotify

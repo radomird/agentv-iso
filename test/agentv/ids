@@ -1,0 +1,11 @@
+# Every acceptance id in PHASE-1-PLAN.md that this repo's CI reports on, with
+# where it's checked: a workflow's name, or "manual" for a check on the NUC.
+# Grows stage by stage (ADR-019). test/agentv/report reads this.
+
+S0.1  iso       a tagged release's ISO installs in CI and boots to the TV setup welcome screen
+S0.2  manual    the NUC boots from the ISO to the welcome screen, with no boot password
+S0.3  manual    NetworkManager brings up the setup hotspot on the NUC's Wi-Fi
+S0.4  iso       the AgenTV logo in the installer, boot splash and screensaver; no Omarchy file edited
+S0.5  agentv-os the nightly run updates a box from the last release in place
+S0.6  sync      a new Omarchy stable tag gets a sync pull request that merges itself only when green
+S0.7  agentv-os the nightly run signs tested.json, and a box holds back what it doesn't list

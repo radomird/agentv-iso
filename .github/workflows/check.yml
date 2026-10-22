@@ -1,0 +1,73 @@
+name: Check
+
+# AgenTV's fast gate (ADR-019, layer 1) on every pull request and every push to
+# agentv: omarchy-iso's files unchanged since .github/omarchy-base, no em
+# dashes, no secrets, no service automation, no owner in code and shellcheck.
+# Upstream's own unit tests run in its unit-test.yml. Other workflows reuse
+# this one.
+
+on:
+  pull_request:
+  push:
+    branches: [agentv]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: "Layer 1: policy, lint and secrets"
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      # Full history, no file contents until needed: the gate compares trees
+      # with the base and reads only the files AgenTV added.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Install shellcheck and gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          type -P shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq shellcheck; }
+          curl -fsSLo /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          shellcheck --version | head -2
+          gitleaks version
+
+      - name: The fast gate
+        run: bin/agentv-check --ci --fetch-base
+
+      - name: The gate catches what it should
+        run: test/agentv/policy/check-test.sh --ci
+
+  report:
+    name: Acceptance ids
+    if: always()
+    needs: [policy]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Report
+        env:
+          POLICY: ${{ needs.policy.result }}
+        run: |
+          case "$POLICY" in
+            success) s04="pass (no omarchy-iso file edited; the logo is checked in iso)" ;;
+            *) s04="fail (layer 1: $POLICY)" ;;
+          esac
+          test/agentv/report check "S0.4=$s04" >>"$GITHUB_STEP_SUMMARY"

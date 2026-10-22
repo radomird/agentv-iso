@@ -1,0 +1,289 @@
+#!/bin/bash
+
+# agentv:summary=Run AgenTV's fast gate (ADR-019 layer 1) on this repo
+# agentv:args=[--ci] [--fetch-base]
+# agentv:examples=agentv check | agentv check --ci --fetch-base
+# agentv:hidden=true
+
+# The same file lives in agentv-os and agentv-iso. Keep the two copies
+# identical. It runs on the Mac's bash 3.2 as well, so it can be the gate
+# before every commit there: no mapfile, namerefs or associative arrays.
+
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage: agentv-check [--ci] [--fetch-base]
+
+Checks that Omarchy's files are untouched, and that everything AgenTV added
+has no em dashes, no secrets, no service automation, no emoji in UI text and
+clean shell. Exits non-zero if anything fails.
+
+  --ci          Treat a missing tool (shellcheck, gitleaks) as a failure
+  --fetch-base  Fetch the base from upstream when this clone doesn't have it
+USAGE
+}
+
+ci=0
+fetch_base=0
+while (( $# )); do
+  case "$1" in
+    --ci) ci=1 ;;
+    --fetch-base) fetch_base=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+POLICY_DIR=test/agentv/policy
+EM_DASH=$'\xe2\x80\x94'
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+failures=0
+
+pass() {
+  printf 'ok - %s\n' "$1"
+}
+
+fail() {
+  local description="$1"
+  local detail="${2:-}"
+
+  [[ -n $detail ]] && printf '%s\n' "$detail" | sed 's/^/    /' >&2
+  printf 'not ok - %s\n' "$description" >&2
+  failures=$(( failures + 1 ))
+}
+
+skip() {
+  if (( ci )); then
+    fail "$1" "$2 is not installed"
+  else
+    printf 'skip - %s (%s is not installed)\n' "$1" "$2"
+  fi
+}
+
+have() {
+  type -P "$1" >/dev/null
+}
+
+# Lines of a policy file, without comments and blank lines.
+policy_lines() {
+  [[ -f $POLICY_DIR/$1 ]] || return 0
+  sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$POLICY_DIR/$1"
+}
+
+# --- The base: the upstream tag or commit this fork sits on -----------------
+
+if [[ ! -f .github/omarchy-base ]]; then
+  fail ".github/omarchy-base names the Omarchy base" "the file is missing"
+  exit 1
+fi
+base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
+
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null && (( fetch_base )); then
+  upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
+  if [[ $base == v* ]]; then
+    git fetch --quiet --no-tags "https://github.com/$upstream.git" "+refs/tags/$base:refs/tags/$base"
+  else
+    git fetch --quiet --no-tags "https://github.com/$upstream.git" "$base"
+  fi
+fi
+
+if ! base_commit=$(git rev-parse --verify --quiet "$base^{commit}"); then
+  fail "the Omarchy base $base is in this clone" "run agentv-check --fetch-base, or fetch it from upstream"
+  exit 1
+fi
+pass "the Omarchy base is $base"
+
+# --- Omarchy's files are untouched ------------------------------------------
+
+# Against the working tree, so a change that isn't committed yet counts too.
+# --no-renames turns a rename into a deletion plus an addition, and it saves a
+# blobless clone from fetching file contents to compare.
+policy_lines upstream-exceptions >"$WORK/exceptions"
+git diff --no-renames --name-only --diff-filter=MDT "$base_commit" |
+  grep -vxF -f "$WORK/exceptions" >"$WORK/changed" || true
+
+if [[ -s $WORK/changed ]]; then
+  fail "Omarchy's files are unchanged since $base" "$(cat "$WORK/changed")"
+else
+  pass "Omarchy's files are unchanged since $base"
+fi
+
+# --- What AgenTV added ------------------------------------------------------
+
+{
+  git diff --no-renames --name-only --diff-filter=A "$base_commit"
+  git ls-files --others --exclude-standard
+} | sort -u >"$WORK/all-added"
+
+# Regular text files only: no symlinks, no images, nothing empty.
+: >"$WORK/ours"
+while IFS= read -r file; do
+  [[ -f $file && ! -L $file ]] || continue
+  grep -Iq . "$file" 2>/dev/null || continue
+  printf '%s\n' "$file" >>"$WORK/ours"
+done <"$WORK/all-added"
+
+# The policy files hold the very patterns the scans look for.
+grep -v "^$POLICY_DIR/" "$WORK/ours" >"$WORK/scanned" || true
+
+added_count=$(grep -c . "$WORK/all-added" || true)
+pass "AgenTV added $added_count files"
+
+# Prints file:line for every line of the listed files that matches the perl
+# pattern. The pattern sees decoded UTF-8 when the second argument is "utf8".
+scan() {
+  local pattern="$1" mode="${2:-bytes}" list="$3"
+  local flags=()
+
+  [[ -s $list ]] || return 0
+  [[ $mode == "utf8" ]] && flags=(-CSD)
+  # The pattern travels in the environment, so a slash in it can't end the
+  # regex early. A scan that breaks reports itself rather than finding nothing.
+  # The +-expansion keeps bash 3.2 from calling an empty array unbound.
+  # shellcheck disable=SC2016 # the single quotes hold perl, not shell
+  tr '\n' '\0' <"$list" |
+    AGENTV_PATTERN="$pattern" xargs -0 perl ${flags[@]+"${flags[@]}"} -ne \
+      'BEGIN { $re = qr/$ENV{AGENTV_PATTERN}/ } print "$ARGV:$.\n" if /$re/; close ARGV if eof' ||
+    echo "(the scan for $pattern failed)"
+}
+
+# --- No em dashes, in files or commit messages ------------------------------
+
+found=$(scan "$EM_DASH" bytes "$WORK/ours")
+git log --format='%h %s%n%b' "$base_commit..HEAD" | grep -F "$EM_DASH" >"$WORK/dash-commits" || true
+if [[ -n $found || -s $WORK/dash-commits ]]; then
+  fail "no em dashes in what AgenTV added" "$(printf '%s\n%s' "$found" "$(cat "$WORK/dash-commits")" | sed '/^$/d')"
+else
+  pass "no em dashes in what AgenTV added"
+fi
+
+# --- No service automation in a public repo ---------------------------------
+
+policy_lines service-hosts >"$WORK/hosts"
+found=""
+if [[ -s $WORK/hosts ]]; then
+  hosts=$(paste -sd '|' "$WORK/hosts")
+  found=$(scan "(?i)(?:$hosts)" bytes "$WORK/scanned")
+fi
+
+# Brand names count in code and config, not in prose.
+grep -vE '\.(md|txt)$|(^|/)LICENSE[^/]*$' "$WORK/scanned" >"$WORK/code" || true
+policy_lines service-names >"$WORK/names"
+if [[ -s $WORK/names ]]; then
+  names=$(paste -sd '|' "$WORK/names")
+  found=$(printf '%s\n%s' "$found" "$(scan "(?i)\\b(?:$names)\\b" bytes "$WORK/code")" | sed '/^$/d')
+fi
+
+if [[ -n $found ]]; then
+  fail "no service automation in a public repo" "$found"
+else
+  pass "no service automation in a public repo"
+fi
+
+# --- No GitHub owner in code ------------------------------------------------
+
+owner=$(git config --get remote.origin.url 2>/dev/null | sed -nE 's#.*github\.com[:/]([^/]+)/.*#\1#p')
+if [[ -n $owner ]]; then
+  policy_lines owner-allowed >"$WORK/owner-allowed"
+  grep -vxF -f "$WORK/owner-allowed" "$WORK/code" >"$WORK/owner-scanned" || true
+  found=$(scan "(?i)\\b$owner\\b" bytes "$WORK/owner-scanned")
+  if [[ -n $found ]]; then
+    fail "the GitHub owner ($owner) lives in one setting, not in code" "$found"
+  else
+    pass "the GitHub owner lives in one setting, not in code"
+  fi
+fi
+
+# --- No emoji in UI text ----------------------------------------------------
+
+grep -E '^(launcher|setup|companion-web|apps)/' "$WORK/scanned" >"$WORK/ui" || true
+found=$(scan '\p{Emoji_Presentation}|\x{FE0F}' utf8 "$WORK/ui")
+if [[ -n $found ]]; then
+  fail "no emoji in UI text" "$found"
+else
+  pass "no emoji in UI text"
+fi
+
+# --- Omarchy's MIT attribution ----------------------------------------------
+
+missing=""
+grep -q "Permission is hereby granted, free of charge" LICENSE 2>/dev/null || missing+=$'LICENSE is not the MIT licence\n'
+grep -qi 'Powered by.*Omarchy' .github/README.md 2>/dev/null || missing+=$'.github/README.md does not say Powered by Omarchy\n'
+if [[ -n $missing ]]; then
+  fail "Omarchy's attribution is present" "$missing"
+else
+  pass "Omarchy's attribution is present"
+fi
+
+# --- Shell scripts pass shellcheck ------------------------------------------
+
+# Sourced leaves and Omarchy hooks have no shebang, so they're named by place.
+: >"$WORK/shell"
+while IFS= read -r file; do
+  first=$(head -n 1 "$file")
+  if [[ $file == *.sh || $file == */PKGBUILD || $file == PKGBUILD || $first =~ ^#!.*(bash|/sh) ]]; then
+    printf '%s\n' "$file" >>"$WORK/shell"
+  elif [[ $file =~ ^(install/tv|migrations/agentv|config/omarchy/hooks)/ ]]; then
+    printf '%s\n' "$file" >>"$WORK/shell"
+  fi
+done <"$WORK/ours"
+
+if ! have shellcheck; then
+  skip "shell scripts pass shellcheck" shellcheck
+elif [[ ! -s $WORK/shell ]]; then
+  pass "shell scripts pass shellcheck (none yet)"
+else
+  # SC1091: sourced files from Omarchy's package aren't in this tree.
+  # PKGBUILDs set variables that makepkg reads.
+  : >"$WORK/shellcheck.log"
+  while IFS= read -r file; do
+    args=(--shell=bash --exclude=SC1091)
+    [[ $file == *PKGBUILD ]] && args+=("--exclude=SC2034,SC2154,SC2164")
+    shellcheck "${args[@]}" "$file" >>"$WORK/shellcheck.log" 2>&1 || true
+  done <"$WORK/shell"
+  if [[ -s $WORK/shellcheck.log ]]; then
+    fail "shell scripts pass shellcheck" "$(cat "$WORK/shellcheck.log")"
+  else
+    pass "shell scripts pass shellcheck ($(grep -c . "$WORK/shell") checked)"
+  fi
+fi
+
+# --- No secrets -------------------------------------------------------------
+
+if ! have gitleaks; then
+  skip "no secrets" gitleaks
+else
+  # The files as they are now, committed or not, then every AgenTV commit, so
+  # a secret that was added and later removed still counts.
+  mkdir -p "$WORK/tree"
+  while IFS= read -r file; do
+    mkdir -p "$WORK/tree/$(dirname "$file")"
+    cp "$file" "$WORK/tree/$file"
+  done <"$WORK/ours"
+
+  # -v prints each finding, redacted, so the log says where it is.
+  leaked=0
+  gitleaks dir --no-banner --no-color --redact -v --log-level warn "$WORK/tree" >"$WORK/leaks" 2>&1 || leaked=1
+  gitleaks git --no-banner --no-color --redact -v --log-level warn \
+    --log-opts="--no-merges $base_commit..HEAD" . >>"$WORK/leaks" 2>&1 || leaked=1
+  if (( leaked )); then
+    fail "no secrets" "$(sed "s#$WORK/tree/##" "$WORK/leaks")"
+  else
+    pass "no secrets"
+  fi
+fi
+
+# --- Done -------------------------------------------------------------------
+
+if (( failures > 0 )); then
+  printf '\n%d check(s) failed.\n' "$failures" >&2
+  exit 1
+fi
+printf '\nThe fast gate is green.\n'

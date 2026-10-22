@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Prints the acceptance ids as a Markdown table for a CI run's summary: pass
+# or fail for the ids this run checked, manual for the NUC's, and where the
+# rest are checked (ADR-019). Runs on bash 3.2 too.
+#
+# Usage: test/agentv/report [<workflow>] [<id>=<status> ...]
+#   test/agentv/report check S0.4=pass >>"$GITHUB_STEP_SUMMARY"
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+workflow="${1:-}"
+(( $# > 0 )) && shift
+
+printf '### Acceptance ids\n\n| Id | Result | What it checks |\n| --- | --- | --- |\n'
+
+sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$ROOT/test/agentv/ids" |
+  while read -r id where description; do
+    result=""
+    for pair in "$@"; do
+      [[ ${pair%%=*} == "$id" ]] && result=${pair#*=}
+    done
+    if [[ -z $result ]]; then
+      if [[ $where == "manual" ]]; then
+        result="manual (on the NUC)"
+      elif [[ $where == "$workflow" ]]; then
+        result="fail (not reported)"
+      else
+        result="in $where"
+      fi
+    fi
+    printf '| %s | %s | %s |\n' "$id" "$result" "$description"
+  done

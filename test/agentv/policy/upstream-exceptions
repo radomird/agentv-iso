@@ -1,0 +1,3 @@
+# Omarchy files AgenTV is allowed to change, one path per line. ADR-021 allows
+# one at most, logo.txt, and only if no overlay or build step can do it. None
+# is needed so far.
