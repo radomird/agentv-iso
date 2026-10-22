@@ -34,8 +34,17 @@ log "Booting the installed system"
 start_vm_from_base
 wait_for_ssh 300 failure-S0.4-ssh-timeout || exit 1
 
+# The splash: AgenTV's logo in the theme, that theme the default, and a boot
+# image built after it, which is what the box actually shows at power on.
+# First boot's own log has to say the branding step finished, too.
+check "first boot's branding step finished" \
+  ssh_sudo "grep -q 'Completed: .*/branding.sh' /var/log/agentv-firstboot.log"
 check "S0.4 the boot splash is AgenTV's logo" \
   ssh_sudo "cmp -s /usr/share/plymouth/themes/omarchy/logo.png /usr/share/agentv/branding/plymouth-logo.png"
+check "S0.4 the splash theme is the default" \
+  ssh_sudo "[ \"\$(plymouth-set-default-theme)\" = omarchy ]"
+check "S0.4 the boot image was rebuilt with the new splash" \
+  ssh_sudo "[ -n \"\$(find /boot -name '*.efi' -newer /usr/share/plymouth/themes/omarchy/logo.png | head -n 1)\" ]"
 check "S0.4 the screensaver is AgenTV's logo" \
   ssh_guest "cmp -s ~/.config/omarchy/branding/screensaver.txt /usr/share/agentv/branding/logo.txt"
 check "About shows AgenTV's logo" \
