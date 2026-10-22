@@ -34,6 +34,10 @@ on:
         description: "Keep the ISO as an artifact"
         type: boolean
         default: false
+      ref:
+        description: "Branch or commit to build (empty: the one this runs on)"
+        type: string
+        default: ""
   workflow_call:
     inputs:
       channel:
@@ -42,6 +46,9 @@ on:
       keep-iso:
         type: boolean
         default: false
+      ref:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -62,6 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || '' }}
           submodules: recursive
           persist-credentials: false
 
@@ -86,49 +94,19 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Build the ISO
-        run: |
-          start=$(date +%s)
-          NO_BOOT_OFFER=1 ./bin/omarchy-iso-make
-          mkdir -p test-runs && echo $(( $(date +%s) - start )) >test-runs/build-seconds
-          ls -l release/
-
-      # Upstream's harness, the same way its install-test.yml runs it, then
-      # AgenTV's checks against the base image it leaves behind.
-      - name: Install unattended, boot, then AgenTV's checks
-        run: |
-          sudo chmod 0666 /dev/kvm
-          docker run --rm --device /dev/kvm -v "$PWD:/w" -w /w \
-            -e OMARCHY_INTEGRATION_DISK_CACHE=none \
-            ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
-              if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
-                printf "#!/bin/sh\nexec /usr/bin/pacman --disable-sandbox \"\$@\"\n" >/usr/local/bin/pacman
-                chmod 0755 /usr/local/bin/pacman
-              fi
-              sed -i "1i Server = https://mirror.omarchy.org/\$repo/os/\$arch" /etc/pacman.d/mirrorlist
-              for attempt in 1 2 3; do
-                pacman -Syu --noconfirm --needed qemu-system-x86 qemu-hw-display-virtio-gpu qemu-hw-display-virtio-vga qemu-img edk2-ovmf socat \
-                  imagemagick tesseract tesseract-data-eng mtools dosfstools jq openssh openssl python curl >/dev/null && break
-                [ "$attempt" -lt 3 ] || { echo "::error::the test container could not install its tools"; exit 1; }
-                echo "pacman failed, attempt $attempt of 3; trying again in 15 s"; sleep 15
-              done
-              printf "#!/bin/sh\nexit 0\n" >/usr/local/bin/omarchy-pkg-add
-              chmod 0755 /usr/local/bin/omarchy-pkg-add
-              iso=$(ls release/*.iso)
-              ./test/integration "$iso" boot --no-preview --memory 8192 --timeout 1800
-              ./test/agentv/image/run "$iso"
-            '
-
-      - name: Hand the results to the runner's user
-        if: always()
-        run: |
-          mkdir -p test-runs
-          sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true
-          echo "${{ job.status }}" >test-runs/status
+      # Upstream's own build and install test, then AgenTV's checks against
+      # the base image it leaves behind (test/agentv/image/ci).
+      - name: Build, install, boot, check
+        run: set -o pipefail; test/agentv/image/ci 2>&1 | tee image.log
 
       - name: Report
         if: always()
         run: |
+          result() {
+            if grep -q "not ok - $1 " image.log 2>/dev/null; then echo fail
+            elif grep -q "^ok - $1 " image.log 2>/dev/null; then echo pass
+            else echo "not run"; fi
+          }
           base=$(ls -d test-runs/*-integration 2>/dev/null | head -1 || true)
           {
             echo "## ISO"
@@ -137,11 +115,9 @@ jobs:
             if [[ -n $base && -f $base/omarchy-install-timing.json ]]; then
               jq -r '"Install: \((.finished_at - .started_at) | round) s."' "$base/omarchy-install-timing.json"
             fi
-            for versions in "$base"/runs/*/versions.txt; do
-              [[ -f $versions ]] && { echo; echo '```'; cat "$versions"; echo '```'; }
-            done
             echo
           } >>"$GITHUB_STEP_SUMMARY"
+          test/agentv/report iso "S0.1=$(result S0.1)" "S0.4=$(result S0.4)" >>"$GITHUB_STEP_SUMMARY"
 
       - name: Keep the screenshots and logs
         if: always()
@@ -149,7 +125,7 @@ jobs:
         with:
           name: iso-test-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            test-runs/status
+            image.log
             test-runs/build-seconds
             test-runs/*/*.png
             test-runs/*/serial.log

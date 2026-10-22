@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# AgenTV's image layer (ADR-019, layer 5), in one place for every workflow
+# that needs it: agentv-iso's own ISO workflow, and agentv-os's sync and
+# nightly runs, which check out this repo next to theirs.
+#
+#   1. Builds the ISO with upstream's own omarchy-iso-make. AgenTV's packages
+#      have to be in configs/airootfs/usr/share/agentv-iso/packages/ already
+#      (bin/agentv-iso-packages, or packages a workflow built itself).
+#   2. Runs upstream's test/integration <iso> boot in an Arch container with
+#      KVM, the way its install-test.yml does: an unattended install, then a
+#      boot of the installed system.
+#   3. Runs AgenTV's checks in test/agentv/image/ against the base image that
+#      leaves behind. Any AGENTV_TEST_* variable is passed on to them.
+#
+# Runs on GitHub's ubuntu-26.04 runner, from anywhere. Results land in
+# test-runs/ at the root of this checkout.
+#
+# Usage: test/agentv/image/ci [--again <check>...]
+#   --again  skips the build and the install, and runs only the named checks
+#            (test/agentv/image/<check>-test.sh) against the same base image,
+#            for a step that needs something the first pass produced.
+
+set -euo pipefail
+
+again=()
+if [[ ${1:-} == "--again" ]]; then
+  shift
+  again=("$@")
+  (( ${#again[@]} > 0 )) || { echo "--again needs the checks to run" >&2; exit 2; }
+fi
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+cd "$ROOT"
+
+mkdir -p test-runs
+# The container runs as root; hand what it wrote back to this user, also when
+# something fails, so later steps can read and upload it.
+trap 'sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true' EXIT
+
+if (( ${#again[@]} == 0 )); then
+  shopt -s nullglob
+  packages=(configs/airootfs/usr/share/agentv-iso/packages/*.pkg.tar.zst)
+  shopt -u nullglob
+  (( ${#packages[@]} > 0 )) || { echo "No AgenTV packages to put in the ISO; run bin/agentv-iso-packages first" >&2; exit 1; }
+
+  start=$(date +%s)
+  NO_BOOT_OFFER=1 ./bin/omarchy-iso-make
+  echo $(( $(date +%s) - start )) >test-runs/build-seconds
+  ls -l release/
+fi
+
+env_args=()
+while IFS='=' read -r name _; do
+  env_args+=(-e "$name")
+done < <(env | grep '^AGENTV_TEST_' || true)
+
+sudo chmod 0666 /dev/kvm
+docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
+  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" ${env_args[@]+"${env_args[@]}"} \
+  ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
+    # pacman 7 fails every sync on a kernel without Landlock; upstream does the same.
+    if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
+      printf "#!/bin/sh\nexec /usr/bin/pacman --disable-sandbox \"\$@\"\n" >/usr/local/bin/pacman
+      chmod 0755 /usr/local/bin/pacman
+    fi
+    sed -i "1i Server = https://mirror.omarchy.org/\$repo/os/\$arch" /etc/pacman.d/mirrorlist
+    for attempt in 1 2 3; do
+      pacman -Syu --noconfirm --needed qemu-system-x86 qemu-hw-display-virtio-gpu qemu-hw-display-virtio-vga \
+        qemu-img edk2-ovmf socat imagemagick tesseract tesseract-data-eng mtools dosfstools jq openssh \
+        openssl python curl >/dev/null && break
+      [ "$attempt" -lt 3 ] || { echo "::error::the test container could not install its tools"; exit 1; }
+      echo "pacman failed, attempt $attempt of 3; trying again in 15 s"; sleep 15
+    done
+    # test/integration installs its tools through Omarchy'"'"'s helper; they are installed above.
+    printf "#!/bin/sh\nexit 0\n" >/usr/local/bin/omarchy-pkg-add
+    chmod 0755 /usr/local/bin/omarchy-pkg-add
+    iso=$(ls release/*.iso)
+    if [ -z "$AGAIN" ]; then
+      ./test/integration "$iso" boot --no-preview --memory 8192 --timeout 1800
+    fi
+    # shellcheck disable=SC2086 # a list of check names
+    ./test/agentv/image/run "$iso" $AGAIN
+  '
