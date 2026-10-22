@@ -79,40 +79,45 @@ policy_lines() {
 
 # --- The base: the upstream tag or commit this fork sits on -----------------
 
+# A repo of AgenTV's own, such as agentv-pkgs, has no base: every file in it
+# is AgenTV's, and every commit.
 if [[ ! -f .github/omarchy-base ]]; then
-  fail ".github/omarchy-base names the Omarchy base" "the file is missing"
-  exit 1
-fi
-base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
-
-if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null && (( fetch_base )); then
-  upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
-  if [[ $base == v* ]]; then
-    git fetch --quiet --no-tags "https://github.com/$upstream.git" "+refs/tags/$base:refs/tags/$base"
-  else
-    git fetch --quiet --no-tags "https://github.com/$upstream.git" "$base"
-  fi
-fi
-
-if ! base_commit=$(git rev-parse --verify --quiet "$base^{commit}"); then
-  fail "the Omarchy base $base is in this clone" "run agentv-check --fetch-base, or fetch it from upstream"
-  exit 1
-fi
-pass "the Omarchy base is $base"
-
-# --- Omarchy's files are untouched ------------------------------------------
-
-# Against the working tree, so a change that isn't committed yet counts too.
-# --no-renames turns a rename into a deletion plus an addition, and it saves a
-# blobless clone from fetching file contents to compare.
-policy_lines upstream-exceptions >"$WORK/exceptions"
-git diff --no-renames --name-only --diff-filter=MDT "$base_commit" |
-  grep -vxF -f "$WORK/exceptions" >"$WORK/changed" || true
-
-if [[ -s $WORK/changed ]]; then
-  fail "Omarchy's files are unchanged since $base" "$(cat "$WORK/changed")"
+  base_commit=$(git hash-object -t tree /dev/null)
+  log_range=HEAD
+  pass "not a fork, so every file is AgenTV's"
 else
-  pass "Omarchy's files are unchanged since $base"
+  base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
+
+  if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null && (( fetch_base )); then
+    upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
+    if [[ $base == v* ]]; then
+      git fetch --quiet --no-tags "https://github.com/$upstream.git" "+refs/tags/$base:refs/tags/$base"
+    else
+      git fetch --quiet --no-tags "https://github.com/$upstream.git" "$base"
+    fi
+  fi
+
+  if ! base_commit=$(git rev-parse --verify --quiet "$base^{commit}"); then
+    fail "the Omarchy base $base is in this clone" "run agentv-check --fetch-base, or fetch it from upstream"
+    exit 1
+  fi
+  log_range="$base_commit..HEAD"
+  pass "the Omarchy base is $base"
+
+  # --- Omarchy's files are untouched ----------------------------------------
+
+  # Against the working tree, so a change that isn't committed yet counts too.
+  # --no-renames turns a rename into a deletion plus an addition, and it saves
+  # a blobless clone from fetching file contents to compare.
+  policy_lines upstream-exceptions >"$WORK/exceptions"
+  git diff --no-renames --name-only --diff-filter=MDT "$base_commit" |
+    grep -vxF -f "$WORK/exceptions" >"$WORK/changed" || true
+
+  if [[ -s $WORK/changed ]]; then
+    fail "Omarchy's files are unchanged since $base" "$(cat "$WORK/changed")"
+  else
+    pass "Omarchy's files are unchanged since $base"
+  fi
 fi
 
 # --- What AgenTV added ------------------------------------------------------
@@ -182,7 +187,7 @@ scan() {
 # --- No em dashes, in files or commit messages ------------------------------
 
 found=$(scan "$EM_DASH" bytes "$WORK/ours")
-git log --format='%h %s%n%b' "$base_commit..HEAD" | grep -F "$EM_DASH" >"$WORK/dash-commits" || true
+git log --format='%h %s%n%b' "$log_range" | grep -F "$EM_DASH" >"$WORK/dash-commits" || true
 if [[ -n $found || -s $WORK/dash-commits ]]; then
   fail "no em dashes in what AgenTV added" "$(printf '%s\n%s' "$found" "$(cat "$WORK/dash-commits")" | sed '/^$/d')"
 else
@@ -240,7 +245,7 @@ fi
 
 missing=""
 grep -q "Permission is hereby granted, free of charge" LICENSE 2>/dev/null || missing+=$'LICENSE is not the MIT licence\n'
-grep -qi 'Powered by.*Omarchy' .github/README.md 2>/dev/null || missing+=$'.github/README.md does not say Powered by Omarchy\n'
+grep -qis 'Powered by.*Omarchy' .github/README.md README.md || missing+=$'the README does not say Powered by Omarchy\n'
 if [[ -n $missing ]]; then
   fail "Omarchy's attribution is present" "$missing"
 else
@@ -297,7 +302,7 @@ else
   leaked=0
   gitleaks dir --no-banner --no-color --redact -v --log-level warn "$WORK/tree" >"$WORK/leaks" 2>&1 || leaked=1
   gitleaks git --no-banner --no-color --redact -v --log-level warn \
-    --log-opts="--no-merges $base_commit..HEAD" . >>"$WORK/leaks" 2>&1 || leaked=1
+    --log-opts="--no-merges $log_range" . >>"$WORK/leaks" 2>&1 || leaked=1
   if (( leaked )); then
     fail "no secrets" "$(sed "s#$WORK/tree/##" "$WORK/leaks")"
   else

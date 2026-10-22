@@ -188,4 +188,30 @@ expect_fail "a file with an unusual name is still scanned" "no em dashes"
 printf 'fine\n' >"$(printf 'two\nlines')"
 expect_fail "a file name with a newline fails" "file names have no control characters"
 
+# --- A repo of AgenTV's own has no Omarchy base ----------------------------
+
+own="$SANDBOX/own"
+mkdir -p "$own/bin" "$own/test/agentv/policy"
+cd "$own"
+git init -q -b main
+git config user.name "AgenTV test"
+git config user.email "test@example.invalid"
+git remote add origin "https://github.com/example-owner/agentv-pkgs.git"
+cp "$repo/bin/agentv-check" bin/
+cp "$repo"/test/agentv/policy/* test/agentv/policy/
+printf 'Permission is hereby granted, free of charge, to any person\n' >LICENSE
+printf 'AgenTV packages. Powered by Omarchy.\n' >README.md
+git add -A
+git commit -q -m "Start AgenTV's own repo"
+
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a repo with no Omarchy base passes" "$output"
+[[ $output == *"not a fork"* ]] || fail "a repo with no Omarchy base says so" "$output"
+pass "a repo with no Omarchy base passes, and says so"
+
+printf 'a pause \xe2\x80\x94 here\n' >>README.md
+git commit -qam "Edit the README"
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) && fail "a repo with no base still gets every scan" "$output"
+[[ $output == *"not ok - no em dashes"* ]] || fail "a repo with no base still gets every scan" "$output"
+pass "a repo with no base still gets every scan"
+
 printf '\nThe fast gate catches what it should.\n'

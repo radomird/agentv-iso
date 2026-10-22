@@ -1,5 +1,5 @@
-# Files that may name the GitHub owner. Everything else reads it from here or
-# from the CI context, so moving the repos to an organisation is one change
-# (HANDOFF.md, "No GitHub owner in code").
-
-.github/agentv-settings
+# Files that may name the GitHub owner, one path per line. None should need
+# to: workflows read it from GitHub's own context, and the agentv package gets
+# its update address written in when CI builds it. Moving the repos to an
+# organisation then changes no code (HANDOFF.md, "No GitHub owner in code").
+# Markdown is never scanned for it, so READMEs can link the repos.
