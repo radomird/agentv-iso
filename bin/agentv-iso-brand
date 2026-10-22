@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# agentv:summary=Give the ISO AgenTV's name, volume label and boot menu, for one build
+# agentv:args=[--restore]
+
+# ADR-027: the ISO's file name, volume label, metadata and boot menu entries
+# say AgenTV. They live in omarchy-iso's own files, which this repo never
+# edits, so this changes them in the working tree for one build only:
+# test/agentv/image/ci runs it right before omarchy-iso-make, and --restore
+# puts upstream's versions back from git afterwards. File names, kernel
+# options and everything else the boot reads stay as they are; only the words
+# people see change. It stops when a line it expects isn't there, so an
+# upstream change shows up as a red build, not as an ISO that quietly says
+# Omarchy again.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
+profile=configs/profiledef.sh
+menus=(
+  configs/grub/grub.cfg
+  configs/grub/loopback.cfg
+  configs/syslinux/archiso_head.cfg
+  configs/syslinux/archiso_sys-linux.cfg
+  configs/syslinux/archiso_pxe-linux.cfg
+  configs/efiboot/loader/entries/01-archiso-x86_64-linux.conf
+)
+
+if [[ ${1:-} == "--restore" ]]; then
+  git checkout -- "$profile" "${menus[@]}"
+  exit 0
+fi
+
+# git checkout puts these back afterwards, which would lose edits of anyone's.
+if ! git diff --quiet -- "$profile" "${menus[@]}"; then
+  echo "agentv-iso-brand: the ISO's own files are changed already; run it with --restore first" >&2
+  exit 1
+fi
+
+# change <file> <perl substitution>: fails when it changes nothing.
+change() {
+  local file="$1" expression="$2" before
+
+  before=$(mktemp)
+  cp "$file" "$before"
+  perl -pi -e "$expression" "$file"
+  if cmp -s "$before" "$file"; then
+    rm -f "$before"
+    echo "agentv-iso-brand: nothing to change in $file; has upstream moved it? ($expression)" >&2
+    exit 1
+  fi
+  rm -f "$before"
+}
+
+# The publisher names where AgenTV lives, from the owner CI passes in.
+publisher="AgenTV"
+[[ -n ${AGENTV_OWNER:-} ]] && publisher="AgenTV <https://github.com/$AGENTV_OWNER/agentv-os>"
+export AGENTV_PUBLISHER="$publisher"
+
+change "$profile" 's/^iso_name="omarchy"$/iso_name="agentv"/'
+change "$profile" 's/^iso_label="OMARCHY_/iso_label="AGENTV_/'
+# shellcheck disable=SC2016 # $ENV{...} is perl's, read from the environment
+change "$profile" 's/^iso_publisher=.*$/iso_publisher="$ENV{AGENTV_PUBLISHER}"/'
+change "$profile" 's/^iso_application="Omarchy Installer"$/iso_application="AgenTV installer, powered by Omarchy"/'
+
+# Only the capitalised word: paths and kernel options say omarchy.
+for menu in "${menus[@]}"; do
+  change "$menu" 's/\bOmarchy\b/AgenTV/g'
+done
+
+echo "agentv-iso-brand: this build's ISO is named, labelled and menued AgenTV"

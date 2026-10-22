@@ -34,15 +34,26 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$ROOT"
 
 mkdir -p test-runs
+branded=0
 # The container runs as root; hand what it wrote back to this user, also when
-# something fails, so later steps can read and upload it.
-trap 'sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true' EXIT
+# something fails, so later steps can read and upload it. And put omarchy-iso's
+# own files back the way upstream has them (ADR-027).
+cleanup() {
+  sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true
+  (( branded )) && bin/agentv-iso-brand --restore
+  return 0
+}
+trap cleanup EXIT
 
 if (( ${#again[@]} == 0 )); then
   shopt -s nullglob
   packages=(configs/airootfs/usr/share/agentv-iso/packages/*.pkg.tar.zst)
   shopt -u nullglob
   (( ${#packages[@]} > 0 )) || { echo "No AgenTV packages to put in the ISO; run bin/agentv-iso-packages first" >&2; exit 1; }
+
+  # AgenTV's name, volume label and boot menu, for this build only (ADR-027).
+  bin/agentv-iso-brand
+  branded=1
 
   start=$(date +%s)
   NO_BOOT_OFFER=1 ./bin/omarchy-iso-make

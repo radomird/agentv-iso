@@ -30,6 +30,23 @@ installer_shows_logo() {
 }
 check "S0.4 the installer shows AgenTV's logo, powered by omarchy (OCR)" installer_shows_logo
 
+# The ISO itself (ADR-027): the volume label a PC's boot menu lists, and the
+# ISO's own boot menus.
+volume_label_is_agentv() {
+  local label
+  label=$(dd if="$ISO" bs=1 skip=32808 count=32 2>/dev/null | tr -d ' ')
+  printf '%s\n' "$label" >"$RUN_DIR/volume-label.txt"
+  [[ $label == AGENTV_* ]]
+}
+boot_menus_say_agentv() {
+  local grub syslinux
+  grub=$(bsdtar -xOf "$ISO" boot/grub/grub.cfg 2>/dev/null) || return 1
+  syslinux=$(bsdtar -xOf "$ISO" boot/syslinux/archiso_head.cfg 2>/dev/null) || return 1
+  [[ $grub == *'menuentry "AgenTV ('* && $grub != *'menuentry "Omarchy'* && $syslinux == *"MENU TITLE AgenTV"* ]]
+}
+check "the ISO's volume label is AgenTV's" volume_label_is_agentv
+check "the ISO's boot menus say AgenTV" boot_menus_say_agentv
+
 log "Booting the installed system"
 start_vm_from_base
 wait_for_ssh 300 failure-S0.4-ssh-timeout || exit 1

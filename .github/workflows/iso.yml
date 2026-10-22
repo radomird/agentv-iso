@@ -97,6 +97,8 @@ jobs:
       # Upstream's own build and install test, then AgenTV's checks against
       # the base image it leaves behind (test/agentv/image/ci).
       - name: Build, install, boot, check
+        env:
+          AGENTV_OWNER: ${{ github.repository_owner }}
         run: set -o pipefail; test/agentv/image/ci 2>&1 | tee image.log
 
       - name: Report
@@ -139,11 +141,29 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # The name people download (ADR-027), given only now: upstream's test
+      # harness reads which packages the ISO has from its file name.
+      - name: Name the ISO
+        if: success() && env.KEEP_ISO == 'true'
+        id: name
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            name="agentv-${GITHUB_REF_NAME#v}-x86_64"
+          else
+            name="agentv-edge-${GITHUB_SHA::7}-x86_64"
+          fi
+          mv release/*.iso "release/$name.iso"
+          (cd release && sha256sum "$name.iso" >"$name.iso.sha256")
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+          echo "ISO: \`$name.iso\`" >>"$GITHUB_STEP_SUMMARY"
+
       - name: Keep the ISO
         if: success() && env.KEEP_ISO == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: agentv-iso-${{ github.sha }}
-          path: release/*.iso
+          name: ${{ steps.name.outputs.name }}
+          path: |
+            release/*.iso
+            release/*.iso.sha256
           compression-level: 0
           retention-days: 30
