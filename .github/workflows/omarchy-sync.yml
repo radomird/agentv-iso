@@ -131,7 +131,10 @@ jobs:
           [[ $IMAGE == "success" ]] || why="$why The ISO build and install failed ($IMAGE)."
           [[ $AUTOMERGE == "true" ]] || why="$why $REASON"
           if [[ -z $why ]]; then
-            GH_TOKEN="$SYNC_TOKEN" gh pr merge "$PR" -R "$GITHUB_REPOSITORY" --merge --auto
+            # Every gate has passed by now, so merge straight away; --auto is the
+            # fallback for a ruleset that wants the checks counted again.
+            GH_TOKEN="$SYNC_TOKEN" gh pr merge "$PR" -R "$GITHUB_REPOSITORY" --merge ||
+              GH_TOKEN="$SYNC_TOKEN" gh pr merge "$PR" -R "$GITHUB_REPOSITORY" --merge --auto
             echo "Every gate is green: Omarchy $TAG merges itself." >>"$GITHUB_STEP_SUMMARY"
           else
             gh issue create -R "$GITHUB_REPOSITORY" --title "Omarchy $TAG didn't merge itself" \
