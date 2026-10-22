@@ -10,6 +10,7 @@ The plan lives in `../agentic-tv-os`: read `HANDOFF.md` first ("Next: stage 0" i
 ## Rules
 
 - **Never edit upstream files.** Only add: our workflows, the build step that adds AgenTV's packages and logo (`configs/airootfs/root/customize_airootfs.sh` and `configs/airootfs/usr/share/agentv-iso/`), and our tests in `test/agentv/`. Check with `bin/agentv-check`; its first check is the same as `git diff --diff-filter=MDR --name-only "$(cat .github/omarchy-base)"...HEAD` printing nothing.
+- **What the ISO shows is AgenTV's, at build time only** (ADR-027, ADR-028). `bin/agentv-iso-brand` changes the name, volume label and boot menu titles in the working tree for one build, and `test/agentv/image/ci` puts upstream's files back. The live system's greeter, step headers and finish screen are changed by `customize.sh` inside the ISO. Each change stops the build if upstream has moved its line; fix the step, never the upstream file.
 - **Upstream's own workflows stay off,** except the ones `.github/upstream-workflows-kept` names (its unit tests). They publish to Omarchy's bucket or use runners we don't have. They're switched off through the API, never by editing them, and the Omarchy sync switches off any new ones.
 - **The owner name is never in code.** Workflows read it from GitHub's own context, so the repos can move to an organisation later.
 - **Build and test the ISO in CI only.** The Mac can't run the x86_64 ISO, and it has little free disk. The ISO is about 6.4 GB, so it travels as a workflow artifact, not a release asset.
