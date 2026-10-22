@@ -34,7 +34,8 @@ check "S0.4 the installer shows AgenTV's logo, powered by omarchy (OCR)" install
 # Under AgenTV's logo, the greeter's line is AgenTV's own, not Omarchy's "by
 # DHH", which would read as if DHH made AgenTV (ADR-027).
 greeter_says_agentv() {
-  [[ -s $RUN_DIR/greeter.txt ]] && grep -qi "agentic TV OS" "$RUN_DIR/greeter.txt" && ! grep -qi "by DHH" "$RUN_DIR/greeter.txt"
+  # OCR reads the O of "OS" as a zero at times, so match the words before it.
+  [[ -s $RUN_DIR/greeter.txt ]] && grep -qi "open-source agentic TV" "$RUN_DIR/greeter.txt" && ! grep -qi "by DHH" "$RUN_DIR/greeter.txt"
 }
 check "the installer's tagline is AgenTV's, not Omarchy's by DHH" greeter_says_agentv
 
@@ -92,7 +93,9 @@ check "the box's boot menu header says AgenTV" \
   ssh_sudo "grep -q '^interface_branding: AgenTV$' /boot/limine.conf"
 check "the box's boot menu entry is AgenTV" \
   ssh_sudo "grep -qE '^/\\+?AgenTV' /boot/limine.conf && ! grep -qE '^/\\+?Omarchy' /boot/limine.conf"
-ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf" 2>&1 || true
+# Kept as .txt so the run's artifacts include it, and its entries shown here.
+ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf.txt" 2>&1 || true
+grep -nE '^ */|comment|interface_branding' "$RUN_DIR/limine.conf.txt" || true
 
 ssh_sudo "cat /var/log/agentv-firstboot.log" >"$RUN_DIR/agentv-firstboot.log" 2>&1 || true
 ssh_guest "ls -la ~/.config/omarchy/branding/" >"$RUN_DIR/branding-files.txt" 2>&1 || true
