@@ -27,19 +27,34 @@ before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 log "Installed: agentv $before; updating to $AGENTV_TEST_UPDATE_VERSION"
 
 # A throwaway VM: let the test user use sudo without a password, as someone at
-# the box would type theirs, and point AgenTV's repository at the test one.
-ssh_sudo "echo '$GUEST_USER ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/zz-test && chmod 440 /etc/sudoers.d/zz-test"
+# the box would type theirs. The rule alone isn't enough: some of Omarchy's
+# sudo calls still asked for one, so this does what upstream's own
+# test/upgrade-test does, with a name that sorts after every other rule.
+ssh_sudo "printf '%s\n' '$GUEST_USER ALL=(ALL:ALL) NOPASSWD: ALL' 'Defaults:$GUEST_USER !authenticate' >/etc/sudoers.d/zzz-agentv-test && chmod 440 /etc/sudoers.d/zzz-agentv-test"
+if ! ssh_guest "sudo -k; sudo -n true && sudo -n -v" </dev/null; then
+  ssh_sudo "ls -l /etc/sudoers.d; sudo -l -U $GUEST_USER" >"$RUN_DIR/sudo.txt" 2>&1 || true
+  check "the test box lets sudo through without a password" false
+  stop_vm
+  finish
+fi
 ssh_sudo "install -d /etc/agentv && echo http://10.0.2.2:$port >/etc/agentv/repository"
 
-# Nobody answers Omarchy's reboot question here, so it doesn't reboot.
-ssh_guest "timeout 2400 agentv update -y --untested </dev/null" >"$RUN_DIR/agentv-update.log" 2>&1 || true
+# Snapshot 0 is the running system, not a snapshot.
+snapshots() { ssh_sudo "snapper -c root --csvout list --columns number | awk -F, 'NR > 1 && \$1 != 0 { n++ } END { print n + 0 }'"; }
+snapshots_before=$(snapshots)
+
+# OMARCHY_UPDATE_LOGGED skips Omarchy's script(1) wrapper, as upstream's test
+# does, so the update has no terminal: its questions, such as the reboot one,
+# report and move on instead of waiting for an answer.
+ssh_guest "timeout 2400 env OMARCHY_UPDATE_LOGGED=1 agentv update -y --untested </dev/null" >"$RUN_DIR/agentv-update.log" 2>&1 || true
 tail -n 30 "$RUN_DIR/agentv-update.log"
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 check "S0.5 agentv update moved agentv to $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" \
   test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
-check "S0.5 Omarchy's update took a snapshot first" \
-  ssh_sudo "snapper -c root list --columns number,type,description | grep -qiE 'pre|update'"
+snapshots_after=$(snapshots)
+check "S0.5 Omarchy's update took a snapshot first (snapshots: $snapshots_before before, $snapshots_after after)" \
+  test "$snapshots_after" -gt "$snapshots_before"
 check "S0.5 the snapshot is in the boot menu" \
   ssh_sudo "grep -qi snapshot /boot/limine.conf"
 check "AgenTV's migrations ran from Omarchy's post-update hook" \
