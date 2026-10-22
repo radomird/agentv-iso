@@ -43,10 +43,13 @@ ssh_sudo "install -d /etc/agentv && echo http://10.0.2.2:$port >/etc/agentv/repo
 snapshots() { ssh_sudo "snapper -c root --csvout list --columns number | awk -F, 'NR > 1 && \$1 != 0 { n++ } END { print n + 0 }'"; }
 snapshots_before=$(snapshots)
 
+# A login shell, as someone at the box has and as upstream's test uses: it's
+# where Omarchy's environment, OMARCHY_PATH among it, comes from.
 # OMARCHY_UPDATE_LOGGED skips Omarchy's script(1) wrapper, as upstream's test
 # does, so the update has no terminal: its questions, such as the reboot one,
 # report and move on instead of waiting for an answer.
-ssh_guest "timeout 2400 env OMARCHY_UPDATE_LOGGED=1 agentv update -y --untested </dev/null" >"$RUN_DIR/agentv-update.log" 2>&1 || true
+update="timeout 2400 env OMARCHY_UPDATE_LOGGED=1 agentv update -y --untested"
+ssh_guest "bash -lc $(printf %q "$update") </dev/null" >"$RUN_DIR/agentv-update.log" 2>&1 || true
 tail -n 30 "$RUN_DIR/agentv-update.log"
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
