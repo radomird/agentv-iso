@@ -52,4 +52,15 @@ rm -rf "$dbpath"
 # which the dashboard takes its width from.
 install -D -m 644 "$here/logo.txt" /usr/share/omarchy/logo.txt
 
-echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, and AgenTV's logo"
+# The greeter's tagline (ADR-027). Under AgenTV's logo, Omarchy's own line,
+# "Beautiful, Fun & Agentic Linux by DHH", would read as if DHH made AgenTV.
+# It becomes AgenTV's public tagline; the logo still says powered by omarchy.
+# Stop if upstream has moved the line, rather than ship it.
+export AGENTV_TAGLINE="The world's first open-source agentic TV OS"
+if ! grep -q '^  tagline="Beautiful, Fun & Agentic Linux by DHH"$' /root/configurator; then
+  echo "agentv-iso: the greeter's tagline in /root/configurator has moved upstream" >&2
+  exit 1
+fi
+perl -pi -e 's/^  tagline="Beautiful, Fun & Agentic Linux by DHH"$/  tagline="$ENV{AGENTV_TAGLINE}"/' /root/configurator
+
+echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, and AgenTV's logo and tagline"

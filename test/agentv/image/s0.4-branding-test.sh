@@ -23,12 +23,20 @@ installer_shows_logo() {
   local found=1
   if wait_for_screen "powered by omarchy" 300; then
     capture_console "success-S0.4-installer"
+    ocr_screen >"$RUN_DIR/greeter.txt"
     found=0
   fi
   stop_vm
   return $found
 }
 check "S0.4 the installer shows AgenTV's logo, powered by omarchy (OCR)" installer_shows_logo
+
+# Under AgenTV's logo, the greeter's line is AgenTV's own, not Omarchy's "by
+# DHH", which would read as if DHH made AgenTV (ADR-027).
+greeter_says_agentv() {
+  [[ -s $RUN_DIR/greeter.txt ]] && grep -qi "agentic TV OS" "$RUN_DIR/greeter.txt" && ! grep -qi "by DHH" "$RUN_DIR/greeter.txt"
+}
+check "the installer's tagline is AgenTV's, not Omarchy's by DHH" greeter_says_agentv
 
 # The ISO itself (ADR-027): the volume label a PC's boot menu lists, and the
 # ISO's own boot menus.
