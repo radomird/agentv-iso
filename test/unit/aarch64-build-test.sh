@@ -71,21 +71,23 @@ grep -Fq 'arch="${OMARCHY_ARCH:-x86_64}"' "$ROOT/configs/profiledef.sh" || fail 
 # --- GRUB templating -----------------------------------------------------------
 for cfg in grub.cfg loopback.cfg; do
   src="$ROOT/configs/grub/$cfg"
-  grep -Fq 'vmlinuz-%KERNEL%' "$src" || fail "$cfg does not template the kernel"
+  grep -Fqx 'set live_kernel=%KERNEL%' "$src" || fail "$cfg does not template the kernel"
+  grep -Fq 'vmlinuz-${live_kernel}' "$src" || fail "$cfg entries do not boot the selected kernel"
+  grep -Fq "if [ \"\${sys_vendor}\" == 'Apple Inc.' ]; then" "$src" || fail "$cfg boots linux-t2 on a machine Apple did not make"
   grep -Fq '%BOOT_SPLASH_KERNEL_OPTIONS%%KERNEL_OPTIONS%' "$src" || fail "$cfg does not template boot options"
   grep -Fq -- "--id 'n1x-recovery'" "$src" || fail "$cfg lacks the N1x recovery entry"
   grep -Fq 'omarchy.n1x_recovery=1 acpi=nospcr' "$src" || fail "$cfg recovery entry lacks acpi=nospcr"
   source "$ROOT/builder/grub-platform.sh"
-  for platform in linux-t2 linux-omarchy; do
+  for platform in x86_64 aarch64; do
     cp "$src" "$fixture/$platform-$cfg"
-    configure_grub_kernel "$fixture/$platform-$cfg" "$platform"
+    configure_grub_platform "$fixture/$platform-$cfg" "$platform"
     sed -i -e 's|%KERNEL%|linux-omarchy|g' -e 's|%BOOT_SPLASH_KERNEL_OPTIONS%|quiet splash |g' -e 's|%KERNEL_OPTIONS%|console=tty0|g' \
-      -e 's|%INSTALL_DIR%|arch|g' -e 's|%ARCH%|aarch64|g' -e 's|%ARCHISO_UUID%|x|g' "$fixture/$platform-$cfg"
+      -e 's|%INSTALL_DIR%|arch|g' -e "s|%ARCH%|$platform|g" -e 's|%ARCHISO_UUID%|x|g' "$fixture/$platform-$cfg"
     if command -v grub-script-check >/dev/null; then
       grub-script-check "$fixture/$platform-$cfg" || fail "$cfg ($platform) is not valid GRUB script"
     fi
-    if [[ $platform == linux-omarchy ]]; then
-      grep -Fq 'n1x-recovery' "$fixture/$platform-$cfg" || fail "the N1x kernel's menu lost the recovery entry in $cfg"
+    if [[ $platform == aarch64 ]]; then
+      grep -Fq 'n1x-recovery' "$fixture/$platform-$cfg" || fail "the aarch64 menu lost the N1x recovery entry in $cfg"
     else
       grep -Fq 'n1x-recovery' "$fixture/$platform-$cfg" && fail "recovery entry leaked into the $platform $cfg"
     fi

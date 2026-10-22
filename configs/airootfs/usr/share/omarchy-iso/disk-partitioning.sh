@@ -32,7 +32,9 @@ partition_path() {
 # never depends on the kernel having re-read the partition table yet — and the
 # same code works against an image file in tests, where lsblk sees nothing.
 partition_numbers() {
-  parted -ms "$1" unit B print 2>/dev/null | tail -n +3 | cut -d: -f1
+  local table
+  table=$(parted -ms "$1" unit B print 2>/dev/null) || return 1
+  printf '%s\n' "$table" | tail -n +3 | cut -d: -f1
 }
 
 partition_size_bytes() {
@@ -86,16 +88,22 @@ create_partition() {
 
   created_partition_number=""
 
-  # Lexicographic sort on both sides: comm needs its inputs ordered the same
-  # way it compares them, and `sort -n` (1, 2, 10) is not that order.
-  before=$(partition_numbers "$disk" | sort)
+  # Both reads must succeed. If only the first failed, every existing
+  # partition would look new, and one the size of the requested partition (an
+  # earlier install's 2GiB ESP) would be taken for it and formatted.
+  before=$(partition_numbers "$disk") || return 1
 
   parted --script "$disk" mkpart primary "$fstype" "${start}B" "${end}B" || return 1
   partprobe "$disk" 2>/dev/null || true
   udevadm settle 2>/dev/null || true
 
-  after=$(partition_numbers "$disk" | sort)
-  num=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)
+  after=$(partition_numbers "$disk") || return 1
+  # Exactly one partition more than before, or something else moved.
+  (( $(grep -c . <<<"$after") == $(grep -c . <<<"$before") + 1 )) || return 1
+
+  # Lexicographic sort on both sides: comm needs its inputs ordered the same
+  # way it compares them, and `sort -n` (1, 2, 10) is not that order.
+  num=$(comm -13 <(sort <<<"$before") <(sort <<<"$after") | head -1)
   [[ -n $num ]] || return 1
 
   # The number must be genuinely new. This is the safety property that keeps a

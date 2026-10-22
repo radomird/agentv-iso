@@ -5,7 +5,7 @@ set -e
 OMARCHY_ISO_REF="${OMARCHY_ISO_REF:-quattro}"
 OMARCHY_MIRROR="${OMARCHY_MIRROR:-stable}"
 OMARCHY_ARCH="${OMARCHY_ARCH:-x86_64}"
-OMARCHY_KERNEL="${OMARCHY_KERNEL:-linux-t2}"
+OMARCHY_KERNEL="${OMARCHY_KERNEL:-linux-omarchy}"
 # profiledef.sh reads both in the mkarchiso environment.
 export OMARCHY_ARCH OMARCHY_KERNEL
 
@@ -182,8 +182,12 @@ else
   : > "$build_cache_dir/airootfs/root/omarchy_kernel"
 fi
 
+# The live kernel's archiso initramfs. x86_64 also keeps linux-t2's, which
+# GRUB boots on a Mac (configs/grub/grub.cfg).
+cp "/builder/${OMARCHY_KERNEL}.preset" "$build_cache_dir/airootfs/etc/mkinitcpio.d/${OMARCHY_KERNEL}.preset"
+
 # Architecture overlay on the shared profile: live kernel, initramfs hooks,
-# GRUB entries. x86_64 keeps its exact previous behaviour.
+# GRUB entries.
 if [[ $OMARCHY_ARCH == aarch64 ]]; then
   # releng's live package list is x86-flavoured; drop what arm64 cannot use.
   arm_live_excludes=(amd-ucode broadcom-wl edk2-shell hyperv intel-ucode linux memtest86+ memtest86+-efi open-vm-tools refind reflector syslinux virtualbox-guest-utils-nox)
@@ -198,7 +202,6 @@ if [[ $OMARCHY_ARCH == aarch64 ]]; then
   # I2C-HID keyboard modules.
   configure_archiso_aarch64_mkinitcpio "$build_cache_dir/airootfs/etc/mkinitcpio.conf.d/archiso.conf"
   boot_splash_kernel_options="quiet splash "
-  cp "/builder/${OMARCHY_KERNEL}.preset" "$build_cache_dir/airootfs/etc/mkinitcpio.d/${OMARCHY_KERNEL}.preset"
   # The N1x firmware's SPCR serial console would take the console from the
   # panel, hence console=tty0 acpi=nospcr.
   kernel_options="console=tty0 acpi=nospcr initramfs_async=0"
@@ -226,10 +229,10 @@ CUSTOMIZE
   rm -rf "$build_cache_dir/syslinux" "$build_cache_dir/efiboot"
 else
   boot_splash_kernel_options="quiet splash "
-  kernel_options="xe.enable_panel_replay=0 initramfs_async=0"
+  kernel_options="xe.enable_panel_replay=0 initramfs_async=0 intel_idle.states_off=0x3fc"
 fi
 for grub_config in "$build_cache_dir/grub/grub.cfg" "$build_cache_dir/grub/loopback.cfg"; do
-  configure_grub_kernel "$grub_config" "$OMARCHY_KERNEL"
+  configure_grub_platform "$grub_config" "$OMARCHY_ARCH"
   sed -i \
     -e "s|%KERNEL%|$OMARCHY_KERNEL|g" \
     -e "s|%BOOT_SPLASH_KERNEL_OPTIONS%|$boot_splash_kernel_options|g" \
@@ -318,14 +321,14 @@ if [[ $OMARCHY_ARCH == aarch64 ]]; then
   # saves a laptop's signed firmware from Windows with qcom-firmware-extract.
   arch_packages=("$OMARCHY_KERNEL" archlinuxarm-keyring git gum jq openssl openssh pciutils plymouth ttfx tzupdate omarchy-keyring "$OMARCHY_SETTINGS_PACKAGE" lvm2 cryptsetup parted systemd-ukify linux-firmware-qcom qcom-firmware-extract python)
 else
-  arch_packages=(linux-t2 git gum jq openssl plymouth ttfx tzupdate omarchy-keyring "$OMARCHY_SETTINGS_PACKAGE" lvm2 cryptsetup parted)
+  # linux-t2 is the live kernel on a Mac (configs/grub/grub.cfg).
+  arch_packages=("$OMARCHY_KERNEL" linux-t2 git gum jq openssl plymouth ttfx tzupdate omarchy-keyring "$OMARCHY_SETTINGS_PACKAGE" lvm2 cryptsetup parted)
 fi
 live_packages_file="$build_cache_dir/packages.$OMARCHY_ARCH"
 printf '%s\n' "${arch_packages[@]}" >> "$live_packages_file"
 
-# The live ISO boots linux-t2 (see airootfs/etc/mkinitcpio.d/linux-t2.preset), so
-# stock linux is a second kernel nobody boots: ~147MB of ISO, plus its own archiso
-# initramfs, copied into both the ISO tree and the size-constrained FAT EFI image.
+# The live ISO boots linux-omarchy, or linux-t2 on a Mac, so stock linux is a
+# kernel nobody boots: ~147MB of ISO, plus its own archiso initramfs.
 #
 # It cannot just be deleted — releng's broadcom-wl hard-depends on it, and it is
 # the only releng package that does, so pacman would drag the kernel straight back
@@ -333,7 +336,7 @@ printf '%s\n' "${arch_packages[@]}" >> "$live_packages_file"
 # kernel we boot, so it has done nothing since we started booting T2 anyway. The
 # install is entirely offline and the live environment needs no Wi-Fi driver.
 #
-# Anchored so linux-t2 and linux-firmware are untouched.
+# Anchored so linux-omarchy, linux-t2 and linux-firmware are untouched.
 sed -i -E '/^(linux|broadcom-wl)$/d' "$live_packages_file"
 
 # Build the offline mirror: everything pacstrap might want during the target
@@ -539,10 +542,10 @@ mapfile -t all_packages < <(
     sort -u
 )
 
-# x86_64: Omarchy's optional list also names firmware for aarch64 boards,
-# which has no x86_64 build. Each exclusion is explicit and printed.
+# x86_64: Omarchy's optional list also names packages for aarch64 boards,
+# which have no x86_64 build. Each exclusion is explicit and printed.
 if [[ $OMARCHY_ARCH == x86_64 ]]; then
-  aarch64_only=(asus-proart-p14-speaker-firmware)
+  aarch64_only=(asus-proart-p14-speaker-firmware iptsd surface-pro-11-sensors surface-pro-11-support)
   printf 'x86_64: excluding aarch64-only package %s\n' "${aarch64_only[@]}" >&2
   mapfile -t all_packages < <(printf '%s\n' "${all_packages[@]}" | grep -Fxv -f <(printf '%s\n' "${aarch64_only[@]}"))
 fi
