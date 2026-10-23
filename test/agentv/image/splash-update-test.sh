@@ -7,6 +7,7 @@
 # the boot image.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/repos.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -16,10 +17,14 @@ wait_for_ssh 300 failure-splash-update-ssh-timeout || exit 1
 check "AgenTV's splash hook ran while the installer put the packages down" \
   ssh_sudo "grep -q \"running '60-agentv-splash.hook'\" /var/log/pacman.log"
 
-# A marker from before the reinstall, so "rebuilt" means rebuilt by it. The
-# test box has never synced its package databases, hence -Sy.
+# The test box has never synced its package databases. It does that first,
+# waiting out an edge release that's being published again (repos.sh).
+check "the box reads its package repositories" sync_repos
+tail -n 5 "$RUN_DIR/sync.log"
+
+# A marker from before the reinstall, so "rebuilt" means rebuilt by it.
 ssh_sudo "touch /root/before-omarchy-settings"
-ssh_sudo "pacman -Sy --noconfirm omarchy-settings" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
+ssh_sudo "pacman -S --noconfirm omarchy-settings" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
 tail -n 15 "$RUN_DIR/omarchy-settings.log"
 check "omarchy-settings was reinstalled, and AgenTV's hook ran after it" \
   grep -q "Putting AgenTV's logo on the boot splash" "$RUN_DIR/omarchy-settings.log"
