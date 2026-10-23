@@ -40,6 +40,7 @@ sleep 2
 guest_hyprctl "-j activewindow" >"$RUN_DIR/active.json" 2>&1 || true
 check "S1.6 focus taken from outside goes back to the home screen" \
   test "$(jq -r '.address' "$RUN_DIR/active.json")" = "$home"
+check "S1.6 and the window it went to isn't shown over the TV (OCR)" screen_shows_welcome "success-S1.6-after-focus"
 
 # Omarchy's terminal key does nothing here: the TV session has none of its keys.
 before=$(ssh_guest "pgrep -c -x foot" || echo 0)
