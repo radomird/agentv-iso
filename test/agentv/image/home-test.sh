@@ -44,7 +44,7 @@ check "the TV has the Omarchy theme's colours (its background is ${background:-u
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 check "agentv setup skip marks setup done (daemon /health)" \
   test "$(jq -r '.screen' <<<"$(health)" 2>/dev/null)" = "home"
-check "with setup done, the TV shows the home screen's grid (OCR)" screen_says "success-home-grid" "all apps"
+check "with setup done, the TV shows the home screen's grid (OCR)" screen_says "success-home-grid" "installed"
 check "the home screen has its status bar (OCR)" grep -qi "settings" "$RUN_DIR/success-home-grid.txt"
 check "the home screen is still in front, full screen" \
   test "$(front '[.front.role, .front.fullscreen] | join(" ")')" = "home 2"
@@ -54,7 +54,7 @@ check "the home screen is still in front, full screen" \
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 check "OK on the all apps tile opens the apps page (OCR)" screen_says "success-home-apps" "on your home" 15
 guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
-check "back comes home again (OCR)" screen_says "success-home-back" "all apps" 15
+check "back comes home again (OCR)" screen_says "success-home-back" "installed" 15
 
 # Setting up again brings the welcome page back, without a restart.
 seen=$(jq -r '.welcome_shown_count // 0' <<<"$(health)" 2>/dev/null || echo 0)
