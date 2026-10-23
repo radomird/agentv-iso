@@ -67,7 +67,7 @@ sleep 15
 wait_for_ssh 300 failure-home-reboot-ssh-timeout || exit 1
 started=$SECONDS
 until [[ $(front '.front.role // ""') == "home" ]] || (( SECONDS - started > 240 )); do sleep 1; done
-check "after a restart the TV comes back to the home screen's grid (OCR)" screen_says "success-home-reboot" "all apps" 60
+check "after a restart the TV comes back to the home screen's grid (OCR)" screen_says "success-home-reboot" "installed" 60
 check "S2.4 a moved tile is where it was put after the box restarts" \
   test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | "\(.id) \(.size)@\(.x),\(.y)"]')" = '["apps s@3,2"]'
 
