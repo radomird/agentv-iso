@@ -1,9 +1,11 @@
 #!/bin/bash
 #
-# What Radomir saw of Omarchy on the NUC's first boot stays off the TV
-# (ADR-029): Omarchy's invitations to pick an agent and install Voxtype are
-# marked as offered, its keybinding and update notices are dismissed while
-# its first run is on, and agentv update asks AgenTV's own question.
+# What Radomir saw of Omarchy on the NUC stays off the TV (ADR-029):
+# Omarchy's invitations to pick an agent and install Voxtype are marked as
+# offered, its keybinding and update notices are dismissed while its first
+# run is on, the idle lock never asks for a password, the welcome page stays
+# an app window when a terminal opens over it, and agentv update asks
+# AgenTV's own question.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 
@@ -28,6 +30,22 @@ ocr_screen >"$RUN_DIR/screen.txt" 2>/dev/null || true
 capture_console "omarchy-hidden"
 check "no Omarchy first-run notice is on the TV (keybindings, update, agent, Voxtype)" \
   bash -c "! grep -Eqi 'keybinding|update system|default agent|voxtype' '$RUN_DIR/screen.txt'"
+
+# No password on an idle TV, and nothing in the menu that suspends it.
+check "Omarchy's idle lock is off, and the screensaver stays" \
+  ssh_guest "jq -e '.idle.lock == 0 and .idle.screensaver > 0' .config/omarchy/shell.json"
+check "suspend is out of Omarchy's menu" ssh_guest "test -f .local/state/omarchy/toggles/suspend-off"
+
+# As on the NUC: a terminal opened over the TV takes the full screen, and the
+# welcome page must not turn into a browser window with an address bar.
+check "the TV is a Chromium app window" \
+  ssh_guest "pgrep -af 'user-data-dir=/var/lib/agentv/chromium' | grep -q -- '--app='"
+ssh_guest "export HYPRLAND_INSTANCE_SIGNATURE=\$(ls /run/user/\$(id -u)/hypr | head -n 1); hyprctl dispatch exec omarchy-launch-terminal" >/dev/null 2>&1 || true
+sleep 5
+ocr_screen >"$RUN_DIR/screen-with-terminal.txt" 2>/dev/null || true
+capture_console "tv-with-terminal"
+check "with a terminal over it, the TV shows no browser tabs or address bar" \
+  bash -c "! grep -q '127.0.0.1' '$RUN_DIR/screen-with-terminal.txt'"
 
 ssh_guest "bash -lc 'agentv-update-confirm' </dev/null" >"$RUN_DIR/update-question.txt" 2>&1 || true
 cat "$RUN_DIR/update-question.txt"
