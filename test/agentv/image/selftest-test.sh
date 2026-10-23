@@ -1,9 +1,11 @@
 #!/bin/bash
 #
-# agentv selftest, the way Radomir runs it on the NUC for S0.2 and S0.3, on
-# the installed box. The VM has no Wi-Fi card, so it gets the kernel's
-# simulated one (mac80211_hwsim), which can be an access point the way the
-# NUC's Intel card can. The NUC itself is still where S0.2 and S0.3 pass.
+# agentv selftest, the way Radomir runs it on the NUC, on the installed box:
+# stage 0's S0.2 and S0.3, then stage 1's TV session checks. The VM has no
+# Wi-Fi card, so it gets the kernel's simulated one (mac80211_hwsim), which
+# can be an access point the way the NUC's Intel card can. The NUC itself is
+# still where S0.2, S0.3, S1.2 and S1.5 pass: the VM has no Widevine, Steam
+# or real screen.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 
@@ -28,7 +30,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-ssh_guest "bash -lc 'agentv selftest' </dev/null" >"$RUN_DIR/selftest.txt" 2>&1 || true
+ssh_guest "bash -lc 'agentv selftest S0.2 S0.3' </dev/null" >"$RUN_DIR/selftest.txt" 2>&1 || true
 cat "$RUN_DIR/selftest.txt"
 
 check "agentv selftest finds the root disk unencrypted" grep -q "^pass S0.2 the root disk isn't encrypted" "$RUN_DIR/selftest.txt"
@@ -39,6 +41,25 @@ check "agentv selftest brings up a WPA2 hotspot in AP mode" grep -q "^pass S0.3 
 check "agentv selftest puts Wi-Fi back" grep -q "^pass S0.3 Wi-Fi is back as it was" "$RUN_DIR/selftest.txt"
 check "agentv selftest leaves no hotspot behind" ssh_guest "! nmcli -g NAME connection show | grep -qx agentv-selftest-hotspot"
 check "agentv selftest ends with every id passing" grep -qx "S0.2 pass, S0.3 pass" "$RUN_DIR/selftest.txt"
+
+# Stage 1, as Radomir runs it over SSH while the TV is on.
+ssh_guest "bash -lc 'agentv selftest' </dev/null" >"$RUN_DIR/selftest-stage1.txt" 2>&1 || true
+cat "$RUN_DIR/selftest-stage1.txt"
+stage1() {
+  grep -qF "$1" "$RUN_DIR/selftest-stage1.txt"
+}
+check "agentv selftest with no id runs stage 1's checks" stage1 "S1.1 "
+check "agentv selftest finds SDDM logging in to the TV session" stage1 "pass S1.1 SDDM logs $GUEST_USER in to the TV session"
+check "agentv selftest finds the home screen in front" stage1 "pass S1.1 the TV session is on, with the home screen in front, full screen"
+check "agentv selftest finds nothing of Omarchy's desktop" stage1 "pass S1.1 nothing of Omarchy's desktop runs in the TV session"
+check "agentv selftest puts a web app in front" stage1 "pass S1.5 a web app came in front"
+check "agentv selftest shows a toast over it" stage1 "pass S1.5 a toast showed over the app in front"
+check "agentv selftest brings the home screen back" stage1 "pass S1.5 the home screen came back in front"
+check "agentv selftest says what S1.2 and S1.5 leave for a person" \
+  bash -c "grep -q '^manual S1.2 ' '$RUN_DIR/selftest-stage1.txt' && grep -q '^manual S1.5 ' '$RUN_DIR/selftest-stage1.txt'"
+check "agentv selftest keeps a new window out of sight" stage1 "pass S1.6 a new window stayed out of sight"
+check "agentv selftest finds the home screen back after a crash" stage1 "pass S1.6 the home screen came back in front"
+check "agentv selftest never stops halfway" bash -c "! grep -q 'the selftest stopped' '$RUN_DIR/selftest-stage1.txt'"
 
 stop_vm
 finish

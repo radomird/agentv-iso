@@ -3,9 +3,10 @@
 # What Radomir saw of Omarchy on the NUC stays off the TV (ADR-029):
 # Omarchy's invitations to pick an agent and install Voxtype are marked as
 # offered, its keybinding and update notices are dismissed while its first
-# run is on, the idle lock never asks for a password, the welcome page stays
-# an app window when a terminal opens over it, and agentv update asks
-# AgenTV's own question.
+# run is on, the idle lock never asks for a password, and agentv update asks
+# AgenTV's own question. The TV runs in AgenTV's own session (ADR-031), so
+# Omarchy's terminal key opens nothing over it; s1.6-front-test.sh tries a
+# terminal opened over it anyway.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 
@@ -42,7 +43,7 @@ check "Omarchy's idle lock is off, and the screensaver stays" \
 check "suspend is out of Omarchy's menu" ssh_guest "test -f .local/state/omarchy/toggles/suspend-off"
 
 check "the TV is a Chromium kiosk app window" \
-  ssh_guest "pgrep -af 'user-data-dir=/var/lib/agentv/chromium' | grep -- '--kiosk' | grep -q -- '--app='"
+  ssh_guest "pgrep -af 'user-data-dir=/var/lib/agentv/chromium-home' | grep -- '--kiosk' | grep -q -- '--app='"
 
 # Esc is AgenTV's back key (ADR-008): it must not take the TV out of full
 # screen, which would bring back Omarchy's bar with its clock and weekday.
@@ -53,16 +54,15 @@ capture_console "tv-after-esc"
 check "after Esc the TV is still the full-screen welcome page" \
   bash -c "grep -q 'TV setup starts here' '$RUN_DIR/screen-after-esc.txt' && ! grep -Eqi '(mon|tues|wednes|thurs|fri|satur|sun)day' '$RUN_DIR/screen-after-esc.txt'"
 
-# As on the NUC: Super+Return opens a terminal over the TV, which takes the
-# full screen, and the welcome page must not turn into a browser window with
-# tabs and an address bar.
+# As on the NUC: Super+Return. On Omarchy's desktop it opened a terminal
+# over the TV; in the TV session it opens nothing, and the TV stays as it is.
 press meta_l-ret
 sleep 5
-check "Super+Return opened a terminal over the TV" ssh_guest "pgrep -u \$(id -u) -x foot >/dev/null"
-ocr_screen >"$RUN_DIR/screen-with-terminal.txt" 2>/dev/null || true
-capture_console "tv-with-terminal"
-check "with a terminal over it, the TV shows no browser tabs or address bar" \
-  bash -c "! grep -Eq '127\.0\.0\.1|AgenTV setup' '$RUN_DIR/screen-with-terminal.txt'"
+check "Super+Return opens no terminal over the TV" ssh_guest "! pgrep -u \$(id -u) -x foot >/dev/null"
+ocr_screen >"$RUN_DIR/screen-after-super-return.txt" 2>/dev/null || true
+capture_console "tv-after-super-return"
+check "after Super+Return the TV is still the welcome page, with no browser tabs or address bar" \
+  bash -c "grep -q 'TV setup starts here' '$RUN_DIR/screen-after-super-return.txt' && ! grep -Eq '127\.0\.0\.1|AgenTV setup' '$RUN_DIR/screen-after-super-return.txt'"
 
 ssh_guest "bash -lc 'agentv-update-confirm' </dev/null" >"$RUN_DIR/update-question.txt" 2>&1 || true
 cat "$RUN_DIR/update-question.txt"
