@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# agentv:summary=Put what AgenTV's package needs in the ISO's offline mirror, for one build
+# agentv:args=[--restore]
+
+# The installer installs from an offline mirror, which omarchy-iso's build
+# fills from Omarchy's package lists and its own builder/archinstall.packages.
+# AgenTV's agentv package needs a few packages Omarchy doesn't install, such
+# as nodejs for the TV session's screen daemon and gamescope for Steam
+# (ADR-031), and without them the install stops halfway. So this adds every
+# package agentv depends on to builder/archinstall.packages in the working
+# tree, for one build only: test/agentv/image/ci runs it before
+# omarchy-iso-make, and --restore puts upstream's file back from git. The
+# build fetches them, with what they need in turn, from the same mirror as
+# everything else, and customize.sh stops the build if anything is still
+# missing from the offline mirror.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
+list=builder/archinstall.packages
+packages=configs/airootfs/usr/share/agentv-iso/packages
+
+if [[ ${1:-} == "--restore" ]]; then
+  git checkout -- "$list"
+  exit 0
+fi
+
+# git checkout puts it back afterwards, which would lose edits of anyone's.
+if ! git diff --quiet -- "$list"; then
+  echo "agentv-iso-depends: $list is changed already; run it with --restore first" >&2
+  exit 1
+fi
+
+shopt -s nullglob
+agentv=("$packages"/agentv-[0-9]*.pkg.tar.zst)
+shopt -u nullglob
+if (( ${#agentv[@]} != 1 )); then
+  echo "agentv-iso-depends: expected one agentv package in $packages, found ${#agentv[@]}" >&2
+  exit 1
+fi
+
+# What agentv depends on, by name. Omarchy's own package and AgenTV's keyring
+# are in the mirror already, and asking for omarchy by name would fetch the
+# published one on top of a channel's own.
+added=()
+while IFS= read -r name; do
+  [[ -n $name ]] || continue
+  if ! grep -qxF "$name" "$list"; then
+    printf '%s\n' "$name" >>"$list"
+    added+=("$name")
+  fi
+done < <(
+  tar -I zstd -xOf "${agentv[0]}" .PKGINFO |
+    sed -n 's/^depend = //p' | sed 's/[<>=].*//' |
+    grep -vx -e omarchy -e agentv-keyring | sort -u
+)
+
+echo "agentv-iso-depends: the offline mirror also carries what agentv needs: ${added[*]:-nothing new}"
