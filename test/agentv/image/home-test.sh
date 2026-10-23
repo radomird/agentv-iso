@@ -3,8 +3,9 @@
 # The home screen (stage 2): once setup is done, the TV shows AgenTV's
 # launcher, which the daemon serves, in the Omarchy theme's colours. The
 # remote's keys move around it, and setting up again brings the welcome page
-# back. Layer 4 checks the launcher itself in a Chromium (S2.3, S2.7); this
-# checks it's what an installed box shows.
+# back, and a layout stays as it was left when the box restarts. Layer 4
+# checks the launcher itself in a Chromium (S2.3 to S2.7); this checks it's
+# what an installed box shows.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -55,6 +56,20 @@ guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 check "OK on the all apps tile opens the apps page (OCR)" screen_says "success-home-apps" "on your home" 15
 guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
 check "back comes home again (OCR)" screen_says "success-home-back" "installed" 15
+
+# The layout is the daemon's to keep (S2.4): a tile moved stays where it was
+# put when the box restarts, and the TV comes back to home, not setup.
+ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":[{\"id\":\"apps\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' http://127.0.0.1:3000/api/layout" \
+  >"$RUN_DIR/layout.json" 2>&1 || true
+log "Restarting the box with the all apps tile moved"
+ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
+sleep 15
+wait_for_ssh 300 failure-home-reboot-ssh-timeout || exit 1
+started=$SECONDS
+until [[ $(front '.front.role // ""') == "home" ]] || (( SECONDS - started > 240 )); do sleep 1; done
+check "after a restart the TV comes back to the home screen's grid (OCR)" screen_says "success-home-reboot" "installed" 60
+check "S2.4 a moved tile is where it was put after the box restarts" \
+  test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | "\(.id) \(.size)@\(.x),\(.y)"]')" = '["apps s@3,2"]'
 
 # Setting up again brings the welcome page back, without a restart.
 seen=$(jq -r '.welcome_shown_count // 0' <<<"$(health)" 2>/dev/null || echo 0)
