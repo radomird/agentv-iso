@@ -6,6 +6,11 @@
 # omarchy-iso's own, so AgenTV can't add a line to it. archiso marks this file
 # executable and runs it anyway, and without a shebang it runs under /bin/sh,
 # which is bash on Arch.
+#
+# Whatever stops customize.sh stops the build: archiso fails the build on
+# this file's exit status, and without set -e the rm after it would hide a
+# failure. That's what customize.sh's own checks rely on.
 
+set -e
 bash /usr/share/agentv-iso/customize.sh
 rm -rf /usr/share/agentv-iso

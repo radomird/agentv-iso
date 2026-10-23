@@ -6,8 +6,12 @@
 # and its version in $AGENTV_TEST_UPDATE_VERSION. The box takes it from here
 # over QEMU's network, and everything else from Omarchy's stable channel as
 # it stands. Skips when there's no repository.
+#
+# The update runs while the TV is on, so it's also S1.6's update: nothing it
+# does takes the screen from the TV (ADR-031).
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 if [[ -z ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
   log "No newer agentv to update to; skipping"
@@ -22,6 +26,9 @@ trap 'kill "$server" 2>/dev/null || true' EXIT
 
 start_vm_from_base
 wait_for_ssh 300 failure-S0.5-ssh-timeout || exit 1
+
+wait_tv 240 >/dev/null || true
+home_pid=$(front '.apps[] | select(.role == "home") | .pid')
 
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 log "Installed: agentv $before; updating to $AGENTV_TEST_UPDATE_VERSION"
@@ -62,6 +69,15 @@ check "S0.5 the snapshot is in the boot menu" \
   ssh_sudo "grep -qi snapshot /boot/limine.conf"
 check "AgenTV's migrations ran from Omarchy's post-update hook" \
   grep -qE "AgenTV migration|No AgenTV migrations to run" "$RUN_DIR/agentv-update.log"
+
+screen_status >"$RUN_DIR/screen-after-update.json"
+check "S1.6 after an update in place, the home screen is still in front" \
+  test "$(jq -r '.front.role' "$RUN_DIR/screen-after-update.json")" = "home"
+check "S1.6 it's the same home screen: the update didn't restart it" \
+  test "$(jq -r '.apps[] | select(.role == "home") | .pid' "$RUN_DIR/screen-after-update.json")" = "$home_pid"
+check "S1.6 nothing the update opened is on the TV" \
+  test "$(jq -r '[.windows[] | select(.workspace == "1" and .role != "home")] | length' "$RUN_DIR/screen-after-update.json")" = "0"
+check "S1.6 after the update the screen shows the TV (OCR)" screen_shows_welcome "success-S1.6-after-update"
 
 ssh_sudo "snapper -c root list" >"$RUN_DIR/snapshots.txt" 2>&1 || true
 stop_vm
