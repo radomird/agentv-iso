@@ -64,5 +64,34 @@ check "AgenTV's migrations ran from Omarchy's post-update hook" \
   grep -qE "AgenTV migration|No AgenTV migrations to run" "$RUN_DIR/agentv-update.log"
 
 ssh_sudo "snapper -c root list" >"$RUN_DIR/snapshots.txt" 2>&1 || true
+
+# From a box without the TV session to one with it (ADR-031), the way the NUC
+# goes: after the update and a restart, SDDM logs in to the TV session, with
+# the home screen in front and nothing of Omarchy's desktop.
+log "Restarting after the update"
+ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
+sleep 15
+wait_for_ssh 300 failure-S0.5-restart-ssh-timeout || exit 1
+status=""
+for _ in $(seq 1 240); do
+  status=$(ssh_guest "bash -lc 'agentv screen status' </dev/null" 2>/dev/null || true)
+  [[ $(jq -r '.front.role // ""' <<<"$status" 2>/dev/null) == "home" ]] && break
+  sleep 1
+done
+printf '%s\n' "$status" >"$RUN_DIR/screen-after-restart.json"
+capture_console "success-S0.5-tv-after-restart"
+check "after the update and a restart, SDDM logs in to the TV session, and stage 0's autologin file is gone" \
+  ssh_guest "grep -qx 'Session=agentv.desktop' /etc/sddm.conf.d/zz-agentv-autologin.conf && test ! -e /etc/sddm.conf.d/agentv-autologin.conf"
+check "after the update and a restart, the home screen is in front, full screen" \
+  test "$(jq -r '[.front.role, .front.workspace, .front.fullscreen] | join(" ")' <<<"$status" 2>/dev/null)" = "home 1 2"
+check "after the update and a restart, Omarchy's shell isn't running" \
+  ssh_guest "! pgrep -f '[/]usr/share/omarchy/shell' >/dev/null"
+check "after the update and a restart, Omarchy's post-boot hook no longer opens the TV" \
+  ssh_guest "! grep -q agentv-tv ~/.config/omarchy/hooks/post-boot.d/agentv"
+ssh_guest "bash -lc 'agentv selftest S1.1 S1.6' </dev/null" >"$RUN_DIR/selftest-after-restart.txt" 2>&1 || true
+cat "$RUN_DIR/selftest-after-restart.txt"
+check "after the update and a restart, agentv selftest passes S1.1 and S1.6" \
+  grep -qx "S1.1 pass, S1.6 pass" "$RUN_DIR/selftest-after-restart.txt"
+
 stop_vm
 finish
