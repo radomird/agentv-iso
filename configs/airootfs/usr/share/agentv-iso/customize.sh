@@ -99,6 +99,26 @@ patch "$configurator" "the greeter's logo" \
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$configurator" "the greeter's animation" \
   's/^  ttfx -i "\$LOGO_PATH" \\\n.*?^    <\/dev\/null >\/dev\/tty 2>\/dev\/null &$/  sleep infinity <\/dev\/null >\/dev\/null 2>&1 &/ms'
+# No disk encryption by default (ADR-007): a TV box boots straight to the TV,
+# and the PIN locks the TV, not the disk. Both disk confirms start out
+# unencrypted, and Ctrl+C still gives an encrypted install, said on screen
+# the way Omarchy says the opposite.
+patch "$configurator" "the free-space install's encryption default" \
+  's/^  local mode="encrypted" affirmative confirm_status$/  local mode="unencrypted" affirmative confirm_status/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the full-disk install's encryption default" \
+  's/^(confirm_disk_overwrite\(\) \{\n)  local mode="encrypted"$/$1  local mode="unencrypted"/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the free-space confirm's Ctrl+C line" \
+  's/^(        )(affirmative="Yes, install without encryption")$/$1say --foreground 8 "Press Ctrl+C for encrypted install."\n$1$2/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the full-disk confirm's Ctrl+C line" \
+  's/^(      )(affirmative="Yes, install without encryption")$/$1say --foreground 8 "Press Ctrl+C for encrypted install."\n$1$2/m'
+if (( $(grep -c '^  local mode="unencrypted"' "$configurator") != 2 )) || grep -q '^  local mode="encrypted"' "$configurator"; then
+  echo "agentv-iso: the installer doesn't default to no encryption in both disk confirms" >&2
+  exit 1
+fi
+
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$dashboard" "the dashboard's logo" \
   's/^    while IFS= read -r line; do\n      printf .\\r%s%s%b%s%b\\n. "\$CLEAR_LINE" "\$pad" "\$GREEN" "\$line" "\$RESET"\n    done <"\$LOGO_PATH"$/    agentv-logo --prefix "\\r\$CLEAR_LINE\$pad"/m'
@@ -108,4 +128,4 @@ patch "$dashboard" "the finish screen's effect" \
 patch "$dashboard" "the finish screen's title" \
   's/title="Installed Omarchy"/title="Installed AgenTV"/'
 
-echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, and AgenTV's logo and tagline"
+echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, AgenTV's logo and tagline, and no encryption by default"
