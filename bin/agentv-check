@@ -241,6 +241,32 @@ else
   pass "no emoji in UI text"
 fi
 
+# --- App packages pass agentv app validate ----------------------------------
+
+# Every app package in the repo, against the app contract (ADR-019). The
+# built-ins and the apps in the test fixtures are AgenTV's own, so they're
+# checked as official apps. A repo without the contract, such as agentv-iso,
+# has none.
+if [[ -f apps/contract/validate.ts ]]; then
+  find apps test/agentv/fixtures/apps -mindepth 2 -maxdepth 3 -name manifest.json \
+    -not -path 'apps/contract/*' 2>/dev/null | sort >"$WORK/manifests" || true
+  if [[ ! -s $WORK/manifests ]]; then
+    pass "app packages pass agentv app validate (none yet)"
+  elif ! have node; then
+    skip "app packages pass agentv app validate" node
+  else
+    packages=()
+    while IFS= read -r manifest; do
+      packages+=("$(dirname -- "$manifest")")
+    done <"$WORK/manifests"
+    if AGENTV_PATH="$ROOT" bin/agentv-app-validate --official "${packages[@]}" >"$WORK/apps.log" 2>&1; then
+      pass "app packages pass agentv app validate (${#packages[@]} checked)"
+    else
+      fail "app packages pass agentv app validate" "$(cat "$WORK/apps.log")"
+    fi
+  fi
+fi
+
 # --- Omarchy's MIT attribution ----------------------------------------------
 
 missing=""
