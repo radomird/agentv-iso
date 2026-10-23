@@ -16,13 +16,17 @@ wait_for_ssh 300 failure-splash-update-ssh-timeout || exit 1
 check "AgenTV's splash hook ran while the installer put the packages down" \
   ssh_sudo "grep -q \"running '60-agentv-splash.hook'\" /var/log/pacman.log"
 
-ssh_sudo "pacman -S --noconfirm omarchy-settings" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
+# A marker from before the reinstall, so "rebuilt" means rebuilt by it. The
+# test box has never synced its package databases, hence -Sy.
+ssh_sudo "touch /root/before-omarchy-settings"
+ssh_sudo "pacman -Sy --noconfirm omarchy-settings" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
 tail -n 15 "$RUN_DIR/omarchy-settings.log"
-check "omarchy-settings was reinstalled" grep -q "60-agentv-splash.hook" "$RUN_DIR/omarchy-settings.log"
+check "omarchy-settings was reinstalled, and AgenTV's hook ran after it" \
+  grep -q "Putting AgenTV's logo on the boot splash" "$RUN_DIR/omarchy-settings.log"
 check "after an Omarchy settings update, the splash is still AgenTV's logo" \
   ssh_sudo "cmp -s /usr/share/agentv/branding/plymouth-logo.png /usr/share/plymouth/themes/omarchy/logo.png"
 check "and the boot image was rebuilt with it" \
-  ssh_sudo "[ -n \"\$(find /boot -name '*.efi' -newer /usr/share/plymouth/themes/omarchy/logo.png | head -n 1)\" ]"
+  ssh_sudo "[ -n \"\$(find /boot -name '*.efi' -newer /root/before-omarchy-settings | head -n 1)\" ]"
 
 stop_vm
 finish
