@@ -79,8 +79,12 @@ fi
 
 git fetch --quiet origin "$target"
 git switch --quiet -c "$branch" "origin/$target"
-git config user.name "github-actions[bot]"
-git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+# The merge is the sync's, not whoever runs it. Set for this process only:
+# git config would write it into the repo, and every worktree shares that, so
+# a dry run on someone's machine would make their own commits the bot's.
+export GIT_AUTHOR_NAME="github-actions[bot]"
+export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
 if [[ $upstream == "omacom/omarchy" ]]; then
   git fetch --quiet --no-tags "$upstream_url" "+refs/tags/$tag:refs/tags/$tag"
