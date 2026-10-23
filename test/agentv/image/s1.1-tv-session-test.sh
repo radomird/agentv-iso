@@ -40,7 +40,7 @@ check "the TV session runs Hyprland with AgenTV's setup" \
 # screensaver and the lock, and its user services hang off
 # graphical-session.target.
 check "S1.1 Omarchy's shell isn't running: no bar, notices, screensaver or idle lock" \
-  ssh_guest "! pgrep -f '/usr/share/omarchy/shell' >/dev/null"
+  ssh_guest "! pgrep -f '$OMARCHY_SHELL' >/dev/null"
 check "S1.1 graphical-session.target isn't started, so none of Omarchy's desktop services are" \
   guest "! systemctl --user is-active --quiet graphical-session.target"
 check "S1.1 no Omarchy overlay is on the screen" \
@@ -48,6 +48,9 @@ check "S1.1 no Omarchy overlay is on the screen" \
 check "S1.1 the screen shows the welcome page (OCR)" screen_shows_welcome "success-S1.1-tv-session"
 check "S1.1 no bar: no weekday or clock on the screen" \
   bash -c "! grep -Eqi '(mon|tues|wednes|thurs|fri|satur|sun)day' '$RUN_DIR/success-S1.1-tv-session.txt'"
+ocr_top "$RUN_DIR/success-S1.1-tv-session.png" "$RUN_DIR/top-at-start.txt" || true
+check "S1.1 no notice over the TV at the start, Hyprland's or anyone's" \
+  bash -c "! grep -Eqi 'xdg|environment|warning|error|config|hyprland|update|keybinding' '$RUN_DIR/top-at-start.txt'"
 
 # Omarchy's screensaver would start after two and a half idle minutes.
 log "Leaving the TV idle for three minutes"
@@ -74,8 +77,8 @@ guest "agentv screen toast 'AgenTV toast over the TV'" >"$RUN_DIR/toast.json" 2>
 sleep 1
 check "a toast draws over the app in front, as an overlay" \
   test "$(front '[.layers[] | select(. == "agentv-toast")] | length')" -ge 1
-ocr_screen >"$RUN_DIR/toast.txt" 2>/dev/null || true
 capture_console "success-S1.1-toast"
+ocr_top "$RUN_DIR/success-S1.1-toast.png" "$RUN_DIR/toast.txt" || true
 check "the toast is on the screen (OCR)" grep -qi "toast over the TV" "$RUN_DIR/toast.txt"
 
 guest "agentv screen frames 3" >"$RUN_DIR/frames.json" 2>&1 || true

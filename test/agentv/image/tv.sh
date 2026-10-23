@@ -73,6 +73,20 @@ screen_shows_welcome() {
   grep -q "TV setup starts here" "$RUN_DIR/$1.txt"
 }
 
+# ocr_top <png> <txt>: reads the top fifth of a screenshot, where toasts and
+# Hyprland's own notices are, larger than ocr_screen does, so small text
+# comes through.
+ocr_top() {
+  magick "$1" -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 300% "$RUN_DIR/.top.png" 2>/dev/null &&
+    tesseract "$RUN_DIR/.top.png" - --psm 6 >"$2" 2>/dev/null
+}
+
+# Omarchy's shell: its bar, notices, screensaver and lock. The bracket keeps
+# pgrep from finding the shell that runs it, whose command line has the
+# pattern in it too.
+# shellcheck disable=SC2034 # the checks that source this use it
+OMARCHY_SHELL='[/]usr/share/omarchy/shell'
+
 # A throwaway VM: sudo without a password, set up the way upstream's own
 # test/upgrade-test does, as someone at the box would type theirs.
 passwordless_sudo() {

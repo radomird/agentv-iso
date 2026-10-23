@@ -38,13 +38,13 @@ switch() {
     capture_console "success-S1.3-$how-desktop"
     check "S1.3 the TV to Omarchy's desktop with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
-    check "it's Omarchy's own desktop: its shell is running" ssh_guest "pgrep -f '/usr/share/omarchy/shell' >/dev/null"
+    check "it's Omarchy's own desktop: its shell is running" ssh_guest "pgrep -f '$OMARCHY_SHELL' >/dev/null"
   else
     took=$(wait_tv 60 "$seen") || took=""
     capture_console "success-S1.3-$how-tv"
     check "S1.3 Omarchy's desktop back to the TV with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
-    check "back on the TV, nothing of Omarchy's desktop is left" ssh_guest "! pgrep -f '/usr/share/omarchy/shell' >/dev/null"
+    check "back on the TV, nothing of Omarchy's desktop is left" ssh_guest "! pgrep -f '$OMARCHY_SHELL' >/dev/null"
   fi
 }
 
