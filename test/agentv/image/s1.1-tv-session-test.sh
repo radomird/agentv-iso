@@ -18,7 +18,7 @@ log "Booting the installed system with no key pressed"
 start_vm_from_base
 wait_for_ssh 300 failure-S1.1-ssh-timeout || exit 1
 
-conf=/etc/sddm.conf.d/agentv-autologin.conf
+conf=/etc/sddm.conf.d/zz-agentv-autologin.conf
 check "S1.1 SDDM logs the owner in to the TV session, and back in after a log-out" \
   ssh_guest "grep -qx 'User=$GUEST_USER' $conf && grep -qx 'Session=agentv.desktop' $conf && grep -qx 'Relogin=true' $conf"
 

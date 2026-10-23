@@ -53,14 +53,18 @@ switch keys tv
 switch command desktop
 switch command tv
 
-# After a power on the TV comes back, even if the desktop was on.
+# After a power on the TV comes back, even if the desktop was on, and even
+# with Omarchy's own autologin to its desktop in place, which its installer
+# keeps for good on an encrypted disk.
 guest "agentv desktop" >>"$RUN_DIR/switch.log" 2>&1 || true
 wait_desktop 60 >/dev/null || true
+ssh_sudo "printf '[Autologin]\\nUser=%s\\nSession=omarchy.desktop\\n' '$GUEST_USER' >/etc/sddm.conf.d/autologin.conf"
 log "Restarting the box from Omarchy's desktop"
 ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
 sleep 15
 wait_for_ssh 300 failure-S1.3-reboot-ssh-timeout || exit 1
-check "after a restart from Omarchy's desktop, the box comes back to the TV" wait_tv 240
+check "after a restart from Omarchy's desktop, the box comes back to the TV, with Omarchy's autologin beside AgenTV's" \
+  wait_tv 240
 
 cat "$RUN_DIR/switch.log" 2>/dev/null || true
 stop_vm

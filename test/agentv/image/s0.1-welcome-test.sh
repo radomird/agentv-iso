@@ -15,7 +15,7 @@ wait_for_ssh 300 failure-S0.1-ssh-timeout || exit 1
 
 check "agentv-firstboot ran" ssh_guest "test -f /var/lib/agentv/firstboot.done"
 check "the daemon is running" ssh_guest "systemctl is-active --quiet agentv-daemon"
-check "the owner logs in on their own" ssh_guest "grep -qx 'User=$GUEST_USER' /etc/sddm.conf.d/agentv-autologin.conf"
+check "the owner logs in on their own" ssh_guest "grep -qx 'User=$GUEST_USER' /etc/sddm.conf.d/zz-agentv-autologin.conf"
 
 # The page reports itself once the kiosk has drawn it.
 health=""
