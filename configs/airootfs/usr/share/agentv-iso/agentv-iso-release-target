@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Releases the newly installed system once the install has finished: written
+# to disk, its swap off, unmounted, its encrypted root closed. Upstream's
+# finish screen leaves all of it mounted until the reboot, and the reboot's
+# stop jobs read from the install medium, so pulling the USB stick at the
+# finish screen, as people do, wedges the box in I/O errors with the new
+# system still mounted read-write (omarchy-iso#125, and Radomir's NUC).
+# Released, the box can reboot through /proc/sysrq-trigger, which needs
+# nothing from the stick. Only on the live ISO, and only for /mnt.
+#
+# Exits 0 when the system is released, 1 when it isn't (and the finish
+# screen then reboots the way upstream does).
+
+set -uo pipefail
+
+[[ -d /run/archiso ]] || exit 1
+mountpoint -q /mnt || exit 1
+
+# A note on the installed system, so its own checks can tell this ran.
+printf 'agentv-iso released this system before rebooting, %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >/mnt/var/log/agentv-iso-release.log 2>/dev/null || true
+sync
+while read -r swap; do
+  swapoff "$swap" || exit 1
+done < <(swapon --show=NAME --noheadings 2>/dev/null | grep '^/mnt/')
+umount -R /mnt || { sleep 2; umount -R /mnt; } || exit 1
+for mapper in omarchy_root root; do
+  if [[ -e /dev/mapper/$mapper ]]; then
+    cryptsetup close "$mapper" || exit 1
+  fi
+done
+sync
+
+# <3> so the kernel prints it on a quiet console too.
+echo "<3>agentv-iso: the installed system is released; the USB stick can come out" >/dev/kmsg 2>/dev/null || true

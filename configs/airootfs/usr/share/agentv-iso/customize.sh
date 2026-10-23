@@ -71,6 +71,7 @@ perl -pi -e 's/^  tagline="Beautiful, Fun & Agentic Linux by DHH"$/  tagline="$E
 # build if upstream has moved the line it replaces.
 install -D -m 644 "$here/logo.ansi" /usr/local/share/agentv/logo.ansi
 install -D -m 755 "$here/agentv-logo" /usr/local/bin/agentv-logo
+install -D -m 755 "$here/agentv-iso-release-target" /usr/local/bin/agentv-iso-release-target
 
 # patch <file> <description> <perl substitution, -0 so it can span lines>
 patch() {
@@ -118,6 +119,50 @@ if (( $(grep -c '^  local mode="unencrypted"' "$configurator") != 2 )) || grep -
   echo "agentv-iso: the installer doesn't default to no encryption in both disk confirms" >&2
   exit 1
 fi
+
+# The installer is AgenTV's (ADR-029): where it names what it installs, it
+# says AgenTV, the box is called agentv unless the owner names it, and the
+# tips while it installs are AgenTV's. Omarchy's own words about Omarchy,
+# such as the "Installing Arch + Omarchy" step, stay true and stay.
+form=/usr/share/omarchy-iso/setup-form.sh
+patch "$form" "the hostname's default" \
+  "s/^OMARCHY_HOSTNAME_DEFAULT='omarchy'\$/OMARCHY_HOSTNAME_DEFAULT='agentv'/m"
+patch "$form" "the hostname prompt" \
+  "s/\(or return for 'omarchy'\)/(or return for 'agentv')/"
+patch "$configurator" "an unattended install's hostname" \
+  's/^  hostname="omarchy"$/  hostname="agentv"/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the disk screens' name for what they install" \
+  's/^([ \t]*(?:say|step|gum style)\b[^\n]*?)\bOmarchy\b/$1AgenTV/mg'
+# Upstream's line here has an em dash, which AgenTV's copy never has.
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$configurator" "the free-space screen's dash" \
+  's/(an AgenTV partition here) \xE2\x80\x94 l(eave)/$1. L$2/'
+if grep -Eq '^[[:space:]]*(say|step|gum style)\b.*\bOmarchy\b' "$configurator"; then
+  echo "agentv-iso: a disk screen still says Omarchy" >&2
+  exit 1
+fi
+patch "$dashboard" "the stopped install's headline" \
+  's/Omarchy installation stopped/AgenTV installation stopped/'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the tips while it installs" \
+  's/^tips=\(\n.*?^\)$/tips=(
+  "AgenTV starts straight on the TV, with no password at power on"
+  "TV setup will run from your phone"
+  "AgenTV'\''s own agent will build the apps your TV is missing"
+  "Apps the agent builds stay on this box"
+  "agentv update takes a snapshot first, then updates in place"
+  "A bad update? Pick the snapshot before it from the boot menu"
+  "agentv selftest checks the boot and the Wi-Fi, and says pass or fail"
+  "Omarchy is underneath: Super + Return still opens a terminal"
+)/ms'
+
+# The finish screen releases the installed system before it offers the
+# reboot, and reboots without the USB stick (agentv-iso-release-target,
+# omarchy-iso#125). If the release fails, it reboots the way upstream does.
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the finish screen's reboot" \
+  's/^if reboot_prompt; then\n(  if \[\[ \$\{OMARCHY_UI_AUTO_REBOOT:-\} == "no" \]\]; then\n    exit 0\n  fi\n  printf .%s. "\$CLEAR" >"\$TTY_PATH" 2>\/dev\/null \|\| true\n)  reboot /target_released=0\nagentv-iso-release-target >>"\$LOG_FILE" 2>&1 && target_released=1\nif reboot_prompt; then\n$1  (( target_released )) && echo b >\/proc\/sysrq-trigger\n  reboot /m'
 
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$dashboard" "the dashboard's logo" \
