@@ -6,6 +6,7 @@
 # reinstall. That's how the NUC follows each stage.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/repos.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -22,6 +23,11 @@ log "Installed: agentv $before, on $(ssh_guest "bash -lc 'agentv channel'")"
 ssh_guest "bash -lc 'agentv channel edge' </dev/null" >"$RUN_DIR/agentv-channel.log" 2>&1 || true
 check "agentv channel edge switches the box to edge" test "$(ssh_guest "bash -lc 'agentv channel'")" = "edge"
 check "pacman takes AgenTV from the edge release" ssh_guest "grep -A3 '^\[agentv\]' /etc/pacman.conf | grep -q '^Server = .*/edge$'"
+
+# Edge may be in the middle of being published again (repos.sh): wait until
+# the box reads it, so agentv update's own sync finds it whole.
+check "the box reads its package repositories, edge among them" sync_repos
+tail -n 5 "$RUN_DIR/sync.log"
 
 # A login shell, as someone at the box has. No --untested: on edge, agentv
 # update doesn't wait for the nightly run by itself.
