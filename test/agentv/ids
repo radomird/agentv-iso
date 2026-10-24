@@ -15,3 +15,4 @@ S1.3  iso       the TV to Omarchy's desktop and back each take under 10 s
 S1.4  agentv-plugin the Back to TV plugin passes omarchy plugin validate (the repo isn't made yet)
 S1.5  manual    the TV session check: 60 fps, an app and home again, a toast over a film, Steam in its gamescope (agentv selftest S1.5)
 S1.6  iso       no window takes the screen unless the daemon puts it in front: a new window, a home screen crash, an update
+S1.7  iso       signing in to a test page in the services' Chromium shows no browser prompt: no Save password, translate, notification or autofill bubble

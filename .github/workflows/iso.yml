@@ -127,7 +127,7 @@ jobs:
             echo
           } >>"$GITHUB_STEP_SUMMARY"
           test/agentv/report iso "S0.1=$(result S0.1)" "S0.4=$(result S0.4)" \
-            "S1.1=$(result S1.1)" "S1.3=$(result S1.3)" "S1.6=$(result S1.6)" >>"$GITHUB_STEP_SUMMARY"
+            "S1.1=$(result S1.1)" "S1.3=$(result S1.3)" "S1.6=$(result S1.6)" "S1.7=$(result S1.7)" >>"$GITHUB_STEP_SUMMARY"
 
       - name: Keep the screenshots and logs
         if: always()
