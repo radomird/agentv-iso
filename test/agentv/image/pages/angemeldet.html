@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Angemeldet</title>
+<style>body { background: #fff; color: #000; font: 28px sans-serif; margin: 160px auto; width: 640px; }</style>
+</head>
+<body>
+<h1>Angemeldet</h1>
+<p>Sie sind angemeldet. Viel Spa&szlig; beim Schauen.</p>
+<script>
+  // A key here asks to send notifications, the way a service's page might
+  // once someone is signed in.
+  document.addEventListener("keydown", () => window.Notification?.requestPermission());
+</script>
+</body>
+</html>
