@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Anmelden</title>
+<style>
+  body { background: #fff; color: #000; font: 20px sans-serif; margin: 40px auto; width: 640px; }
+  label { display: block; margin: 6px 0; }
+  input { display: block; font: 20px sans-serif; width: 100%; margin-top: 2px; }
+</style>
+</head>
+<body>
+<!-- A service's sign-in page, in German so Chromium has a reason to offer
+     to translate it. Its words are all German, so English words on the
+     screen are Chromium's own (S1.7). -->
+<h1>Anmelden</h1>
+<p>Willkommen zur&uuml;ck. Melden Sie sich mit Ihrem Konto an, um dort weiterzuschauen, wo Sie aufgeh&ouml;rt haben. Ihre Liste, Ihre Profile und Ihre Einstellungen warten auf Sie.</p>
+<form action="angemeldet.html" method="get">
+  <label>Benutzername <input name="benutzer" autocomplete="username" autofocus></label>
+  <label>Kennwort <input name="kennwort" type="password" autocomplete="current-password"></label>
+  <label>Vor- und Nachname <input name="name" autocomplete="name"></label>
+  <label>Stra&szlig;e und Hausnummer <input name="strasse" autocomplete="street-address"></label>
+  <label>Postleitzahl <input name="plz" autocomplete="postal-code"></label>
+  <label>Ort <input name="ort" autocomplete="address-level2"></label>
+  <button>Anmelden</button>
+</form>
+</body>
+</html>
