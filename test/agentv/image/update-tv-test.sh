@@ -17,7 +17,26 @@ fi
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 port=$((SSH_PORT + 3))
-(cd "$AGENTV_TEST_UPDATE_REPO" && exec python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1) &
+# The repository, with each package taking about 20 s to come down, as on a
+# slow line: an update of one small package is otherwise over before the
+# check can read the Updating screen. pacman gives up on a download only when
+# nothing comes for 10 s.
+(cd "$AGENTV_TEST_UPDATE_REPO" && exec python3 - "$port" <<'PY'
+import http.server, os, sys, time
+
+class Slow(http.server.SimpleHTTPRequestHandler):
+    def copyfile(self, source, outputfile):
+        if not self.path.endswith(".pkg.tar.zst"):
+            return super().copyfile(source, outputfile)
+        size = os.fstat(source.fileno()).st_size
+        while data := source.read(max(1, size // 40)):
+            outputfile.write(data)
+            outputfile.flush()
+            time.sleep(0.5)
+
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Slow).serve_forever()
+PY
+) >/dev/null 2>&1 &
 server=$!
 trap 'kill "$server" 2>/dev/null || true' EXIT
 
