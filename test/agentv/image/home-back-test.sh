@@ -5,8 +5,9 @@
 # Chromium. Home pauses it and shows the home screen, and opening it again
 # brings the same window back, playing (S2.15). A third app closes the oldest.
 # Back stays the app's, holding it for a second goes home, and Home works from
-# a keyboard's Home key and a remote's Home button, which is what the phone
-# sends (S2.16). S2.15's 1 s is timed on the NUC; here it's logged.
+# a keyboard's Home key, a remote's Home button, which is what the phone
+# sends, and the mouse's button in the top left corner (S2.16). S2.15's 1 s
+# is timed on the NUC; here it's logged.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -31,6 +32,21 @@ wait_front() {
       return 0
     fi
     sleep 0.2
+  done
+  return 1
+}
+
+# Whether the overlay's corner, the mouse's Home, is on the screen.
+corner_ready() {
+  guest_hyprctl "-j layers" 2>/dev/null | jq -e '[.. | objects | select(.namespace? == "agentv-corner")] | length > 0' >/dev/null 2>&1
+}
+
+# wait_corner <yes|no> <seconds>
+wait_corner() {
+  local started=$SECONDS
+  while (( SECONDS - started < $2 )); do
+    if corner_ready; then [[ $1 == "yes" ]] && return 0; else [[ $1 == "no" ]] && return 0; fi
+    sleep 0.5
   done
   return 1
 }
@@ -74,6 +90,27 @@ guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
 wait_front web 10 >/dev/null || true
 guest "agentv input key home" >>"$RUN_DIR/input.log" 2>&1 || true
 check "S2.16 a remote's Home button, the phone's too, shows the home screen" wait_front home 10
+
+# The mouse: pushed into the top left corner, the pointer shows Home there,
+# and a click on it goes home. On the home screen the corner is the
+# launcher's own.
+check "the corner's Home button isn't there on the home screen" wait_corner no 10
+guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
+wait_front web 10 >/dev/null || true
+check "the corner's Home button is ready while an app is in front" wait_corner yes 10
+guest "agentv input move -4000 -4000" >>"$RUN_DIR/input.log" 2>&1 || true
+sleep 1
+capture_console "success-home-back-corner"
+corner_text=""
+if [[ -s $RUN_DIR/success-home-back-corner.png ]]; then
+  corner_text=$(magick "$RUN_DIR/success-home-back-corner.png" -gravity northwest -crop 25%x20%+0+0 +repage -colorspace gray -resize 300% png:- 2>/dev/null |
+    tesseract - - --psm 6 2>/dev/null || true)
+fi
+check "S2.16 the pointer in the top left corner shows Home there (OCR: ${corner_text//$'\n'/ })" grep -qi "home" <<<"$corner_text"
+guest "agentv input click" >>"$RUN_DIR/input.log" 2>&1 || true
+check "S2.16 a click on the corner's Home shows the home screen" wait_front home 10
+check "S2.15 and the app stays open behind it, paused" test "$(opened '[.open[] | select(.front == false) | .paused] | all')" = "true"
+check "the corner's Home button goes once home is in front" wait_corner no 10
 
 # Two more apps: the first goes.
 for n in 2 3; do
