@@ -173,6 +173,11 @@ screen_off() {
 started=$SECONDS
 until screen_off "success-go-back-off" || (( SECONDS - started > 60 )); do sleep 3; done
 check "S2.14 the TV says something's off and offers Go back (OCR)" grep -Eqi "something.{0,2}s off" "$RUN_DIR/success-go-back-off.txt"
+if ! grep -Eqi "something.{0,2}s off" "$RUN_DIR/success-go-back-off.txt"; then
+  # What the TV showed, and what home was told about the update.
+  cat "$RUN_DIR/success-go-back-off.txt"
+  ssh_guest "curl -fsS http://127.0.0.1:3000/api/updates" | jq -c '{status: .status | {agentv, waiting}, goBack, after, seen}' 2>&1 || true
+fi
 
 # OK on the TV: Go back has the focus.
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
