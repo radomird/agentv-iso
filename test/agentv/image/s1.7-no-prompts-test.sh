@@ -23,7 +23,8 @@ ssh_guest "mkdir -p /tmp/agentv-sign-in"
 for name in sign-in angemeldet; do
   ssh_guest "cat >/tmp/agentv-sign-in/$name.html" <"$pages/$name.html"
 done
-ssh_guest "cd /tmp/agentv-sign-in && (nohup python3 -m http.server 8766 --bind 127.0.0.1 >/dev/null 2>&1 &)"
+# Its log says what the form sent, so the test knows the keyboard filled it in.
+ssh_guest "cd /tmp/agentv-sign-in && (nohup python3 -m http.server 8766 --bind 127.0.0.1 >requests.log 2>&1 &)"
 page=http://127.0.0.1:8766/sign-in.html
 
 # wait_front <role> <seconds>: until <role> is in front.
@@ -50,7 +51,7 @@ prompts() {
     magick "$shot" -colorspace gray -resize 150% "$RUN_DIR/.all.png" 2>/dev/null && tesseract "$RUN_DIR/.all.png" - --psm 6 2>/dev/null
     magick "$shot" -colorspace gray -negate -resize 150% "$RUN_DIR/.all.png" 2>/dev/null && tesseract "$RUN_DIR/.all.png" - --psm 6 2>/dev/null
   } >"$RUN_DIR/$1.txt" || true
-  grep -Eoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' '
+  grep -Eoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' ' || true
 }
 
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
@@ -65,6 +66,8 @@ printf 'zuschauer.berlin\tS17-kennwort-%s\tErika Mustermann\tHauptstrasse 1\t101
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 6
 found=$(prompts "success-S1.7-signed-in")
+check "S1.7 the keyboard filled in the name and password, and the form was sent" \
+  ssh_guest "grep -q 'benutzer=zuschauer.berlin&kennwort=S17-kennwort-[0-9]' /tmp/agentv-sign-in/requests.log"
 check "S1.7 the sign-in went through (OCR)" grep -qi "angemeldet" "$RUN_DIR/success-S1.7-signed-in.txt"
 check "S1.7 after signing in, no Save password, Save address or card, or Translate bubble (saw: ${found:-nothing})" test -z "$found"
 
@@ -74,6 +77,10 @@ sleep 4
 found=$(prompts "success-S1.7-notifications")
 check "S1.7 a page that asks to send notifications gets no bubble (saw: ${found:-nothing})" test -z "$found"
 check "the services' Chromium is still in front" wait_front web 5
+
+# The settings themselves, as Chromium keeps them in the services' profile.
+check "S1.7 the services' profile has password saving, autofill, translate and notifications off" \
+  ssh_sudo "jq -e '.credentials_enable_service == false and .credentials_enable_autosignin == false and .autofill.profile_enabled == false and .autofill.credit_card_enabled == false and .translate.enabled == false and .profile.default_content_setting_values.notifications == 2' /var/lib/agentv/chromium/Default/Preferences >/dev/null"
 
 guest "journalctl --user -b --no-pager -u agentv-screen -u agentv-input" >"$RUN_DIR/tv-session.log" 2>&1 || true
 check "S1.7 nothing the keyboard typed is in the TV session's log" bash -c "! grep -q 'S17-kennwort' '$RUN_DIR/tv-session.log'"
