@@ -82,9 +82,16 @@ until_file() {
   return 1
 }
 
+# The agentv this run hands over isn't in the nightly run's tested.json, so
+# on stable it waits (ADR-026), and Check now says so. On edge it goes ahead,
+# the way S0.5's check takes it with --untested.
 guest "agentv screen update check" >"$RUN_DIR/screen.log" 2>&1 || true
+check "S2.12 on stable, Check now says agentv $AGENTV_TEST_UPDATE_VERSION waits for the nightly run" \
+  until_file ".agentv.available == \"$AGENTV_TEST_UPDATE_VERSION\" and .waiting == true" /var/lib/agentv/update/status.json 180
+ssh_sudo "echo edge >/etc/agentv/channel"
+guest "agentv screen update check" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "S2.12 Check now finds agentv $AGENTV_TEST_UPDATE_VERSION" \
-  until_file ".agentv.available == \"$AGENTV_TEST_UPDATE_VERSION\"" /var/lib/agentv/update/status.json 180
+  until_file ".channel == \"edge\" and .agentv.available == \"$AGENTV_TEST_UPDATE_VERSION\" and .waiting == false" /var/lib/agentv/update/status.json 180
 ssh_guest "cat /var/lib/agentv/update/status.json" >"$RUN_DIR/status.json" 2>&1 || true
 check "S2.12 and says which agentv the box has now" \
   test "$(jq -r '.agentv.installed' "$RUN_DIR/status.json")" = "$before"
@@ -103,6 +110,7 @@ ssh_guest "cat /var/lib/agentv/update/progress.json" >"$RUN_DIR/progress.json" 2
 check "S2.12 the update finishes ($(jq -r '"\(.state): \(.detail)"' "$RUN_DIR/progress.json" 2>/dev/null))" \
   jq -e '.state == "done" or .state == "restarting"' "$RUN_DIR/progress.json"
 ssh_guest "cat /var/lib/agentv/update/update.log" >"$RUN_DIR/update.log" 2>&1 || true
+jq -e '.state == "done" or .state == "restarting"' "$RUN_DIR/progress.json" >/dev/null 2>&1 || tail -n 30 "$RUN_DIR/update.log"
 if [[ $(jq -r .state "$RUN_DIR/progress.json") == "restarting" ]]; then
   log "The update restarts the box"
   sleep 20
