@@ -83,11 +83,13 @@ until_file() {
 }
 
 # The agentv this run hands over isn't in the nightly run's tested.json, so
-# on stable it waits (ADR-026), and Check now says so. On edge it goes ahead,
-# the way S0.5's check takes it with --untested.
+# on stable it waits (ADR-026), and Check now says so. On edge, where this
+# run's packages put the box, it goes ahead, the way S0.5's check takes it
+# with --untested.
+ssh_sudo "echo stable >/etc/agentv/channel"
 guest "agentv screen update check" >"$RUN_DIR/screen.log" 2>&1 || true
 check "S2.12 on stable, Check now says agentv $AGENTV_TEST_UPDATE_VERSION waits for the nightly run" \
-  until_file ".agentv.available == \"$AGENTV_TEST_UPDATE_VERSION\" and .waiting == true" /var/lib/agentv/update/status.json 180
+  until_file ".channel == \"stable\" and .agentv.available == \"$AGENTV_TEST_UPDATE_VERSION\" and .waiting == true" /var/lib/agentv/update/status.json 180
 ssh_sudo "echo edge >/etc/agentv/channel"
 guest "agentv screen update check" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "S2.12 Check now finds agentv $AGENTV_TEST_UPDATE_VERSION" \
