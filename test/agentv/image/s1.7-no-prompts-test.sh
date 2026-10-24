@@ -51,7 +51,7 @@ prompts() {
     magick "$shot" -colorspace gray -resize 150% "$RUN_DIR/.all.png" 2>/dev/null && tesseract "$RUN_DIR/.all.png" - --psm 6 2>/dev/null
     magick "$shot" -colorspace gray -negate -resize 150% "$RUN_DIR/.all.png" 2>/dev/null && tesseract "$RUN_DIR/.all.png" - --psm 6 2>/dev/null
   } >"$RUN_DIR/$1.txt" || true
-  grep -Eoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' ' || true
+  grep -aEoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' ' || true
 }
 
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
@@ -68,7 +68,7 @@ sleep 6
 found=$(prompts "success-S1.7-signed-in")
 check "S1.7 the keyboard filled in the name and password, and the form was sent" \
   ssh_guest "grep -q 'benutzer=zuschauer.berlin&kennwort=S17-kennwort-[0-9]' /tmp/agentv-sign-in/requests.log"
-check "S1.7 the sign-in went through (OCR)" grep -qi "angemeldet" "$RUN_DIR/success-S1.7-signed-in.txt"
+check "S1.7 the sign-in went through (OCR)" grep -aqi "angemeldet" "$RUN_DIR/success-S1.7-signed-in.txt"
 check "S1.7 after signing in, no Save password, Save address or card, or Translate bubble (saw: ${found:-nothing})" test -z "$found"
 
 # The signed-in page asks to send notifications when a key is pressed.
