@@ -44,6 +44,16 @@ check "agentv selftest puts Wi-Fi back" grep -q "^pass S0.3 Wi-Fi is back as it 
 check "agentv selftest leaves no hotspot behind" ssh_guest "! nmcli -g NAME connection show | grep -qx agentv-selftest-hotspot"
 check "agentv selftest ends with every id passing" grep -qx "S0.2 pass, S0.3 pass" "$RUN_DIR/selftest.txt"
 
+# Stage 2 measures the home screen itself, its tiles and UI sounds, so TV
+# setup is marked done first, as it is on the NUC.
+ssh_guest "bash -lc 'agentv setup skip' </dev/null" >"$RUN_DIR/setup.log" 2>&1 || true
+for _ in $(seq 30); do
+  [[ $(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/health" 2>/dev/null | jq -r '.screen // ""' 2>/dev/null) == "home" ]] && break
+  sleep 1
+done
+# The launcher's page takes the welcome page's place.
+sleep 5
+
 # Stages 1 and 2, as Radomir runs them over SSH while the TV is on.
 ssh_guest "bash -lc 'agentv selftest' </dev/null" >"$RUN_DIR/selftest-stage1.txt" 2>&1 || true
 cat "$RUN_DIR/selftest-stage1.txt"
