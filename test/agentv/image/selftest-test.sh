@@ -60,8 +60,9 @@ cat "$RUN_DIR/selftest-stage1.txt"
 stage1() {
   grep -qF "$1" "$RUN_DIR/selftest-stage1.txt"
 }
+# Stage 2 ends with S2.16, or S2.18 once Settings → Power is there (ADR-033).
 check "agentv selftest with no id runs stages 1 and 2" \
-  grep -qE "^S1.1 (pass|fail), .*S1.7 (pass|fail), S2.8 (pass|fail), .*S2.16 (pass|fail)$" "$RUN_DIR/selftest-stage1.txt"
+  grep -qE "^S1.1 (pass|fail), .*S1.7 (pass|fail), S2.8 (pass|fail), .*S2.16 (pass|fail)(, S2.18 (pass|fail))?$" "$RUN_DIR/selftest-stage1.txt"
 check "agentv selftest finds SDDM logging in to the TV session" stage1 "pass S1.1 SDDM logs $GUEST_USER in to the TV session"
 check "agentv selftest finds the home screen in front" stage1 "pass S1.1 the TV session is on, with the home screen in front, full screen"
 check "agentv selftest finds nothing of Omarchy's desktop" stage1 "pass S1.1 nothing of Omarchy's desktop runs in the TV session"
