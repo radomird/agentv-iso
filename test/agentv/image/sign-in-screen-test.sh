@@ -115,21 +115,18 @@ check "the app took its page to the site's sign-in form" test "$up" = 1
 sleep 2
 capture_console "success-sign-in-screen"
 # The bar's text, then its button's: beside the bar's light text on dark,
-# tesseract takes the light blue "i'm signed in" button for a picture. So
-# a second pass floods the bar's dark background white from its bottom
-# corner first, and the button is the only dark text on light that's left.
+# tesseract takes the light blue "i'm signed in" button for a picture. So the
+# button is found as the one solid block of its blue (a 9 x 9 opening wipes
+# out the bluish edges of the bar's text) and read on its own.
 : >"$RUN_DIR/bar.txt"
 if magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+0 +repage "$RUN_DIR/.bar.png" 2>/dev/null; then
   magick "$RUN_DIR/.bar.png" -colorspace gray -negate -resize 200% png:- 2>/dev/null |
     tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
-  magick "$RUN_DIR/.bar.png" -flip -fuzz 15% -fill white -draw "color 0,0 floodfill" -flip -colorspace gray -resize 200% png:- 2>/dev/null |
-    tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
-  # And the bar's right side on its own, where the button is, both ways round.
-  for way in "" "-negate"; do
-    # shellcheck disable=SC2086 # $way is one option or none
-    magick "$RUN_DIR/.bar.png" -gravity east -crop 35%x100%+0+0 +repage -colorspace gray $way -resize 300% png:- 2>/dev/null |
-      tesseract - - --psm 11 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
-  done
+  button=$(magick "$RUN_DIR/.bar.png" -fuzz 8% -fill black +opaque "#7aa2f7" -fill white -opaque "#7aa2f7" \
+    -morphology Open Square:4 -trim -format "%wx%h%X%Y" info: 2>/dev/null || true)
+  echo "the button: ${button:-not found}"
+  [[ -z $button ]] || magick "$RUN_DIR/.bar.png" -crop "$button" +repage -colorspace gray -resize 200% png:- 2>/dev/null |
+    tesseract - - --psm 7 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
 fi
 cat "$RUN_DIR/bar.txt"
 # When the button isn't read, what the bar looked like: its size, its
