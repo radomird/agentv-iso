@@ -1,12 +1,13 @@
 #!/bin/bash
 #
 # The phone companion's sign-in fields and arrange home on an installed box
-# (ADR-032, S4.9, S4.7). A paired phone moves a tile on home, and the daemon
-# keeps it. Then a stand-in app with signIn opens AgenTV's sign-in screen:
-# the daemon hears it from the screen daemon and offers the phone its fields,
-# and the name and password the phone sends are typed into the service's own
-# form on the TV, through the virtual input device. The app says it's signed
-# in, and no log on the box has the password. A real phone's password
+# (ADR-032, S4.4, S4.7, S4.9). A paired phone moves a tile on home, and the
+# daemon keeps it. Then a stand-in app with signIn opens AgenTV's sign-in
+# screen: the daemon hears it from the screen daemon and offers the phone its
+# fields, and the email and password the phone sends are typed into the
+# service's own form on the TV, through the virtual input device. The form
+# gets the email as typed, the app says it's signed in, and no log on the
+# box has the password. A real phone's password
 # manager filling the fields is the NUC's check.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
@@ -35,7 +36,7 @@ ssh_guest "cat >/tmp/agentv-sign-in-check/login.html" <<'HTML'
 <body style="background:#fff;color:#000;font:28px sans-serif;margin:60px">
 <h1>Sign in to Check TV</h1>
 <form id="login"><input name="email" autocomplete="username" autofocus><input name="password" type="password" autocomplete="current-password"><button>Sign in</button></form>
-<script>document.getElementById("login").addEventListener("submit", (e) => { e.preventDefault(); document.cookie = "signed=in; path=/"; location.href = "/"; });</script>
+<script>document.getElementById("login").addEventListener("submit", (e) => { e.preventDefault(); document.cookie = "signed=in; path=/"; location.href = "/?email=" + encodeURIComponent(e.target.email.value); });</script>
 </body>
 HTML
 ssh_guest "cd /tmp/agentv-sign-in-check && (nohup python3 -m http.server 8767 --bind 127.0.0.1 >requests.log 2>&1 &)"
@@ -126,6 +127,11 @@ for second in $(seq 1 30); do
 done
 capture_console "success-phone-sign-in"
 check "S4.9 they fill the service's form on the TV, and the app says it's signed in" test -n "$done_at"
+# The form sends its email field on, so the stand-in's log says what was typed.
+emailed() {
+  ssh_guest "grep -q 'GET /?email=ana%40example.org ' /tmp/agentv-sign-in-check/requests.log"
+}
+check "S4.4 the email typed on the phone is the one the service's form got" emailed
 sleep 2
 check "the sign-in screen is over, and the phone's fields go" no_fields
 
