@@ -114,9 +114,19 @@ check "and the bar keeps the bottom of the screen: the page ends above it" \
 check "the app took its page to the site's sign-in form" test "$up" = 1
 sleep 2
 capture_console "success-sign-in-screen"
-magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+0 +repage -colorspace gray -negate -resize 200% "$RUN_DIR/.bar.png" 2>/dev/null &&
-  tesseract "$RUN_DIR/.bar.png" - --psm 6 >"$RUN_DIR/bar.txt" 2>/dev/null || true
-check "the bar says where to type, and i'm signed in (OCR)" bash -c "grep -aqi 'phone or keyboard' '$RUN_DIR/bar.txt' && grep -aqi 'signed in' '$RUN_DIR/bar.txt'"
+# The bar's text, then its button's on its own: tesseract takes the light
+# blue button for a picture, so it's found by its colour and read alone.
+: >"$RUN_DIR/bar.txt"
+if magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+0 +repage "$RUN_DIR/.bar.png" 2>/dev/null; then
+  magick "$RUN_DIR/.bar.png" -colorspace gray -negate -resize 200% png:- 2>/dev/null |
+    tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
+  button=$(magick "$RUN_DIR/.bar.png" -fuzz 8% -fill black +opaque "#7aa2f7" -fill white -opaque "#7aa2f7" -format "%@" info: 2>/dev/null || true)
+  [[ -z $button ]] || magick "$RUN_DIR/.bar.png" -crop "$button" +repage -colorspace gray -resize 200% png:- 2>/dev/null |
+    tesseract - - --psm 7 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
+fi
+cat "$RUN_DIR/bar.txt"
+# All of where to type: a long name running into it garbles its start.
+check "the bar says where to type, and i'm signed in (OCR)" bash -c "grep -aqi 'type on your phone or keyboard' '$RUN_DIR/bar.txt' && grep -aqi 'signed in' '$RUN_DIR/bar.txt'"
 
 # Typed the way the phone will, the password from stdin.
 printf 'viewer@example.org\tcheck-%s' "$RANDOM$RANDOM" | ssh_guest "bash -lc 'agentv input text -'" >"$RUN_DIR/input.log" 2>&1 || true
