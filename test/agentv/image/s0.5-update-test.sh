@@ -8,7 +8,10 @@
 # it stands. Skips when there's no repository.
 #
 # The update runs while the TV is on, so it's also S1.6's update: nothing it
-# does takes the screen from the TV (ADR-031).
+# does takes the screen from the TV (ADR-031). It ends by restarting
+# AgenTV's own services on the new agentv (agentv-restart), so home comes
+# back on the new version, with no restart of the box unless it has a new
+# kernel or Omarchy's update says it needs one.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -29,6 +32,7 @@ wait_for_ssh 300 failure-S0.5-ssh-timeout || exit 1
 
 wait_tv 240 >/dev/null || true
 home_pid=$(front '.apps[] | select(.role == "home") | .pid')
+boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
 
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 log "Installed: agentv $before; updating to $AGENTV_TEST_UPDATE_VERSION"
@@ -70,11 +74,28 @@ check "S0.5 the snapshot is in the boot menu" \
 check "AgenTV's migrations ran from Omarchy's post-update hook" \
   grep -qE "AgenTV migration|No AgenTV migrations to run" "$RUN_DIR/agentv-update.log"
 
+if needs_restart; then
+  # A new kernel came with Omarchy's packages, or its update set its flag.
+  log "This update needs a restart of the box, so AgenTV's services start again with it"
+  check "the update leaves AgenTV's services to the restart it needs" \
+    grep -q "AgenTV's services start again with the box" "$RUN_DIR/agentv-update.log"
+  check "S1.6 after an update in place, the home screen is still in front" wait_tv 60
+else
+  check "the update restarted AgenTV's services" grep -q "Restarting AgenTV's services" "$RUN_DIR/agentv-update.log"
+  took=$(wait_running "$AGENTV_TEST_UPDATE_VERSION" 90) || took=""
+  check "S1.6 after an update in place, home is back in front, and AgenTV's daemon and screen daemon run agentv $AGENTV_TEST_UPDATE_VERSION${took:+ (after $took s)}" \
+    test -n "$took"
+  health >"$RUN_DIR/health-after-update.json"
+  cat "$RUN_DIR/health-after-update.json"
+  echo
+  home_after=$(front '.apps[] | select(.role == "home") | .pid')
+  # No home screen at all counts as the same one.
+  check "the home screen restarted with them (pid $home_pid before, ${home_after:-none} now)" \
+    test "${home_after:-$home_pid}" != "$home_pid"
+  check "and the box didn't restart" test "$(ssh_guest "cat /proc/sys/kernel/random/boot_id")" = "$boot_id"
+fi
 screen_status >"$RUN_DIR/screen-after-update.json"
-check "S1.6 after an update in place, the home screen is still in front" \
-  test "$(jq -r '.front.role' "$RUN_DIR/screen-after-update.json")" = "home"
-check "S1.6 it's the same home screen: the update didn't restart it" \
-  test "$(jq -r '.apps[] | select(.role == "home") | .pid' "$RUN_DIR/screen-after-update.json")" = "$home_pid"
+cat "$RUN_DIR/screen-after-update.json"
 check "S1.6 nothing the update opened is on the TV" \
   test "$(jq -r '[.windows[] | select(.workspace == "1" and .role != "home")] | length' "$RUN_DIR/screen-after-update.json")" = "0"
 check "S1.6 after the update the screen shows the TV (OCR)" screen_shows_welcome "success-S1.6-after-update"

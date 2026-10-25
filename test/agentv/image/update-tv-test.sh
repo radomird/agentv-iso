@@ -3,6 +3,9 @@
 # Updates from the TV (ADR-025, S2.12): Settings → Updates' Check now finds the
 # newer agentv the image run hands over, and Install now installs it, with the
 # TV's Updating screen on while it runs, then home again on the new release.
+# The update ends by restarting AgenTV's own services (agentv-restart), so
+# the daemon, the screen daemon and home run the new agentv with no restart
+# of the box, unless it has a new kernel or Omarchy's update says it needs one.
 # Both go through the TV's screen daemon, as the launcher's buttons do
 # (agentv screen update check|install), and through polkit. Skips when
 # there's no newer agentv, as S0.5 does.
@@ -51,6 +54,8 @@ wait_tv 240 >/dev/null || true
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 ssh_sudo "install -d /etc/agentv && echo http://10.0.2.2:$port >/etc/agentv/repository"
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
+kernel=$(ssh_guest "uname -r")
+boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
 
 # A small app made on this box, which the check after the update loads. It's
 # there before the update, so the snapshot has it.
@@ -136,6 +141,17 @@ if [[ $(jq -r .state "$RUN_DIR/progress.json") == "restarting" ]]; then
   log "The update restarts the box"
   sleep 20
   wait_for_ssh 300 failure-update-tv-reboot-ssh-timeout || exit 1
+  # Omarchy's flag outlives the restart, which isn't Omarchy's own.
+  had_to() {
+    [[ $(ssh_guest "uname -r") != "$kernel" ]] || ssh_guest "test -f ~/.local/state/omarchy/reboot-required"
+  }
+  check "the box restarted because it had to: a new kernel (was $kernel, now $(ssh_guest "uname -r")) or Omarchy's flag" had_to
+else
+  took=$(wait_running "$AGENTV_TEST_UPDATE_VERSION" 90) || took=""
+  check "after an update from the TV, home is back in front, and AgenTV's daemon and screen daemon run agentv $AGENTV_TEST_UPDATE_VERSION${took:+ (after $took s)}" \
+    test -n "$took"
+  [[ -n $took ]] || { health; screen_status; } >"$RUN_DIR/running.json" 2>&1
+  check "and the box didn't restart" test "$(ssh_guest "cat /proc/sys/kernel/random/boot_id")" = "$boot_id"
 fi
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
