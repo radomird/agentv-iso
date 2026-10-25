@@ -1,8 +1,9 @@
 #!/bin/bash
 #
 # The home screen (stage 2): once setup is done, the TV shows AgenTV's
-# launcher, which the daemon serves, in the Omarchy theme's colours. The
-# remote's keys move around it, and setting up again brings the welcome page
+# launcher, which the daemon serves, in the Omarchy theme's colours, with
+# the built-in clock and weather on it (stage 3). The remote's keys move
+# around it, and setting up again brings the welcome page
 # back, and a layout stays as it was left when the box restarts. Layer 4
 # checks the launcher itself in a Chromium (S2.3 to S2.7); this checks it's
 # what an installed box shows.
@@ -49,6 +50,15 @@ check "with setup done, the TV shows the home screen's grid (OCR)" screen_says "
 check "the home screen has its status bar (OCR)" grep -qi "settings" "$RUN_DIR/success-home-grid.txt"
 check "the home screen is still in front, full screen" \
   test "$(front '[.front.role, .front.fullscreen] | join(" ")')" = "home 2"
+
+# The built-ins come first (stage 3), so the all apps tile's in the first
+# row after them; the focus starts on the first tile.
+check "the built-in clock and weather are on home (OCR)" bash -c "grep -qi clock '$RUN_DIR/success-home-grid.txt' && grep -qi weather '$RUN_DIR/success-home-grid.txt'"
+rights=$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq '[.layout | sort_by(.y, .x)[] | .id] | index("apps") // 0' 2>/dev/null || echo 0)
+for _ in $(seq 1 "$rights"); do
+  guest "agentv input key right" >>"$RUN_DIR/input.log" 2>&1 || true
+done
+sleep 1
 
 # The remote's keys: OK on the all apps tile opens the apps page, back
 # comes home.
