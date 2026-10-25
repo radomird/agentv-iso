@@ -114,15 +114,16 @@ check "and the bar keeps the bottom of the screen: the page ends above it" \
 check "the app took its page to the site's sign-in form" test "$up" = 1
 sleep 2
 capture_console "success-sign-in-screen"
-# The bar's text, then its button's on its own: tesseract takes the light
-# blue button for a picture, so it's found by its colour and read alone.
+# The bar's text, then its button's: beside the bar's light text on dark,
+# tesseract takes the light blue "i'm signed in" button for a picture. So
+# a second pass floods the bar's dark background white from its bottom
+# corner first, and the button is the only dark text on light that's left.
 : >"$RUN_DIR/bar.txt"
 if magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+0 +repage "$RUN_DIR/.bar.png" 2>/dev/null; then
   magick "$RUN_DIR/.bar.png" -colorspace gray -negate -resize 200% png:- 2>/dev/null |
     tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
-  button=$(magick "$RUN_DIR/.bar.png" -fuzz 8% -fill black +opaque "#7aa2f7" -fill white -opaque "#7aa2f7" -format "%@" info: 2>/dev/null || true)
-  [[ -z $button ]] || magick "$RUN_DIR/.bar.png" -crop "$button" +repage -colorspace gray -resize 200% png:- 2>/dev/null |
-    tesseract - - --psm 7 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
+  magick "$RUN_DIR/.bar.png" -flip -fuzz 15% -fill white -draw "color 0,0 floodfill" -flip -colorspace gray -resize 200% png:- 2>/dev/null |
+    tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
 fi
 cat "$RUN_DIR/bar.txt"
 # All of where to type: a long name running into it garbles its start.
