@@ -124,8 +124,24 @@ if magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+
     tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
   magick "$RUN_DIR/.bar.png" -flip -fuzz 15% -fill white -draw "color 0,0 floodfill" -flip -colorspace gray -resize 200% png:- 2>/dev/null |
     tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
+  # And the bar's right side on its own, where the button is, both ways round.
+  for way in "" "-negate"; do
+    # shellcheck disable=SC2086 # $way is one option or none
+    magick "$RUN_DIR/.bar.png" -gravity east -crop 35%x100%+0+0 +repage -colorspace gray $way -resize 300% png:- 2>/dev/null |
+      tesseract - - --psm 11 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
+  done
 fi
 cat "$RUN_DIR/bar.txt"
+# When the button isn't read, what the bar looked like: its size, its
+# commonest colours, and the crop itself, small, to look at from the log.
+if ! grep -aqi 'signed in' "$RUN_DIR/bar.txt"; then
+  magick "$RUN_DIR/.bar.png" -format "the bar's crop: %wx%h\n" info: 2>/dev/null || true
+  magick "$RUN_DIR/.bar.png" -colors 12 -format %c histogram:info:- 2>/dev/null | sort -rn | head -n 12 || true
+  echo "--- the bar, as a PNG in base64 ---"
+  magick "$RUN_DIR/.bar.png" -resize 50% -colors 64 png:- 2>/dev/null | base64 -w 0 || true
+  echo
+  echo "--- end of the bar ---"
+fi
 # All of where to type: a long name running into it garbles its start.
 check "the bar says where to type, and i'm signed in (OCR)" bash -c "grep -aqi 'type on your phone or keyboard' '$RUN_DIR/bar.txt' && grep -aqi 'signed in' '$RUN_DIR/bar.txt'"
 
