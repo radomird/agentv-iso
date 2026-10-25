@@ -87,6 +87,7 @@ else
     test -n "$took"
   health >"$RUN_DIR/health-after-update.json"
   cat "$RUN_DIR/health-after-update.json"
+  echo
   home_after=$(front '.apps[] | select(.role == "home") | .pid')
   # No home screen at all counts as the same one.
   check "the home screen restarted with them (pid $home_pid before, ${home_after:-none} now)" \
