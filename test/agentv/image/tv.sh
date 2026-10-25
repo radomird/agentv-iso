@@ -51,6 +51,32 @@ wait_tv() {
   return 1
 }
 
+# wait_running <version> <seconds>: until AgenTV's daemon and screen daemon
+# both run agentv <version> (/health and agentv screen status say which
+# package each process started from) and the home screen is in front again.
+# Prints the seconds it took.
+wait_running() {
+  local started=$SECONDS
+
+  while (( SECONDS - started < $2 )); do
+    if [[ $(jq -r '.running // ""' <<<"$(health)" 2>/dev/null) == "$1" &&
+      $(front '"\(.running // "")/\(.front.role // "")"') == "$1/home" ]]; then
+      echo $(( SECONDS - started ))
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# The box needs a restart for its update: a new kernel, whose running
+# kernel's modules are gone, or Omarchy's own flag. AgenTV's services then
+# start again with the box rather than at the end of the update.
+# shellcheck disable=SC2016 # expanded on the box
+needs_restart() {
+  guest '[[ ! -d /usr/lib/modules/$(uname -r) || -f ~/.local/state/omarchy/reboot-required ]]'
+}
+
 # wait_desktop <seconds>: until Omarchy's desktop is up, its bar on screen.
 # Prints the seconds it took.
 wait_desktop() {
