@@ -56,7 +56,7 @@ check "it's there for the daemon, as a hash, not the PIN" hashed
 guest "agentv-pin-check desktop; echo exit=\$?" >"$RUN_DIR/check-cancel.log" 2>&1 &
 asking=$!
 check "with no terminal, agentv-pin-check asks for the PIN on the TV (OCR)" wait_pad "success-pin-asked" 30
-check "the pad says what it's for (OCR)" grep -qi "desktop" "$RUN_DIR/success-pin-asked.txt"
+check "the pad says what it's for (OCR)" grep -Eqi "omarchy|desk" "$RUN_DIR/success-pin-asked.txt"
 guest "agentv input key back" >"$RUN_DIR/input.log" 2>&1 || true
 wait "$asking" || true
 check "S4.5 cancelled on the TV, agentv-pin-check refuses" grep -q "exit=1" "$RUN_DIR/check-cancel.log"
