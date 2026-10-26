@@ -17,13 +17,18 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 work=$(mktemp -d)
-smb=""
+# Samba runs as a daemon, in a session of its own: in the foreground it shared
+# this check's process group, and it stops its whole group as it goes. Its
+# pid file is named after the config file when that isn't the default one.
+smb_pid() {
+  cat "$work"/samba/run/smbd*.pid 2>/dev/null | head -n 1
+}
 # The share and the files go too, before upstream's own cleanup, which keeps
-# the exit status. Samba is in a session of its own, since it stops its whole
-# process group as it goes.
+# the exit status.
 stop_share() {
-  local status=$?
-  [[ -n $smb ]] && { kill -- "-$smb" 2>/dev/null || kill "$smb" 2>/dev/null; }
+  local status=$? pid
+  pid=$(smb_pid)
+  if [[ -n $pid ]]; then kill "$pid" 2>/dev/null || true; fi
   rm -rf "$work"
   (exit "$status")
   cleanup
@@ -63,7 +68,7 @@ mcopy -s -i "$work/stick.img" "$work/stick/Night Shift" ::
 # the user tv, with its password, read-only.
 pacman -S --noconfirm --needed samba >"$work/samba-install.log" 2>&1 || { cat "$work/samba-install.log"; check "Samba installs in the test container" false; finish; }
 id tv >/dev/null 2>&1 || useradd -M -s /usr/bin/nologin tv
-mkdir -p "$work/samba/private" "$work/samba/lock" "$work/samba/state" "$work/samba/cache" "$work/samba/run" "$work/samba/ncalrpc"
+mkdir -p "$work/samba/private" "$work/samba/lock" "$work/samba/state" "$work/samba/cache" "$work/samba/run" "$work/samba/ncalrpc" "$work/samba/log"
 # Samba reads the files as the guest or as tv.
 chmod -R a+rX "$work"
 cat >"$work/smb.conf" <<CONF
@@ -96,8 +101,13 @@ cat >"$work/smb.conf" <<CONF
   read only = yes
 CONF
 printf '%s\n%s\n' "$SHARE_PASSWORD" "$SHARE_PASSWORD" | smbpasswd -c "$work/smb.conf" -s -a tv >/dev/null
-setsid smbd --foreground --debug-stdout -s "$work/smb.conf" >"$work/smb.log" 2>&1 &
-smb=$!
+smbd --daemon -s "$work/smb.conf" -l "$work/samba/log"
+# smbd up: its pid written, and still there.
+smb_up() {
+  local pid
+  pid=$(smb_pid)
+  [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null
+}
 
 start_vm_from_base
 wait_for_ssh 300 failure-music-ssh-timeout || exit 1
@@ -107,7 +117,8 @@ passwordless_sudo
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 5
 
-check "the test container serves the share" kill -0 "$smb"
+check "the test container serves the share" smb_up
+smb_up || tail -n 30 "$work/samba/log/log.smbd" 2>/dev/null
 
 # The album in the person's own Music folder.
 tar -C "$work/folder" -c . | ssh_guest "mkdir -p ~/Music && tar -C ~/Music -x"
@@ -194,6 +205,6 @@ guest "agentv music sources" >"$RUN_DIR/sources-after-restart.json" 2>&1 || true
 check "and Music → sources says it's ready" \
   jq -e '[.sources[] | select(.id == "share:smb://tv@10.0.2.2/private" and .available == true)] | length == 1' "$RUN_DIR/sources-after-restart.json"
 
-cp "$work/smb.log" "$RUN_DIR/smb.log" 2>/dev/null || true
+cp "$work/samba/log/log.smbd" "$RUN_DIR/smb.log" 2>/dev/null || true
 stop_vm
 finish
