@@ -108,11 +108,17 @@ wait_desktop() {
   return 1
 }
 
-# The welcome page's text is on the screen, read with OCR.
+# What OCR reads on the welcome screen: TV setup's (stage 5), whose code
+# to pair the phone sits beside its words, or the stage 0 placeholder an
+# older release has, as before an update.
+# shellcheck disable=SC2034 # the checks that source this use it
+WELCOME_TEXT="TV setup starts here|use a keyboard|1/6 connect"
+
+# The welcome screen is on the TV, read with OCR, which reads it as scattered
+# text too, since the QR code beside it turns a block reading to noise.
 screen_shows_welcome() {
-  ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -q "TV setup starts here" "$RUN_DIR/$1.txt"
+  ocr_finds "$1" "$WELCOME_TEXT" 15
 }
 
 # ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
