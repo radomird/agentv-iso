@@ -150,6 +150,22 @@ ocr_top() {
 # shellcheck disable=SC2034 # the checks that source this use it
 OMARCHY_SHELL='[/]usr/share/omarchy/shell'
 
+# no_omarchy_shell <seconds>: within that long, no process of Omarchy's shell
+# and none of its layers (omarchy-bar, omarchy-notifications and the rest) in
+# the TV session (ADR-031). For after something that starts the shell, such
+# as Omarchy's update, which restarts it in whatever session is running.
+no_omarchy_shell() {
+  local started=$SECONDS
+  while (( SECONDS - started <= $1 )); do
+    if ! ssh_guest "pgrep -f '$OMARCHY_SHELL'" >/dev/null 2>&1 &&
+      [[ $(front '[.layers[]? | select(startswith("omarchy-"))] | length') == "0" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # A throwaway VM: sudo without a password, set up the way upstream's own
 # test/upgrade-test does, as someone at the box would type theirs.
 passwordless_sudo() {
