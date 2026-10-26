@@ -51,20 +51,17 @@ qr() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones/qr" 2>/dev/null | grep -q "<svg"
 }
 check "with a QR code, drawn by qrencode" qr
-# Read for up to 10 s, and say what OCR read when it doesn't find it.
-pair_screen() {
-  local _
-  for _ in $(seq 1 10); do
-    ocr_screen >"$RUN_DIR/pair.txt" 2>/dev/null || true
-    grep -qi "pair a phone" "$RUN_DIR/pair.txt" && return 0
-    sleep 1
-  done
+# Read for up to 10 s. check keeps what it runs quiet, so what OCR read is
+# printed after it, when it didn't find it.
+before=$FAILURES
+check "the pairing screen says pair a phone (OCR)" ocr_finds pair "pair a phone" 10
+if (( FAILURES > before )); then
+  capture_console "failure-phone-pair-ocr"
   log "What OCR read on the pairing screen:"
   cat "$RUN_DIR/pair.txt"
-  capture_console "failure-phone-pair-ocr"
-  return 1
-}
-check "the pairing screen says pair a phone (OCR)" pair_screen
+  log "What the screen daemon says is in front:"
+  screen_status
+fi
 
 # The phone, on the box's own address as a phone on the network reaches it.
 phone="http://$address:3001"
