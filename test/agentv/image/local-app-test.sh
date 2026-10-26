@@ -112,8 +112,18 @@ check "ADR-039 agentv app install --local installs the app" grep -q "^exit=0" "$
 check "it said what the app can reach first" grep -q "It can reach 127.0.0.1:8768, and nothing else." "$RUN_DIR/install.log"
 check "it said what it installed, and where to find it" grep -q "^Installed Image check 1.0.0 ($id). It's in Apps on the TV" "$RUN_DIR/install.log"
 check "agentv app list has it as a local app" listed "$id 1.0.0 local"
-check "it's in /var/lib/agentv/apps/$id, root's, without its fixtures" \
-  test "$(ssh_guest "stat -c '%U %a' /var/lib/agentv/apps/$id /var/lib/agentv/apps/$id/manifest.json /var/lib/agentv/apps/$id/app.ts; ls /var/lib/agentv/apps/$id" | tr '\n' ' ')" = "root 755 root 644 root 644 app.ts manifest.json "
+# What's in its folder, as the box's own account reads it: owner, mode and
+# path of each, one a line, the folder itself last.
+listing="$RUN_DIR/installed-files.txt"
+ssh_guest "find /var/lib/agentv/apps/$id -printf '%u %m %P\\n' | sort" >"$listing" 2>&1 || true
+before=$FAILURES
+check "it's in /var/lib/agentv/apps/$id, and all of it is root's" bash -c "test -s '$listing' && ! grep -qv '^root ' '$listing'"
+check "its files are 644 and its folder 755" test "$(awk '{print $2, $3}' "$listing" | tr '\n' ' ')" = "644 app.ts 644 manifest.json 755  "
+check "and its fixtures stayed behind" bash -c "! grep -q fixtures '$listing'"
+if (( FAILURES > before )); then
+  log "What the box has in /var/lib/agentv/apps/$id:"
+  cat "$listing"
+fi
 check "ADR-039 the TV has it in Apps within 10 s, made by your agent" in_apps 10
 check "and it isn't on the arranged home yet" not_on_home
 
