@@ -9,14 +9,16 @@
 #
 # Steam itself needs an account, downloads its runtime from Valve on first
 # start and draws its UI on a GPU, none of which a CI box has. So a stand-in
-# called steam shows a window that fills gamescope until it's asked to quit,
-# as Exit Steam does. Steam's own sign-in screen full screen is S1.5, on the
-# NUC. gamescope draws with Vulkan, which a box with no GPU gets from Mesa's
-# software one.
+# called steam shows a full-screen window until it's asked to quit, as Exit
+# Steam does. gamescope needs a GPU too: on Mesa's software Vulkan it crashes
+# in libvulkan_lvp.so. So gamescope has a stand-in as well, which notes how
+# the screen daemon started it and runs what comes after its --. The screen
+# daemon knows Steam's window as one from the gamescope it started, so the
+# rest is the box's own. Steam's own sign-in screen full screen in its real
+# gamescope is S1.5, on the NUC.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
-source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/repos.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -49,23 +51,31 @@ ssh_sudo "record=/var/lib/agentv/apps/installed.json; [[ -f \$record ]] || echo 
 check "Steam's app is on home's list of apps" \
   ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home | jq -e '.apps[] | select(.id == \"agentv.steam\")' >/dev/null"
 
-# The stand-in, where Steam's own package puts steam, and Vulkan for gamescope.
+# The stand-ins, where Steam's and gamescope's own packages put them, on
+# this throwaway box only.
 ssh_guest "cat >/tmp/steam" <<'STEAM'
 #!/bin/bash
-# A stand-in for Steam in AgenTV's S3.5 image check: a window that fills
-# gamescope, until /tmp/agentv-steam-quit appears, as Exit Steam does.
+# A stand-in for Steam in AgenTV's S3.5 image check: a full-screen window,
+# until /tmp/agentv-steam-quit appears, as Exit Steam does.
 rm -f /tmp/agentv-steam-quit
-mpv --idle=yes --force-window=yes --fs --vo=x11 --no-audio --no-terminal --title=steam-stand-in &
+mpv --idle=yes --force-window=yes --fs --no-audio --no-terminal --title=steam-stand-in &
 player=$!
 while [[ ! -e /tmp/agentv-steam-quit ]] && kill -0 "$player" 2>/dev/null; do sleep 0.2; done
 kill "$player" 2>/dev/null
 wait "$player" 2>/dev/null
 exit 0
 STEAM
-ssh_sudo "install -m 755 /tmp/steam /usr/bin/steam"
-check "the box reads its package repositories" sync_repos
-ssh_sudo "pacman -S --noconfirm --needed vulkan-swrast" >"$RUN_DIR/vulkan.log" 2>&1 || true
-check "gamescope has a Vulkan device to draw with" ssh_guest "ls /usr/share/vulkan/icd.d/ | grep -q lvp"
+ssh_guest "cat >/tmp/gamescope" <<'GAMESCOPE'
+#!/bin/bash
+# A stand-in for gamescope in AgenTV's S3.5 image check, which has no GPU:
+# it notes how it was started and runs what comes after --, and it ends when
+# that does, as gamescope does.
+printf '%s\n' "$*" >/tmp/agentv-gamescope-args
+while (( $# > 0 )) && [[ $1 != "--" ]]; do shift; done
+shift
+"$@"
+GAMESCOPE
+ssh_sudo "install -m 755 /tmp/steam /usr/bin/steam && install -m 755 /tmp/gamescope /usr/bin/gamescope"
 
 # wait_front <role> <seconds>: until <role> is in front.
 wait_front() {
@@ -98,7 +108,7 @@ game_running() {
 # Steam doesn't come up.
 said() {
   log "agentv screen app said: $(tail -n 1 "$RUN_DIR/screen.log")"
-  guest "journalctl --user -b --no-pager -u agentv-screen | grep -iE 'steam|gamescope|vulkan|xwayland' | tail -n 25" 2>/dev/null |
+  guest "journalctl --user -b --no-pager -u agentv-screen | grep -iE 'steam|gamescope|mpv' | tail -n 25" 2>/dev/null |
     while IFS= read -r line; do log "screen daemon: $line"; done
 }
 
@@ -109,6 +119,15 @@ check "S3.5 Steam opens in front, in its gamescope" test "$up" = yes
 [[ $up == yes ]] || said
 sleep 3
 check "S3.5 it fills the screen" fills_screen
+# How the screen daemon started gamescope: full screen, at the TV's mode,
+# with Steam's Big Picture.
+mode=$(guest_hyprctl "-j monitors" 2>/dev/null | jq -r '.[0] | "-W \(.width) -H \(.height)"' 2>/dev/null || true)
+started=$(ssh_guest "cat /tmp/agentv-gamescope-args" 2>/dev/null || true)
+log "gamescope was started with: $started"
+started_right() {
+  [[ -n $mode && " $started " == *" -f "* && " $started " == *" $mode "* && $started == *"-- steam -gamepadui" ]]
+}
+check "S3.5 Steam starts in gamescope, full screen at the TV's mode ($mode), as Big Picture" started_right
 capture_console "success-S3.5-steam"
 guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen-daemon.log" 2>&1 || true
 
