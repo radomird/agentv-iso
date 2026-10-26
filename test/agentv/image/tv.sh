@@ -51,6 +51,22 @@ wait_tv() {
   return 1
 }
 
+# wait_home <seconds>: until home is in front, for a box that's been set up,
+# which shows no welcome page as it starts for wait_tv to wait for. Prints how
+# many seconds it took.
+wait_home() {
+  local started=$SECONDS
+
+  while (( SECONDS - started < $1 )); do
+    if [[ $(front '.front.role // ""') == "home" ]]; then
+      echo $(( SECONDS - started ))
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 # wait_running <version> <seconds>: until AgenTV's daemon and screen daemon
 # both run agentv <version> (/health and agentv screen status say which
 # package each process started from) and the home screen is in front again.

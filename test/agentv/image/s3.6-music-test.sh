@@ -168,10 +168,14 @@ guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen.log" 
 # ADR-038: after a restart, the share with a password is back with no one
 # asked, and so is its album.
 log "Restarting the box: the share with a password comes back on its own"
+boot=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
 ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
-sleep 15
+started=$SECONDS
+while [[ $(ssh_guest "cat /proc/sys/kernel/random/boot_id" 2>/dev/null || echo "$boot") == "$boot" ]] && (( SECONDS - started < 120 )); do sleep 3; done
 wait_for_ssh 300 failure-music-reboot-ssh-timeout || exit 1
-wait_tv 240 >/dev/null || true
+check "the box restarted" test "$(ssh_guest "cat /proc/sys/kernel/random/boot_id")" != "$boot"
+took=$(wait_home 240) || took="over 240"
+log "Home was in front $took s after SSH answered"
 mounted_again() {
   local started=$SECONDS
   while (( SECONDS - started < 120 )); do
