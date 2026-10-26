@@ -81,7 +81,7 @@ cat >"$dir/manifest.json" <<'JSON'
     "homeUrl": "http://127.0.0.1:8765/",
     "origins": ["http://127.0.0.1:8765"],
     "capabilities": ["launch"],
-    "kidsSafe": true
+    "childSafe": true
   }
 }
 JSON
