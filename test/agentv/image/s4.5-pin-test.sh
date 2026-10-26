@@ -4,7 +4,8 @@
 # agentv-pin-check, with no terminal as from Super+Ctrl+Home, asks on the
 # TV's pad and refuses when it's cancelled or wrong; Settings → Omarchy
 # desktop asks for it too; a guarded request without the PIN is refused; the
-# user account can't read where it's kept; and after a restart the TV is
+# user account can't read where it's kept. After a restart, a profile that
+# doesn't ask for the PIN opens without it, and one that does (ADR-034) is
 # locked until it's typed in, with keys from the virtual input device as the
 # remote would.
 
@@ -95,11 +96,28 @@ guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 3
 check "and without it, the TV session stays" test "$(front '.front.role // ""')" = "home"
 
-# After a restart the TV is locked, until the PIN.
-ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
-sleep 15
-wait_for_ssh 300 failure-pin-reboot-ssh-timeout || { check "the box came back" false; stop_vm; finish; }
-wait_tv 240 >/dev/null || true
+restart() {
+  ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
+  sleep 15
+  wait_for_ssh 300 "failure-pin-reboot-$1-ssh-timeout" || { check "the box came back" false; stop_vm; finish; }
+  wait_tv 240 >/dev/null || true
+}
+
+# After a restart, a profile that doesn't ask for the PIN opens without it
+# (ADR-034).
+restart open
+check "ADR-034 after a restart, a profile that doesn't ask for the PIN isn't locked" jq -e '.set == true and .locked == false' <<<"$(pin_status)"
+started=$SECONDS
+until says "success-pin-open" "installed" || (( SECONDS - started > 60 )); do sleep 3; done
+check "ADR-034 and home is there, with no pad (OCR)" says "success-pin-open" "installed"
+
+# The owner's profile asks for it now: after a restart the TV is locked,
+# until the PIN.
+owner=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/viewers" 2>/dev/null | jq -r '.active // empty')
+grant=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"pin\":\"4826\"}' http://127.0.0.1:3000/api/pin/check" 2>/dev/null | jq -r '.grant // empty')
+ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -H 'X-AgenTV-Grant: $grant' -d '{\"locked\":true}' http://127.0.0.1:3000/api/viewers/$owner" >"$RUN_DIR/lock-profile.json" 2>&1 || true
+check "ADR-034 the owner's profile asks for the PIN to open" jq -e '.profile.locked == true' "$RUN_DIR/lock-profile.json"
+restart locked
 check "S4.5 after a restart the TV is locked" jq -e '.set == true and .locked == true' <<<"$(pin_status)"
 check "S4.5 and shows the pad, not home (OCR)" wait_pad "success-pin-locked" 60
 guest "agentv input key 4 8 2 6" >>"$RUN_DIR/input.log" 2>&1 || true
