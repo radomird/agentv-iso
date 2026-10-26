@@ -30,8 +30,19 @@ wait_for_ssh 300 failure-hotspot-ssh-timeout || exit 1
 passwordless_sudo
 wait_tv 240 >/dev/null || { capture_console "failure-hotspot-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 
-# First boot on Ethernet: the check ran and left the hotspot closed.
-check "the first-boot check is enabled" ssh_guest "systemctl is-enabled agentv-hotspot-boot.service"
+# First boot on Ethernet: the check ran and left the hotspot closed. The
+# package enables it through /usr/lib's multi-user.target.wants, which
+# systemctl is-enabled doesn't count, so this asks whether boot wanted it and
+# whether it ran.
+wanted_at_boot() {
+  ssh_guest "systemctl list-dependencies --plain --no-pager multi-user.target" 2>/dev/null | grep -q "agentv-hotspot-boot.service"
+}
+check "the first-boot check is wanted at boot" wanted_at_boot
+ran_at_boot() {
+  [[ $(ssh_guest "systemctl show -p ExecMainStartTimestampMonotonic --value agentv-hotspot-boot.service" 2>/dev/null) =~ ^[1-9] ]] &&
+    [[ $(ssh_guest "systemctl show -p ExecMainStatus --value agentv-hotspot-boot.service" 2>/dev/null) == "0" ]]
+}
+check "and it ran, and finished" ran_at_boot
 check "its hand-over to root is waiting" ssh_guest "systemctl is-active agentv-hotspot.path"
 closed() {
   [[ $(ssh_guest "systemctl is-active agentv-hotspot.service" 2>/dev/null) != "active" ]]
@@ -58,20 +69,24 @@ box_if=$(ssh_guest "nmcli -t -f DEVICE,TYPE device status | awk -F: '\$2 == \"wi
 check "and the box keeps one for itself" test -n "$box_if"
 
 # The home Wi-Fi: an access point with WPA2, and addresses from its own
-# dnsmasq.
-ssh_sudo "cat >/run/agentv-test-home.conf <<EOF
+# dnsmasq. Passwords go to the box through stdin, never on sudo's command
+# line, which sudo writes to the journal.
+private_file() {
+  ssh_guest "sudo sh -c 'umask 077 && cat >$1'"
+}
+private_file /run/agentv-test-home.conf <<EOF
 network={
-  ssid=\"$HOME_SSID\"
+  ssid="$HOME_SSID"
   mode=2
   frequency=2437
   key_mgmt=WPA-PSK
   proto=RSN
   pairwise=CCMP
   group=CCMP
-  psk=\"$HOME_PASSWORD\"
+  psk="$HOME_PASSWORD"
 }
 EOF
-ip netns exec home ip link set lo up
+ssh_sudo "ip netns exec home ip link set lo up
 ip netns exec home ip link set $home_if up
 ip netns exec home wpa_supplicant -B -i $home_if -c /run/agentv-test-home.conf -P /run/agentv-test-home-wpa.pid
 ip netns exec home ip addr add 192.168.77.1/24 dev $home_if
@@ -80,9 +95,25 @@ ip netns exec home dnsmasq --conf-file=/dev/null --port=0 --interface=$home_if -
   --pid-file=/run/agentv-test-home-dnsmasq.pid --dhcp-leasefile=/run/agentv-test-home.leases" >"$RUN_DIR/home.log" 2>&1 || true
 cat "$RUN_DIR/home.log"
 home_up() {
-  ssh_sudo "ip netns exec home iw dev $home_if info" 2>/dev/null | grep -q "type AP"
+  local _
+  for _ in $(seq 1 20); do
+    ssh_sudo "ip netns exec home iw dev $home_if info" 2>/dev/null | grep -q "type AP" && return 0
+    sleep 1
+  done
+  return 1
 }
 check "the home Wi-Fi is up as an access point" home_up
+# The box has to see it before it opens its own network, as a box that's
+# setting up does.
+box_sees_home() {
+  local _
+  for _ in $(seq 1 20); do
+    ssh_sudo "nmcli -t -f SSID device wifi list --rescan yes ifname $box_if" 2>/dev/null | grep -qx "$HOME_SSID" && return 0
+    sleep 2
+  done
+  return 1
+}
+check "the box can see it" box_sees_home
 
 # The hotspot, opened from a terminal.
 guest "agentv hotspot start" >"$RUN_DIR/start.txt" 2>&1 || true
@@ -104,7 +135,7 @@ check "the box's radio is an access point" ap_mode
 saw_home() {
   ssh_guest "jq -e 'map(.ssid) | index(\"$HOME_SSID\") != null' /run/agentv-hotspot/networks.json" >/dev/null 2>&1
 }
-check "it saw the home Wi-Fi before it opened" saw_home
+check "it saw the home Wi-Fi before it opened" saw_home || ssh_guest "cat /run/agentv-hotspot/networks.json"
 holes() {
   ssh_sudo "iptables -S; iptables -t nat -S" 2>/dev/null | grep -c "agentv-setup-hotspot" || true
 }
@@ -124,17 +155,17 @@ check "with the hotspot's QR code" qr
 
 # The phone joins it.
 ssh_guest "cat >/tmp/agentv-phone.py" <"$DIR/phone.py"
-ssh_sudo "mkdir -p /etc/netns/phone && cat >/run/agentv-test-phone.conf <<EOF
+private_file /run/agentv-test-phone.conf <<EOF
 network={
-  ssid=\"$ssid\"
+  ssid="$ssid"
   key_mgmt=WPA-PSK
   proto=RSN
   pairwise=CCMP
   group=CCMP
-  psk=\"$password\"
+  psk="$password"
 }
 EOF
-ip netns exec phone ip link set lo up
+ssh_sudo "ip netns exec phone ip link set lo up
 ip netns exec phone sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.default.rp_filter=0 net.ipv4.conf.$phone_if.rp_filter=0
 ip netns exec phone ip link set $phone_if up
 ip netns exec phone wpa_supplicant -B -i $phone_if -c /run/agentv-test-phone.conf -P /run/agentv-test-phone-wpa.pid" >"$RUN_DIR/phone.log" 2>&1 || true
@@ -181,7 +212,8 @@ check "it lists the home Wi-Fi" jq -e --arg ssid "$HOME_SSID" '.networks | map(.
 
 # A wrong password: the hotspot comes back, with the reason.
 join() {
-  phone_curl "-H 'Content-Type: application/json' -d '{\"ssid\":\"$HOME_SSID\",\"password\":\"$1\"}' http://10.42.0.1/api/setup/wifi"
+  jq -cn --arg ssid "$HOME_SSID" --arg password "$1" '{ssid: $ssid, password: $password}' | private_file /run/agentv-test-join.json
+  phone_curl "-H 'Content-Type: application/json' -d @/run/agentv-test-join.json http://10.42.0.1/api/setup/wifi"
 }
 asked=$(join "not-the-password")
 check "the phone asks the box to join it" jq -e '.ok == true' <<<"$asked"
@@ -240,10 +272,20 @@ ssh_sudo "journalctl -b --no-pager" >"$RUN_DIR/journal.txt" 2>/dev/null || true
 check "the password is in no log" bash -c "! grep -q '$HOME_PASSWORD' '$RUN_DIR/journal.txt'"
 
 # The welcome screen moves on to pairing.
-sleep 4
-ocr_screen >"$RUN_DIR/welcome-joined.txt" 2>/dev/null || true
+# Read for up to 15 s, and say what OCR read when it doesn't find it.
+welcome_joined() {
+  local _
+  for _ in $(seq 1 15); do
+    ocr_screen >"$RUN_DIR/welcome-joined.txt" 2>/dev/null || true
+    grep -Eqi "tv is on|pair it" "$RUN_DIR/welcome-joined.txt" && return 0
+    sleep 1
+  done
+  log "What OCR read on the welcome screen:"
+  cat "$RUN_DIR/welcome-joined.txt"
+  return 1
+}
+check "the welcome screen says the TV is on the home Wi-Fi, and to pair the phone (OCR)" welcome_joined
 capture_console "success-hotspot-joined"
-check "the welcome screen says the TV is on the home Wi-Fi (OCR)" grep -qi "the tv is on" "$RUN_DIR/welcome-joined.txt"
 paired_qr() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones" 2>/dev/null | jq -e --arg net "192.168.77." '.pairing.url // "" | contains($net)' >/dev/null
 }
