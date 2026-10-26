@@ -99,6 +99,9 @@ cat "$RUN_DIR/screen-after-update.json"
 check "S1.6 nothing the update opened is on the TV" \
   test "$(jq -r '[.windows[] | select(.workspace == "1" and .role != "home")] | length' "$RUN_DIR/screen-after-update.json")" = "0"
 check "S1.6 after the update the screen shows the TV (OCR)" screen_shows_welcome "success-S1.6-after-update"
+# Omarchy's update ends by restarting its shell in the session that's
+# running; the TV session stops it again.
+check "S1.6 after an update from a terminal, Omarchy's shell isn't on the TV: no bar, no process (ADR-031)" no_omarchy_shell 30
 
 ssh_sudo "snapper -c root list" >"$RUN_DIR/snapshots.txt" 2>&1 || true
 stop_vm

@@ -96,11 +96,17 @@ guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 3
 check "and without it, the TV session stays" test "$(front '.front.role // ""')" = "home"
 
+# The box is set up, so it shows no welcome page as it starts: wait for a new
+# boot, then for the TV session, not for the welcome page.
 restart() {
+  local boot started
+  boot=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
   ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
-  sleep 15
+  started=$SECONDS
+  while [[ $(ssh_guest "cat /proc/sys/kernel/random/boot_id" 2>/dev/null || echo "$boot") == "$boot" ]] && (( SECONDS - started < 120 )); do sleep 3; done
   wait_for_ssh 300 "failure-pin-reboot-$1-ssh-timeout" || { check "the box came back" false; stop_vm; finish; }
-  wait_tv 240 >/dev/null || true
+  check "the box restarted ($1)" test "$(ssh_guest "cat /proc/sys/kernel/random/boot_id")" != "$boot"
+  wait_home 240 >/dev/null || true
 }
 
 # After a restart, a profile that doesn't ask for the PIN opens without it
