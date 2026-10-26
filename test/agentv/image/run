@@ -4,6 +4,12 @@
 # upstream's ./test/integration <iso> made: every *-test.sh here, or the ones
 # named, each in its own VM, even after one fails.
 #
+# With AGENTV_TEST_LANES=2 they run two VMs at a time. Each lane has its own
+# SSH port (and the ports a check opens beside it), its own half of the CPUs,
+# so its VM gets that half (upstream gives a VM every CPU it can use), and
+# 6 GB of memory, and takes the next check from one list, the slow ones
+# first. A check's output is printed whole when it ends, so two never mix.
+#
 # Usage: test/agentv/image/run <iso> [<check>...]
 
 set -euo pipefail
@@ -12,12 +18,23 @@ DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 iso="${1:?usage: test/agentv/image/run <iso> [<check>...]}"
 shift
 
+lanes=${AGENTV_TEST_LANES:-1}
+[[ $lanes =~ ^[1-4]$ ]] || { echo "AGENTV_TEST_LANES is 1 to 4" >&2; exit 2; }
+
 # What ./test/integration exports for its own scenarios.
 export OMARCHY_INTEGRATION_ISO
 OMARCHY_INTEGRATION_ISO=$(realpath "$iso")
 export OMARCHY_INTEGRATION_SSH_PORT="${OMARCHY_INTEGRATION_SSH_PORT:-2322}"
-export OMARCHY_INTEGRATION_MEMORY="${OMARCHY_INTEGRATION_MEMORY:-8192}"
+if (( lanes > 1 )); then
+  export OMARCHY_INTEGRATION_MEMORY="${OMARCHY_INTEGRATION_MEMORY:-6144}"
+else
+  export OMARCHY_INTEGRATION_MEMORY="${OMARCHY_INTEGRATION_MEMORY:-8192}"
+fi
 export OMARCHY_INTEGRATION_NO_PREVIEW=true
+
+# The slow ones first, so two lanes end near the same time: each restarts
+# the box, waits out the idle minutes, or updates it.
+SLOW=(s4.5-pin idle s1.1-tv-session update-tv s3.6-music s4-hotspot home selftest)
 
 tests=()
 if (( $# > 0 )); then
@@ -25,15 +42,59 @@ if (( $# > 0 )); then
     tests+=("$DIR/$name-test.sh")
   done
 else
-  tests=("$DIR"/*-test.sh)
+  for name in "${SLOW[@]}"; do
+    [[ -f $DIR/$name-test.sh ]] && tests+=("$DIR/$name-test.sh")
+  done
+  for test in "$DIR"/*-test.sh; do
+    name=${test##*/}
+    [[ " ${SLOW[*]} " == *" ${name%-test.sh} "* ]] || tests+=("$test")
+  done
 fi
 
-failed=()
-for test in "${tests[@]}"; do
-  printf '\033[1;35m==> %s\033[0m\n' "${test##*/}"
-  env -u SCENARIO bash "$test" || failed+=("${test##*/}")
-done
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+: >"$work/failed"
 
+# One lane: the next check no other lane has claimed, until none are left.
+lane() {
+  local n=$1 cpus=$2 test name status
+  for test in "${tests[@]}"; do
+    name=${test##*/}
+    mkdir "$work/$name.claim" 2>/dev/null || continue
+    if (( lanes == 1 )); then
+      printf '\033[1;35m==> %s\033[0m\n' "$name"
+      env -u SCENARIO bash "$test" || echo "$name" >>"$work/failed"
+      continue
+    fi
+    status=0
+    OMARCHY_INTEGRATION_SSH_PORT=$(( 2322 + 20 * n )) taskset -c "$cpus" env -u SCENARIO bash "$test" >"$work/$name.log" 2>&1 || status=$?
+    {
+      flock 9
+      printf '\033[1;35m==> %s\033[0m\n' "$name"
+      cat "$work/$name.log"
+      if (( status != 0 )); then echo "$name" >>"$work/failed"; fi
+    } 9>"$work/print.lock"
+  done
+}
+
+if (( lanes > 1 )); then
+  total=$(nproc)
+  per=$(( total / lanes > 0 ? total / lanes : 1 ))
+  pids=()
+  for (( n = 0; n < lanes; n++ )); do
+    first=$(( n * per % total ))
+    last=$(( first + per - 1 < total ? first + per - 1 : total - 1 ))
+    lane "$n" "$first-$last" &
+    pids+=($!)
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || true
+  done
+else
+  lane 0 ""
+fi
+
+mapfile -t failed <"$work/failed"
 if (( ${#failed[@]} > 0 )); then
   printf '\n%d AgenTV image check(s) failed:\n' "${#failed[@]}" >&2
   printf '  %s\n' "${failed[@]}" >&2
