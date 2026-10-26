@@ -67,7 +67,10 @@ for key in up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
-check "continue finishes setup" until_json /api/setup '.setup.done' 30
+# Continue moves setup on: to its background once that step is there, or
+# home. The background has a check of its own, so it skips it.
+check "continue moves setup on from its look" until_json /api/setup '.setup.done or (.setup.step != "theme")' 30
+guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "and home takes over${took:+ (after $took s)}" test -n "$took"
 sleep 3

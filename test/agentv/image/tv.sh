@@ -122,14 +122,16 @@ screen_shows_welcome() {
 }
 
 # ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
-# any case) on the screen. Each try reads one screenshot three ways: as a
+# any case) on the screen. Each try reads one screenshot four ways: as a
 # block of text, as ocr_screen does; as scattered text, which still reads a
 # headline with a QR code beside it, where the block reading turns to noise
-# at a VM's small screen; and the right 62% as a block, larger, which leaves
-# out a QR code on the left. What it read last is in $RUN_DIR/<name>.txt,
-# and the screenshot in $RUN_DIR/.ocr.ppm.
+# at a VM's small screen; the right 62% as a block, larger, which leaves
+# out a QR code on the left; and the bottom 30% as a block, larger, where a
+# small line such as the ambient screen's credit sits over a picture. What
+# it read last is in $RUN_DIR/<name>.txt, and the screenshot in
+# $RUN_DIR/.ocr.ppm.
 ocr_finds() {
-  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png"
+  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png"
 
   while true; do
     : >"$RUN_DIR/$1.txt"
@@ -141,6 +143,8 @@ ocr_finds() {
         tesseract "$prepped" - --psm 11 2>/dev/null
         magick "$shot" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
           tesseract "$right" - --psm 6 2>/dev/null
+        magick "$shot" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
+          tesseract "$bottom" - --psm 6 2>/dev/null
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
