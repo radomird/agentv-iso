@@ -135,7 +135,9 @@ check "the box's radio is an access point" ap_mode
 saw_home() {
   ssh_guest "jq -e 'map(.ssid) | index(\"$HOME_SSID\") != null' /run/agentv-hotspot/networks.json" >/dev/null 2>&1
 }
-check "it saw the home Wi-Fi before it opened" saw_home || ssh_guest "cat /run/agentv-hotspot/networks.json"
+before=$FAILURES
+check "it saw the home Wi-Fi before it opened" saw_home
+(( FAILURES == before )) || ssh_guest "cat /run/agentv-hotspot/networks.json"
 holes() {
   ssh_sudo "iptables -S; iptables -t nat -S" 2>/dev/null | grep -c "agentv-setup-hotspot" || true
 }
@@ -144,10 +146,8 @@ ssh_sudo "iptables -t nat -S PREROUTING" >"$RUN_DIR/nat.txt" 2>&1 || true
 check "port 80 goes to the captive page" grep -q -- "-i $box_if -p tcp -m tcp --dport 80 .*agentv-setup-hotspot.* -j REDIRECT --to-ports 3002" "$RUN_DIR/nat.txt"
 
 # The welcome screen shows its QR code.
-sleep 4
-ocr_screen >"$RUN_DIR/welcome.txt" 2>/dev/null || true
+check "the welcome screen says to scan it (OCR)" ocr_finds welcome "scan this" 15
 capture_console "success-hotspot-welcome"
-check "the welcome screen says to scan it (OCR)" grep -qi "scan this" "$RUN_DIR/welcome.txt"
 qr() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/hotspot/qr" 2>/dev/null | grep -q "<svg"
 }
@@ -272,20 +272,20 @@ ssh_sudo "journalctl -b --no-pager" >"$RUN_DIR/journal.txt" 2>/dev/null || true
 check "the password is in no log" bash -c "! grep -q '$HOME_PASSWORD' '$RUN_DIR/journal.txt'"
 
 # The welcome screen moves on to pairing.
-# Read for up to 15 s, and say what OCR read when it doesn't find it.
-welcome_joined() {
-  local _
-  for _ in $(seq 1 15); do
-    ocr_screen >"$RUN_DIR/welcome-joined.txt" 2>/dev/null || true
-    grep -Eqi "tv is on|pair it" "$RUN_DIR/welcome-joined.txt" && return 0
-    sleep 1
-  done
+# Read for up to 15 s. check keeps what it runs quiet, so what OCR read is
+# printed after it, when it didn't find it.
+before=$FAILURES
+check "the welcome screen says the TV is on the home Wi-Fi, and to pair the phone (OCR)" ocr_finds welcome-joined "tv is on|pair it" 15
+if (( FAILURES > before )); then
+  capture_console "failure-hotspot-joined"
   log "What OCR read on the welcome screen:"
   cat "$RUN_DIR/welcome-joined.txt"
-  return 1
-}
-check "the welcome screen says the TV is on the home Wi-Fi, and to pair the phone (OCR)" welcome_joined
-capture_console "success-hotspot-joined"
+  log "What the screen daemon says is in front, and the hotspot's state:"
+  screen_status
+  state
+else
+  capture_console "success-hotspot-joined"
+fi
 paired_qr() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones" 2>/dev/null | jq -e --arg net "192.168.77." '.pairing.url // "" | contains($net)' >/dev/null
 }
