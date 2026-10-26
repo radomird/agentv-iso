@@ -56,13 +56,21 @@ check "Steam's app is on home's list of apps" \
 ssh_guest "cat >/tmp/steam" <<'STEAM'
 #!/bin/bash
 # A stand-in for Steam in AgenTV's S3.5 image check: a full-screen window,
-# until /tmp/agentv-steam-quit appears, as Exit Steam does.
+# drawn without a GPU, until /tmp/agentv-steam-quit appears, as Exit Steam
+# does. mpv draws it in shared memory; if that doesn't stay up, Chromium
+# draws it instead.
 rm -f /tmp/agentv-steam-quit
-mpv --idle=yes --force-window=yes --fs --no-audio --no-terminal --title=steam-stand-in &
-player=$!
-while [[ ! -e /tmp/agentv-steam-quit ]] && kill -0 "$player" 2>/dev/null; do sleep 0.2; done
-kill "$player" 2>/dev/null
-wait "$player" 2>/dev/null
+mpv --vo=wlshm --idle=yes --force-window=yes --fs --no-audio --no-terminal --title=steam-stand-in &
+window=$!
+sleep 3
+if ! kill -0 "$window" 2>/dev/null; then
+  chromium --ozone-platform=wayland --user-data-dir=/tmp/agentv-steam-stand-in --no-first-run --kiosk \
+    "data:text/html,<title>steam-stand-in</title><body style='background:%23123'>" &
+  window=$!
+fi
+while [[ ! -e /tmp/agentv-steam-quit ]] && kill -0 "$window" 2>/dev/null; do sleep 0.2; done
+kill "$window" 2>/dev/null
+wait "$window" 2>/dev/null
 exit 0
 STEAM
 ssh_guest "cat >/tmp/gamescope" <<'GAMESCOPE'
@@ -101,14 +109,14 @@ fills_screen() {
 # The game running behind home: gamescope and the stand-in's window. The
 # bracket keeps pgrep from finding its own command line.
 game_running() {
-  ssh_guest "pgrep -x gamescope >/dev/null && pgrep -f 'title=steam-stand-i[n]' >/dev/null"
+  ssh_guest "pgrep -x gamescope >/dev/null && pgrep -f 'steam-stand-i[n]' >/dev/null"
 }
 
 # What the screen daemon and gamescope said, in the run's own log, for when
 # Steam doesn't come up.
 said() {
   log "agentv screen app said: $(tail -n 1 "$RUN_DIR/screen.log")"
-  guest "journalctl --user -b --no-pager -u agentv-screen | grep -iE 'steam|gamescope|mpv' | tail -n 25" 2>/dev/null |
+  guest "journalctl --user -b --no-pager -u agentv-screen | grep -iE 'steam|gamescope|mpv|chromium' | grep -v '^ *#' | tail -n 25" 2>/dev/null |
     while IFS= read -r line; do log "screen daemon: $line"; done
 }
 
