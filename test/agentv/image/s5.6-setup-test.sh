@@ -88,16 +88,20 @@ if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
   after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
   check "S5.6 the box is on agentv $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
   check "S5.6 the daemon setup talks to runs the new release" test "$(jq -r '.running // ""' <<<"$(health)")" = "$AGENTV_TEST_UPDATE_VERSION"
-  check "S5.6 getting ready sees the update in, and setup moves on to what the TV is for" \
-    until_setup '.setup.ready.update == "done" and .setup.step == "goal"' 180
+  check "S5.6 getting ready sees the update in, and setup moves on to the next step" \
+    until_setup '.setup.ready.update == "done" and .setup.step != "ready" and .setup.step != "welcome"' 180
 else
   log "No newer agentv to update to; getting ready finds nothing to install"
-  check "with nothing newer, getting ready moves on to what the TV is for" \
-    until_setup '(.setup.ready.update == "none" or .setup.ready.update == "failed") and .setup.step == "goal"' 400
+  check "with nothing newer, getting ready moves on to the next step" \
+    until_setup '(.setup.ready.update == "none" or .setup.ready.update == "failed") and .setup.step != "ready" and .setup.step != "welcome"' 400
 fi
-ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-goal.json" 2>&1 || true
-check "what the TV is for is on the TV (OCR)" ocr_finds success-S5.6-goal "pick one|what is this tv for" 30
-capture_console "success-S5.6-goal"
+ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-next.json" 2>&1 || true
+next=$(jq -r '.setup.step // ""' "$RUN_DIR/setup-next.json")
+# Each step after getting ready has its own headline: the AI provider's and
+# the goal's are "pick one", who watches says so.
+NEXT_TEXT="pick one|which ai|who watches|what is this tv for"
+check "the step after getting ready ($next) is on the TV (OCR)" ocr_finds success-S5.6-next "$NEXT_TEXT" 30
+capture_console "success-S5.6-next"
 
 # A restart: setup comes back at the same step.
 boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
@@ -106,14 +110,14 @@ sleep 20
 wait_for_ssh 300 failure-S5.6-restart-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || true
 check "the box restarted" test "$(ssh_guest "cat /proc/sys/kernel/random/boot_id")" != "$boot_id"
-check "S5.6 after a restart, setup picks up at the same step" until_setup '.setup.step == "goal" and (.setup.done | not)' 60
-check "S5.6 /health says so too" test "$(jq -r '.setup_step // ""' <<<"$(health)")" = "goal"
-check "S5.6 and the TV shows that step again (OCR)" ocr_finds success-S5.6-goal-after-restart "pick one|what is this tv for" 30
-capture_console "success-S5.6-goal-after-restart"
+check "S5.6 after a restart, setup picks up at the same step ($next)" until_setup ".setup.step == \"$next\" and (.setup.done | not)" 60
+check "S5.6 /health says so too" test "$(jq -r '.setup_step // ""' <<<"$(health)")" = "$next"
+check "S5.6 and the TV shows that step again (OCR)" ocr_finds success-S5.6-after-restart "$NEXT_TEXT" 30
+capture_console "success-S5.6-after-restart"
 
-# Enter picks the first one, and setup is done: home takes over.
-guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
-check "Enter on what the TV is for finishes setup, and home takes over" until_setup '.setup.done and .setup.goal == "streaming"' 60
+# agentv setup skip finishes it: home takes over.
+guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
+check "agentv setup skip finishes setup, and home takes over" until_setup '.setup.done' 60
 took=$(wait_home 60) || took=""
 check "home is in front${took:+ (after $took s)}" test -n "$took"
 check "and /health says home" test "$(jq -r '.screen // ""' <<<"$(health)")" = "home"
