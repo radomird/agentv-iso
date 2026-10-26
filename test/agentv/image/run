@@ -35,6 +35,9 @@ export OMARCHY_INTEGRATION_NO_PREVIEW=true
 # The slow ones first, so two lanes end near the same time: each restarts
 # the box, waits out the idle minutes, or updates it.
 SLOW=(s4.5-pin idle s1.1-tv-session update-tv s3.6-music s4-hotspot home selftest)
+# The checks that look at the ISO itself, which a run from the night's disk
+# (AGENTV_TEST_NO_ISO, ci --from-disk) doesn't have.
+NEEDS_ISO=(s0.4-branding)
 
 tests=()
 if (( $# > 0 )); then
@@ -49,6 +52,18 @@ else
     name=${test##*/}
     [[ " ${SLOW[*]} " == *" ${name%-test.sh} "* ]] || tests+=("$test")
   done
+fi
+if [[ -n ${AGENTV_TEST_NO_ISO:-} ]]; then
+  kept=()
+  for test in "${tests[@]}"; do
+    name=${test##*/}
+    if [[ " ${NEEDS_ISO[*]} " == *" ${name%-test.sh} "* ]]; then
+      printf "==> %s: skipped, since this run started from the night's disk and has no ISO\n" "$name"
+    else
+      kept+=("$test")
+    fi
+  done
+  tests=(${kept[@]+"${kept[@]}"})
 fi
 
 work=$(mktemp -d)
