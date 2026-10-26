@@ -61,16 +61,19 @@ check "S1.1 after three idle minutes the home screen is still in front" \
   test "$(front '.front.role')" = "home"
 
 # The virtual input device (ADR-008): keys sent to it reach the home screen.
+# Not Enter: on setup's welcome screen it carries on to getting ready, which
+# updates the box first. On a pull request's run that's edge's agentv, often
+# newer than the one being checked, and the update restarts the TV session.
 guest_hyprctl "-j devices" >"$RUN_DIR/devices.json" 2>&1 || true
 check "the virtual input device is on: Hyprland sees AgenTV remote" \
   jq -e '[.keyboards[].name] | any(test("agentv-remote"))' "$RUN_DIR/devices.json"
 guest "agentv screen keys 6" >"$RUN_DIR/keys.json" 2>&1 &
 keys=$!
 sleep 2
-guest "agentv input key up down enter" >"$RUN_DIR/input.txt" 2>&1 || true
+guest "agentv input key up down right" >"$RUN_DIR/input.txt" 2>&1 || true
 wait "$keys" || true
 check "the virtual input device's keys reach the home screen" \
-  test "$(jq -c '.keys' "$RUN_DIR/keys.json" 2>/dev/null)" = '["ArrowUp","ArrowDown","Enter"]'
+  test "$(jq -c '.keys' "$RUN_DIR/keys.json" 2>/dev/null)" = '["ArrowUp","ArrowDown","ArrowRight"]'
 
 # A toast over the app in front (S1.5 on the NUC is a toast over a film).
 guest "agentv screen toast 'AgenTV toast over the TV'" >"$RUN_DIR/toast.json" 2>&1 || true
