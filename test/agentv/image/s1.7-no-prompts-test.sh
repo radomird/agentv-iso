@@ -54,9 +54,22 @@ prompts() {
   grep -aEoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' ' || true
 }
 
+# wait_title <words> <seconds>: until the window in front has the page's own
+# title, so the page has loaded and put the cursor in its first field. On a
+# busy box that comes a while after the window.
+wait_title() {
+  local started=$SECONDS
+  while (( SECONDS - started < $2 )); do
+    [[ $(front '.front.title // ""') == *"$1"* ]] && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "the sign-in page opens in the services' Chromium" wait_front web 60
-sleep 3
+check "the sign-in page has loaded" wait_title Anmelden 60
+sleep 1
 capture_console "success-S1.7-sign-in"
 
 # Typed the way the phone will: through the virtual keyboard, a Tab between
@@ -66,7 +79,15 @@ printf 'zuschauer.berlin\tS17-kennwort-%s\tErika Mustermann\tHauptstrasse 1\t101
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 6
 found=$(prompts "success-S1.7-signed-in")
-check "S1.7 the keyboard filled in the name and password, and the form was sent" \
+# What the name field got, in a word, so a miss says why without the password.
+case $(ssh_guest "grep -o 'benutzer=[^&]*' /tmp/agentv-sign-in/requests.log | tail -n 1" 2>/dev/null) in
+  benutzer=zuschauer.berlin) name="as typed" ;;
+  benutzer=S17-kennwort-*) name="the password, so the typing began before the page was ready" ;;
+  benutzer=) name="nothing" ;;
+  "") name="no form came" ;;
+  *) name="something else" ;;
+esac
+check "S1.7 the keyboard filled in the name and password, and the form was sent (name: $name)" \
   ssh_guest "grep -q 'benutzer=zuschauer.berlin&kennwort=S17-kennwort-[0-9]' /tmp/agentv-sign-in/requests.log"
 check "S1.7 the sign-in went through (OCR)" grep -aqi "angemeldet" "$RUN_DIR/success-S1.7-signed-in.txt"
 check "S1.7 after signing in, no Save password, Save address or card, or Translate bubble (saw: ${found:-nothing})" test -z "$found"
