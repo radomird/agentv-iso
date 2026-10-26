@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# The parent PIN on an installed box (ADR-009, S4.5). With a PIN set:
+# The adult PIN on an installed box (ADR-009, S4.5). With a PIN set:
 # agentv-pin-check, with no terminal as from Super+Ctrl+Home, asks on the
 # TV's pad and refuses when it's cancelled or wrong; Settings → Omarchy
 # desktop asks for it too; a guarded request without the PIN is refused; the
@@ -36,7 +36,7 @@ says() {
 # The pad on the TV, read off the screen, for up to <seconds>.
 wait_pad() {
   local found=0
-  ocr_finds "$1" "enter the parent pin" "$2" || found=1
+  ocr_finds "$1" "enter the adult pin" "$2" || found=1
   capture_console "$1"
   return $found
 }
@@ -72,7 +72,7 @@ check "the pad says what it's for (OCR)" grep -Eqi "omarchy|desk" "$RUN_DIR/succ
 guest "agentv input key back" >"$RUN_DIR/input.log" 2>&1 || true
 wait "$asking" || true
 check "S4.5 cancelled on the TV, agentv-pin-check refuses" grep -q "exit=1" "$RUN_DIR/check-cancel.log"
-check "and says it needs the PIN" grep -q "That needs the parent PIN." "$RUN_DIR/check-cancel.log"
+check "and says it needs the PIN" grep -q "That needs the adult PIN." "$RUN_DIR/check-cancel.log"
 
 # A wrong PIN is refused on the pad, and the right one lets it through.
 guest "agentv-pin-check desktop; echo exit=\$?" >"$RUN_DIR/check-right.log" 2>&1 &
