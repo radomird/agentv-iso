@@ -73,13 +73,15 @@ profiles() {
 # visits to that profile's page.
 opened_as() {
   local started=$SECONDS
-  until (( $(ssh_guest "grep -c 'GET /as/$1.html' $work/site/requests.log" 2>/dev/null || echo 0) >= $2 )); do
+  until (( $(ssh_guest "grep -c 'GET /as/$1.html' $work/site/requests.log || true" 2>/dev/null || echo 0) >= $2 )); do
     (( SECONDS - started < $3 )) || return 1
     sleep 1
   done
 }
+# How many times a profile's page was opened. grep -c prints 0 and fails
+# when there's none, so the failure is the count's, not the call's.
 visits() {
-  ssh_guest "grep -c 'GET /as/' $work/site/requests.log" 2>/dev/null || echo 0
+  ssh_guest "grep -c 'GET /as/${1:-}' $work/site/requests.log || true" 2>/dev/null || echo 0
 }
 
 # An adult opens it: it lists the service's profiles, and leaves it on the
@@ -115,7 +117,7 @@ guest "agentv screen quit $id" >/dev/null 2>&1 || true
 sleep 2
 guest "agentv screen app $id" >"$RUN_DIR/open-child.json" 2>&1 || true
 check "ADR-009 the app opened by a child opens the profile for children" opened_as kids 2 40
-check "and never an adult's" test "$(ssh_guest "grep -c 'GET /as/radomir.html' $work/site/requests.log" 2>/dev/null || echo 0)" = "0"
+check "and never an adult's" test "$(visits radomir.html)" = "0"
 
 # Back to an adult: opening it leaves the service's profile as it is.
 guest "agentv screen quit $id" >/dev/null 2>&1 || true
