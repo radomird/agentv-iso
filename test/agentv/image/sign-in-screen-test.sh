@@ -47,7 +47,7 @@ ssh_guest "mkdir -p /tmp/agentv-sign-in-check/app && cat >/tmp/agentv-sign-in-ch
   "schemaVersion": 1, "id": "$id", "name": "Sign-in check", "version": "1.0.0", "author": "agentv", "license": "MIT",
   "description": "A stand-in for a streaming service with a sign-in", "kinds": ["tv-app"], "entryPoints": { "tvApp": "app.ts" },
   "tv": { "contract": 1, "category": "streaming", "runtime": "web", "homeUrl": "$site/", "origins": ["$site"],
-    "capabilities": ["launch", "signIn"], "setup": [{ "type": "signIn" }], "kidsSafe": true }
+    "capabilities": ["launch", "signIn"], "setup": [{ "type": "signIn" }], "childSafe": true }
 }
 JSON
 ssh_guest "cat >/tmp/agentv-sign-in-check/app/app.ts" <<'APP'
