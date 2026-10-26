@@ -78,8 +78,9 @@ sleep 1
 check "a toast draws over the app in front, as an overlay" \
   test "$(front '[.layers[] | select(. == "agentv-toast")] | length')" -ge 1
 capture_console "success-S1.1-toast"
-ocr_top "$RUN_DIR/success-S1.1-toast.png" "$RUN_DIR/toast.txt" || true
-check "the toast is on the screen (OCR)" grep -qi "toast over the TV" "$RUN_DIR/toast.txt"
+# The toast is in the top right, beside setup's own text: ocr_finds reads the
+# right of the screen too.
+check "the toast is on the screen (OCR)" ocr_finds toast "toast over the TV" 15
 
 guest "agentv screen frames 3" >"$RUN_DIR/frames.json" 2>&1 || true
 log "The home screen in the VM: $(cat "$RUN_DIR/frames.json")"
