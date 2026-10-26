@@ -65,8 +65,10 @@ check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "g
 capture_console "success-S5.6-getting-ready"
 
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
+  # From a repo on the same machine the install can be in before the check
+  # first looks, so done counts too.
   check "S5.6 getting ready finds agentv $AGENTV_TEST_UPDATE_VERSION and starts the TV's own install" \
-    until_setup ".setup.ready.update == \"installing\" and .setup.ready.to == \"$AGENTV_TEST_UPDATE_VERSION\"" 300
+    until_setup "(.setup.ready.update == \"installing\" or .setup.ready.update == \"done\") and .setup.ready.to == \"$AGENTV_TEST_UPDATE_VERSION\"" 300
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-installing.json" 2>&1 || true
   boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
   log "Waiting for the update to finish"
