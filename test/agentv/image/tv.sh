@@ -99,6 +99,30 @@ screen_shows_welcome() {
   grep -q "TV setup starts here" "$RUN_DIR/$1.txt"
 }
 
+# ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
+# any case) on the screen. Each try reads one screenshot twice: as a block of
+# text, as ocr_screen does, and as scattered text, which still reads a
+# headline with a QR code beside it, where the block reading turns to noise
+# at a VM's small screen. What it read last is in $RUN_DIR/<name>.txt.
+ocr_finds() {
+  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png"
+
+  while true; do
+    : >"$RUN_DIR/$1.txt"
+    rm -f "$shot"
+    screendump "$shot"
+    if [[ -s $shot ]] && magick "$shot" -colorspace gray -negate -resize 150% "$prepped" 2>/dev/null; then
+      {
+        tesseract "$prepped" - --psm 6 2>/dev/null
+        tesseract "$prepped" - --psm 11 2>/dev/null
+      } >"$RUN_DIR/$1.txt"
+      grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
+    fi
+    (( SECONDS - started < $3 )) || return 1
+    sleep 1
+  done
+}
+
 # ocr_top <png> <txt>: reads the top fifth of a screenshot, where toasts and
 # Hyprland's own notices are, larger than ocr_screen does, so small text
 # comes through.
