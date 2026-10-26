@@ -23,16 +23,21 @@ sleep 5
 pin_status() {
   ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/pin" 2>/dev/null || true
 }
+# What's on the TV, read off the screen once, in ocr_finds' three ways: the
+# pad's headline sits beside its digits, which a single block reading can
+# miss on the VM's small screen.
 says() {
-  ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
+  local found=0
+  ocr_finds "$1" "$2" 0 || found=1
   capture_console "$1"
-  grep -qi "$2" "$RUN_DIR/$1.txt"
+  return $found
 }
 # The pad on the TV, read off the screen, for up to <seconds>.
 wait_pad() {
-  local started=$SECONDS
-  until says "$1" "enter the parent pin" || (( SECONDS - started > $2 )); do sleep 2; done
-  says "$1" "enter the parent pin"
+  local found=0
+  ocr_finds "$1" "enter the parent pin" "$2" || found=1
+  capture_console "$1"
+  return $found
 }
 
 ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"pin\":\"4826\"}' http://127.0.0.1:3000/api/pin" >"$RUN_DIR/set.json" 2>&1 || true
@@ -55,7 +60,13 @@ check "it's there for the daemon, as a hash, not the PIN" hashed
 # agentv-pin-check with no terminal asks on the TV. Cancelled, it refuses.
 guest "agentv-pin-check desktop; echo exit=\$?" >"$RUN_DIR/check-cancel.log" 2>&1 &
 asking=$!
+before=$FAILURES
 check "with no terminal, agentv-pin-check asks for the PIN on the TV (OCR)" wait_pad "success-pin-asked" 30
+if (( FAILURES > before )); then
+  log "What OCR read on the pad:"
+  cat "$RUN_DIR/success-pin-asked.txt"
+  print_screen "$RUN_DIR/.ocr.ppm"
+fi
 check "the pad says what it's for (OCR)" grep -Eqi "omarchy|desk" "$RUN_DIR/success-pin-asked.txt"
 guest "agentv input key back" >"$RUN_DIR/input.log" 2>&1 || true
 wait "$asking" || true
