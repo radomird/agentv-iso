@@ -49,7 +49,7 @@ ssh_sudo "record=/var/lib/agentv/apps/installed.json; [[ -f \$record ]] || echo 
 check "Steam's app is on home's list of apps" \
   ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home | jq -e '.apps[] | select(.id == \"agentv.steam\")' >/dev/null"
 
-# The stand-in, ahead of anything else called steam, and Vulkan for gamescope.
+# The stand-in, where Steam's own package puts steam, and Vulkan for gamescope.
 ssh_guest "cat >/tmp/steam" <<'STEAM'
 #!/bin/bash
 # A stand-in for Steam in AgenTV's S3.5 image check: a window that fills
@@ -62,7 +62,7 @@ kill "$player" 2>/dev/null
 wait "$player" 2>/dev/null
 exit 0
 STEAM
-ssh_sudo "install -m 755 /tmp/steam /usr/local/bin/steam"
+ssh_sudo "install -m 755 /tmp/steam /usr/bin/steam"
 check "the box reads its package repositories" sync_repos
 ssh_sudo "pacman -S --noconfirm --needed vulkan-swrast" >"$RUN_DIR/vulkan.log" 2>&1 || true
 check "gamescope has a Vulkan device to draw with" ssh_guest "ls /usr/share/vulkan/icd.d/ | grep -q lvp"
@@ -77,9 +77,10 @@ wait_front() {
   return 1
 }
 
-# Whether the window in front fills the screen.
+# Whether Steam is in front and fills the screen.
 fills_screen() {
   local address monitor client
+  [[ $(front '.front.role // ""') == "steam" ]] || return 1
   address=$(front '.front.address // ""')
   monitor=$(guest_hyprctl "-j monitors" 2>/dev/null | jq -c '.[0] | [(.width / .scale | floor), (.height / .scale | floor)]' 2>/dev/null || true)
   client=$(guest_hyprctl "-j clients" 2>/dev/null | jq -c --arg address "$address" '.[] | select(.address == $address) | {at, size}' 2>/dev/null || true)
@@ -93,8 +94,19 @@ game_running() {
   ssh_guest "pgrep -x gamescope >/dev/null && pgrep -f 'title=steam-stand-i[n]' >/dev/null"
 }
 
+# What the screen daemon and gamescope said, in the run's own log, for when
+# Steam doesn't come up.
+said() {
+  log "agentv screen app said: $(tail -n 1 "$RUN_DIR/screen.log")"
+  guest "journalctl --user -b --no-pager -u agentv-screen | grep -iE 'steam|gamescope|vulkan|xwayland' | tail -n 25" 2>/dev/null |
+    while IFS= read -r line; do log "screen daemon: $line"; done
+}
+
 guest "agentv screen app agentv.steam" >>"$RUN_DIR/screen.log" 2>&1 || true
-check "S3.5 Steam opens in front, in its gamescope" wait_front steam 90
+up=no
+wait_front steam 90 && up=yes
+check "S3.5 Steam opens in front, in its gamescope" test "$up" = yes
+[[ $up == yes ]] || said
 sleep 3
 check "S3.5 it fills the screen" fills_screen
 capture_console "success-S3.5-steam"
