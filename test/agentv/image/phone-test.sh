@@ -61,6 +61,7 @@ if (( FAILURES > before )); then
   cat "$RUN_DIR/pair.txt"
   log "What the screen daemon says is in front:"
   screen_status
+  print_screen "$RUN_DIR/.ocr.ppm"
 fi
 
 # The phone, on the box's own address as a phone on the network reaches it.

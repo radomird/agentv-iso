@@ -100,12 +100,14 @@ screen_shows_welcome() {
 }
 
 # ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
-# any case) on the screen. Each try reads one screenshot twice: as a block of
-# text, as ocr_screen does, and as scattered text, which still reads a
+# any case) on the screen. Each try reads one screenshot three ways: as a
+# block of text, as ocr_screen does; as scattered text, which still reads a
 # headline with a QR code beside it, where the block reading turns to noise
-# at a VM's small screen. What it read last is in $RUN_DIR/<name>.txt.
+# at a VM's small screen; and the right 62% as a block, larger, which leaves
+# out a QR code on the left. What it read last is in $RUN_DIR/<name>.txt,
+# and the screenshot in $RUN_DIR/.ocr.ppm.
 ocr_finds() {
-  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png"
+  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png"
 
   while true; do
     : >"$RUN_DIR/$1.txt"
@@ -115,12 +117,23 @@ ocr_finds() {
       {
         tesseract "$prepped" - --psm 6 2>/dev/null
         tesseract "$prepped" - --psm 11 2>/dev/null
+        magick "$shot" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
+          tesseract "$right" - --psm 6 2>/dev/null
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
     (( SECONDS - started < $3 )) || return 1
     sleep 1
   done
+}
+
+# print_screen <screenshot>: prints it as a PNG in base64, in 16 greys, for
+# a check that failed on what's on the screen. The job's log is the one
+# thing of a run that can always be read back.
+print_screen() {
+  log "The screen, as a base64 PNG:"
+  magick "$1" -colorspace gray -colors 16 png:- 2>/dev/null | base64 -w 120
+  log "End of the screen"
 }
 
 # ocr_top <png> <txt>: reads the top fifth of a screenshot, where toasts and

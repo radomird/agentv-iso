@@ -283,6 +283,7 @@ if (( FAILURES > before )); then
   log "What the screen daemon says is in front, and the hotspot's state:"
   screen_status
   state
+  print_screen "$RUN_DIR/.ocr.ppm"
 else
   capture_console "success-hotspot-joined"
 fi
