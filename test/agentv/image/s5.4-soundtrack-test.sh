@@ -45,13 +45,21 @@ check "the player is on the TV (OCR)" ocr_finds success-S5.4-player "setup sound
 capture_console "success-S5.4-player"
 guest "pactl list sink-inputs" >"$RUN_DIR/sink-inputs.txt" 2>&1 || true
 check "the TV's page plays through the box's output" grep -qi "chrom" "$RUN_DIR/sink-inputs.txt"
-playing=$(loudness playing)
-check "S5.4 the soundtrack can be heard on the box's output (loudness $playing)" awk -v l="$playing" 'BEGIN { exit !(l > 0.005) }'
 
-# A phone mutes it.
+# A phone pairs, as the welcome screen asks, and that moves setup on to
+# getting ready, whose lines tick off with the TV's own sounds. Those aren't
+# the soundtrack's to mute, so both recordings wait for getting ready to
+# settle.
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
 token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
 check "a phone pairs" test -n "$token"
+check "getting ready settles, with the soundtrack still playing" \
+  until_json /api/setup '(.setup.ready.update | IN("none", "done", "failed", "skipped")) and (.setup.muted | not)' 120
+sleep 3
+playing=$(loudness playing)
+check "S5.4 the soundtrack can be heard on the box's output (loudness $playing)" awk -v l="$playing" 'BEGIN { exit !(l > 0.005) }'
+
+# The phone mutes it.
 ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"muted\": true}' http://127.0.0.1:3001/api/phone/setup-music" >"$RUN_DIR/mute.json" 2>&1 || true
 check "S5.4 the phone mutes the soundtrack" until_json /api/setup '.setup.muted' 10
 sleep 2
