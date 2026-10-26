@@ -16,18 +16,30 @@
 # Runs on GitHub's ubuntu-26.04 runner, from anywhere. Results land in
 # test-runs/ at the root of this checkout.
 #
-# Usage: test/agentv/image/ci [--again <check>...]
-#   --again  skips the build and the install, and runs only the named checks
-#            (test/agentv/image/<check>-test.sh) against the same base image,
-#            for a step that needs something the first pass produced.
+# With AGENTV_TEST_KEEP_DISK=<folder under /w>, a run where every check passed
+# also leaves the installed base image there, compressed, with what boots it,
+# for --from-disk (the nightly run keeps it as an artifact, Q100).
+#
+# Usage: test/agentv/image/ci [--again <check>...] [--from-disk <folder>]
+#   --again      skips the build and the install, and runs only the named
+#                checks (test/agentv/image/<check>-test.sh) against the same
+#                base image, for a step that needs something the first pass
+#                produced.
+#   --from-disk  skips the build and the install too, and starts from a base
+#                image a night's run kept: test/agentv/image/up-to-date brings
+#                it up to AgenTV's packages in the ISO's package folder, then
+#                every check runs, apart from those that need the ISO itself.
 
 set -euo pipefail
 
 again=()
+disk=""
 if [[ ${1:-} == "--again" ]]; then
   shift
   again=("$@")
   (( ${#again[@]} > 0 )) || { echo "--again needs the checks to run" >&2; exit 2; }
+elif [[ ${1:-} == "--from-disk" ]]; then
+  disk=$(realpath "${2:?--from-disk needs the folder a nightly run kept}")
 fi
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
@@ -47,7 +59,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if (( ${#again[@]} == 0 )); then
+if [[ -n $disk ]]; then
+  # The night's base image, where upstream's harness looks for it: in a
+  # folder named after the night's ISO, which this run names but doesn't
+  # have, so the checks that need the ISO itself stand down.
+  name=$(cat "$disk/iso-name")
+  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "the night's disk names an odd ISO: $name" >&2; exit 1; }
+  mkdir -p release "test-runs/$name-integration"
+  rm -f release/*.iso
+  : >"release/$name.iso"
+  for file in base.qcow2 OVMF_VARS.4m.fd id_ed25519 id_ed25519.pub cidata.img; do
+    mv "$disk/$file" "test-runs/$name-integration/$file"
+  done
+  chmod 600 "test-runs/$name-integration/id_ed25519"
+elif (( ${#again[@]} == 0 )); then
   shopt -s nullglob
   packages=(configs/airootfs/usr/share/agentv-iso/packages/*.pkg.tar.zst)
   shopt -u nullglob
@@ -73,7 +98,7 @@ done < <(env | grep '^AGENTV_TEST_' || true)
 
 sudo chmod 0666 /dev/kvm
 docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
-  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" ${env_args[@]+"${env_args[@]}"} \
+  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" -e FROM_DISK="${disk:+1}" ${env_args[@]+"${env_args[@]}"} \
   ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
     # pacman 7 fails every sync on a kernel without Landlock; upstream does the same.
     if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
@@ -92,9 +117,21 @@ docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
     printf "#!/bin/sh\nexit 0\n" >/usr/local/bin/omarchy-pkg-add
     chmod 0755 /usr/local/bin/omarchy-pkg-add
     iso=$(ls release/*.iso)
-    if [ -z "$AGAIN" ]; then
+    if [ -n "$FROM_DISK" ]; then
+      ./test/agentv/image/up-to-date "$iso"
+      export AGENTV_TEST_NO_ISO=1
+    elif [ -z "$AGAIN" ]; then
       ./test/integration "$iso" boot --no-preview --memory 8192 --timeout 1800
     fi
     # shellcheck disable=SC2086 # a list of check names
     ./test/agentv/image/run "$iso" $AGAIN
+    # Every check passed: the base image, compressed, and what boots it.
+    if [ -n "${AGENTV_TEST_KEEP_DISK:-}" ] && [ -z "$AGAIN" ] && [ -z "$FROM_DISK" ]; then
+      base="test-runs/$(basename "$iso" .iso)-integration"
+      mkdir -p "$AGENTV_TEST_KEEP_DISK"
+      qemu-img convert -c -O qcow2 "$base/base.qcow2" "$AGENTV_TEST_KEEP_DISK/base.qcow2"
+      cp "$base/OVMF_VARS.4m.fd" "$base/id_ed25519" "$base/id_ed25519.pub" "$base/cidata.img" "$AGENTV_TEST_KEEP_DISK/"
+      basename "$iso" .iso >"$AGENTV_TEST_KEEP_DISK/iso-name"
+      du -sh "$AGENTV_TEST_KEEP_DISK"
+    fi
   '

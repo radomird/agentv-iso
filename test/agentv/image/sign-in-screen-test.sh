@@ -89,15 +89,19 @@ guest "agentv screen sign-in $id" >"$RUN_DIR/sign-in.json" 2>&1 || true
 cat "$RUN_DIR/sign-in.json"
 check "agentv screen sign-in opens the sign-in screen" jq -e '.ok == true' "$RUN_DIR/sign-in.json"
 
-# Up to 30 s for the page, the bar, and the form.
-up=0
+height=$(guest_hyprctl "-j monitors" 2>/dev/null | jq '.[0].height / .[0].scale | floor' 2>/dev/null || echo 0)
+# shellcheck disable=SC2016 # $height is jq's own
+above_bar='$height > 0 and ([.[] | select(.workspace.name == "1")][0] | .at[1] + .size[1] <= $height - 200)'
+
+# Up to 30 s for the page, the bar, and the form. The page moves up once the
+# bar has its room, a moment after it's maximized, so that's waited for too.
 for _ in $(seq 1 60); do
   layers=$(guest_hyprctl "-j layers" 2>/dev/null || true)
   clients=$(guest_hyprctl "-j clients" 2>/dev/null || true)
   if jq -e '[.. | objects | select(.namespace? == "agentv-signin")] | length > 0' <<<"$layers" >/dev/null 2>&1 &&
     jq -e '.[] | select(.workspace.name == "1" and .fullscreen == 1)' <<<"$clients" >/dev/null 2>&1 &&
+    jq -e --argjson height "${height:-0}" "$above_bar" <<<"$clients" >/dev/null 2>&1 &&
     ssh_guest "grep -q 'GET /login.html' /tmp/agentv-sign-in-check/requests.log"; then
-    up=1
     break
   fi
   sleep 0.5
@@ -106,11 +110,9 @@ echo "$layers" >"$RUN_DIR/layers.json"
 echo "$clients" >"$RUN_DIR/clients.json"
 check "the sign-in bar is in the overlay" jq -e '[.. | objects | select(.namespace? == "agentv-signin")] | length > 0' "$RUN_DIR/layers.json"
 check "the service's page is maximized above it, not full screen" jq -e '.[] | select(.workspace.name == "1" and .fullscreen == 1)' "$RUN_DIR/clients.json"
-height=$(guest_hyprctl "-j monitors" 2>/dev/null | jq '.[0].height / .[0].scale | floor' 2>/dev/null || echo 0)
-# shellcheck disable=SC2016 # $height is jq's own
 check "and the bar keeps the bottom of the screen: the page ends above it" \
-  jq -e --argjson height "${height:-0}" '$height > 0 and ([.[] | select(.workspace.name == "1")][0] | .at[1] + .size[1] <= $height - 200)' "$RUN_DIR/clients.json"
-check "the app took its page to the site's sign-in form" test "$up" = 1
+  jq -e --argjson height "${height:-0}" "$above_bar" "$RUN_DIR/clients.json"
+check "the app took its page to the site's sign-in form" ssh_guest "grep -q 'GET /login.html' /tmp/agentv-sign-in-check/requests.log"
 sleep 2
 capture_console "success-sign-in-screen"
 # The bar's text, then its button's: beside the bar's light text on dark,

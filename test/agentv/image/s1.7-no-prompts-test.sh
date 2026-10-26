@@ -54,20 +54,48 @@ prompts() {
   grep -aEoi "$words" "$RUN_DIR/$1.txt" | sort -u | tr '\n' ' ' || true
 }
 
+# wait_title <words> <seconds>: until the window in front has the page's own
+# title, so the page has loaded and put the cursor in its first field. On a
+# busy box that comes a while after the window.
+wait_title() {
+  local started=$SECONDS
+  while (( SECONDS - started < $2 )); do
+    [[ $(front '.front.title // ""') == *"$1"* ]] && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "the sign-in page opens in the services' Chromium" wait_front web 60
-sleep 3
+check "the sign-in page has loaded" wait_title Anmelden 60
+sleep 1
 capture_console "success-S1.7-sign-in"
 
 # Typed the way the phone will: through the virtual keyboard, a Tab between
 # fields, and the password from stdin, so it's on no command line.
-printf 'zuschauer.berlin\tS17-kennwort-%s\tErika Mustermann\tHauptstrasse 1\t10115\tBerlin' "$RANDOM$RANDOM" |
+password="S17-kennwort-$RANDOM$RANDOM"
+printf 'zuschauer.berlin\t%s\tErika Mustermann\tHauptstrasse 1\t10115\tBerlin' "$password" |
   ssh_guest "bash -lc 'agentv input text -'" >>"$RUN_DIR/input.log" 2>&1 || true
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 6
 found=$(prompts "success-S1.7-signed-in")
-check "S1.7 the keyboard filled in the name and password, and the form was sent" \
-  ssh_guest "grep -q 'benutzer=zuschauer.berlin&kennwort=S17-kennwort-[0-9]' /tmp/agentv-sign-in/requests.log"
+# Every field as typed, as the form sends it. A miss names the fields that
+# differ, never what they hold.
+sent=$(ssh_guest "grep -o 'GET /angemeldet.html?[^ ]*' /tmp/agentv-sign-in/requests.log | tail -n 1" 2>/dev/null || true)
+differ=()
+for field in benutzer=zuschauer.berlin "kennwort=$password" name=Erika+Mustermann strasse=Hauptstrasse+1 plz=10115 ort=Berlin; do
+  [[ "&${sent#*\?}&" == *"&$field&"* ]] || differ+=("${field%%=*}")
+done
+if [[ -z $sent ]]; then
+  fields="no form came"
+elif (( ${#differ[@]} == 0 )); then
+  fields="all as typed"
+else
+  fields="not as typed: ${differ[*]}"
+fi
+check "S1.7 the keyboard filled in every field as typed, and the form was sent ($fields)" \
+  test "$fields" = "all as typed"
 check "S1.7 the sign-in went through (OCR)" grep -aqi "angemeldet" "$RUN_DIR/success-S1.7-signed-in.txt"
 check "S1.7 after signing in, no Save password, Save address or card, or Translate bubble (saw: ${found:-nothing})" test -z "$found"
 
