@@ -19,10 +19,11 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 work=$(mktemp -d)
 smb=""
 # The share and the files go too, before upstream's own cleanup, which keeps
-# the exit status.
+# the exit status. Samba is in a session of its own, since it stops its whole
+# process group as it goes.
 stop_share() {
   local status=$?
-  [[ -n $smb ]] && kill "$smb" 2>/dev/null
+  [[ -n $smb ]] && { kill -- "-$smb" 2>/dev/null || kill "$smb" 2>/dev/null; }
   rm -rf "$work"
   (exit "$status")
   cleanup
@@ -95,7 +96,7 @@ cat >"$work/smb.conf" <<CONF
   read only = yes
 CONF
 printf '%s\n%s\n' "$SHARE_PASSWORD" "$SHARE_PASSWORD" | smbpasswd -c "$work/smb.conf" -s -a tv >/dev/null
-smbd --foreground --no-process-group --debug-stdout -s "$work/smb.conf" >"$work/smb.log" 2>&1 &
+setsid smbd --foreground --debug-stdout -s "$work/smb.conf" >"$work/smb.log" 2>&1 &
 smb=$!
 
 start_vm_from_base
