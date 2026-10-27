@@ -68,13 +68,11 @@ check "Steam and the built-in Music are under more" jq -e '[.more[].id] | index(
 check "the apps step is on the TV (OCR)" ocr_finds success-setup-apps "pick your apps|add your own" 30
 capture_console "success-setup-apps"
 
-# Immich ticked with the remote's keys, then continue, above it. The focus
-# starts on the goal's first app, so Immich is as many to the right as its
-# place in the row.
-rights=$(jq -r '[.for[].id] | index("agentv.immich") // 1' "$RUN_DIR/setup-apps.json" 2>/dev/null || echo 1)
-keys=()
-for (( i = 0; i < rights; i++ )); do keys+=(right); done
-for key in "${keys[@]}" enter up enter; do
+# The goal's second app ticked with the remote's keys, then continue, above
+# it. The focus starts on the goal's first app, and the second is always
+# beside it; the row wraps at the TV's width, so a third may not be.
+ticked=$(jq -r '.for[1].id // "agentv.immich"' "$RUN_DIR/setup-apps.json" 2>/dev/null || echo agentv.immich)
+for key in right enter up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
@@ -85,16 +83,18 @@ guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "and home takes over${took:+ (after $took s)}" test -n "$took"
 
-log "Waiting for Immich to install"
-until_file '.apps["agentv.immich"].state == "installed" or .apps["agentv.immich"].state == "failed"' /run/agentv-setup-apps/state.json 600 || true
+log "Waiting for $ticked to install"
+until_file ".apps[\"$ticked\"].state == \"installed\" or .apps[\"$ticked\"].state == \"failed\"" /run/agentv-setup-apps/state.json 600 || true
 ssh_guest "cat /run/agentv-setup-apps/state.json" >"$RUN_DIR/setup-apps-state.json" 2>&1 || true
 ssh_guest "journalctl -u agentv-setup-apps.service --no-pager" >"$RUN_DIR/setup-apps-service.log" 2>&1 || true
-check "the ticked app installed as root, from the index ($(jq -r '.apps["agentv.immich"] | "\(.state) \(.error // "")"' "$RUN_DIR/setup-apps-state.json" 2>/dev/null))" \
-  jq -e '.apps["agentv.immich"].state == "installed"' "$RUN_DIR/setup-apps-state.json"
-check "and only that one" jq -e '.apps | keys == ["agentv.immich"]' "$RUN_DIR/setup-apps-state.json"
+# shellcheck disable=SC2016 # $id is jq's own
+check "the ticked app, $ticked, installed as root, from the index ($(jq -r --arg id "$ticked" '.apps[$id] | "\(.state) \(.error // "")"' "$RUN_DIR/setup-apps-state.json" 2>/dev/null))" \
+  jq -e --arg id "$ticked" '.apps[$id].state == "installed"' "$RUN_DIR/setup-apps-state.json"
+# shellcheck disable=SC2016 # $id is jq's own
+check "and only that one" jq -e --arg id "$ticked" '.apps | keys == [$id]' "$RUN_DIR/setup-apps-state.json"
 guest "agentv app list" >"$RUN_DIR/app-list.txt" 2>&1 || true
-check "agentv app list has it" grep -q '^agentv.immich ' "$RUN_DIR/app-list.txt"
-check "home has it" until_json /api/home '[.apps[].id] | index("agentv.immich") != null' 30
+check "agentv app list has it" grep -q "^$ticked " "$RUN_DIR/app-list.txt"
+check "home has it" until_json /api/home "[.apps[].id] | index(\"$ticked\") != null" 30
 check "the daemon's drop is gone" test -z "$(ssh_sudo "ls /var/lib/private/agentv/daemon/apps-drop 2>/dev/null")"
 
 stop_vm
