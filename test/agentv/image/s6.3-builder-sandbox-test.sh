@@ -127,7 +127,9 @@ check "ADR-044 an install script can't see the builder's home, its CLI or a plan
 check "ADR-044 an install script writes the work folder" said yes bwrap-work
 check "ADR-044 and nothing else of the build" said no bwrap-build
 check "ADR-044 nor reads the key" said no bwrap-env
-check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-enabled --quiet agentv-npm-check.timer"
+# The package wants its timer through /usr/lib's timers.target.wants, which
+# systemctl is-enabled doesn't count, so this asks whether it's waiting.
+check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-active --quiet agentv-npm-check.timer"
 check "the build's unit ended, and its ticket with it" ssh_guest "! systemctl is-active --quiet '$UNIT' && ! test -e /run/agentv-build/ticket.json"
 
 stop_vm
