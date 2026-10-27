@@ -70,7 +70,9 @@ ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 
 
 # Everywhere the token could have gone but the CLI's own file (and the
 # stand-in, which plays the provider's side too), and the whole journal.
-ssh_guest "sudo grep -rlsF '$MARK' /var/lib/agentv /var/lib/private /run /etc /home /tmp /var/tmp /var/log --exclude-dir=journal | grep -vxF -e '$HOME_DIR/.claude/.credentials.json' -e '$HOME_DIR/.local/bin/claude'" >"$RUN_DIR/copies.txt" 2>&1 || true
+# grep reads the mark from its input: sudo logs each command line, so a
+# mark on grep's would put it in the journal itself.
+printf '%s\n' "$MARK" | ssh_guest "sudo grep -rlsFf - /var/lib/agentv /var/lib/private /run /etc /home /tmp /var/tmp /var/log --exclude-dir=journal | grep -vxF -e '$HOME_DIR/.claude/.credentials.json' -e '$HOME_DIR/.local/bin/claude'" >"$RUN_DIR/copies.txt" 2>&1 || true
 no_copies() { [[ ! -s $RUN_DIR/copies.txt ]]; }
 not_in_journal() { ! ssh_guest "sudo journalctl -b --no-pager | grep -qF -e '$MARK' -e good-code"; }
 
