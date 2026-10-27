@@ -28,9 +28,16 @@ guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 
 home_shut() { ! ssh_guest "ls /var/lib/agentv/builder" >/dev/null 2>&1; }
 # sudo -l -U lists what a user may run with sudo, and says so when there's
-# nothing. Its answer is kept with the run.
+# nothing. Its answer is kept with the run. A rule for everyone that only
+# takes a command away, like Omarchy's "(ALL) !/usr/bin/asdcontrol", lets
+# the builder run nothing, so only a command without "!" counts.
 ssh_guest "sudo -l -U agentv-builder" >"$RUN_DIR/sudo-list.txt" 2>&1 || true
-no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! grep -qiE "may run|NOPASSWD|ALL\)" "$RUN_DIR/sudo-list.txt"; }
+granted() {
+  sed -n '/may run the following/,$p' "$RUN_DIR/sudo-list.txt" | tail -n +2 |
+    sed -E 's/^[[:space:]]*(\([^)]*\))?[[:space:]]*([A-Z_]+:[[:space:]]*)*//' | tr ',' '\n' |
+    sed -E 's/^[[:space:]]+//' | grep -v '^!' | grep -q .
+}
+no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! granted; }
 check "the builder has its own user, with a home only it reads" ssh_guest "id agentv-builder && test \"\$(stat -c %U:%a /var/lib/agentv/builder)\" = agentv-builder:700"
 check "the person's account can't read the builder's home" home_shut
 check "the builder may run nothing with sudo" no_sudo
