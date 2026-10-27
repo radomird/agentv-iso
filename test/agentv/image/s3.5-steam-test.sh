@@ -83,18 +83,30 @@ served_icon() {
 check "S3.5 the daemon serves that icon as the package put it" served_icon
 # And home draws it on Steam's tile: a block of the stand-in's magenta that
 # wasn't on the screen before. A logo is 72 px square.
+after=0
 tile_icon() {
-  local started=$SECONDS now=0
+  local started=$SECONDS
   while (( SECONDS - started < 20 )); do
     capture_console "success-S3.5-tile"
-    now=$(magenta "$RUN_DIR/success-S3.5-tile.png")
-    (( now - before >= 1000 )) && return 0
+    after=$(magenta "$RUN_DIR/success-S3.5-tile.png")
+    (( after - before >= 1000 )) && return 0
     sleep 1
   done
-  log "magenta pixels: $before before, $now after"
   return 1
 }
-check "S3.5 home shows the icon on Steam's tile" tile_icon
+shown=no
+tile_icon && shown=yes
+check "S3.5 home shows the icon on Steam's tile" test "$shown" = yes
+# When it doesn't, what home had and showed, in the run's own log: the
+# magenta, home's tiles, what was in front, and the screen in colour, small.
+if [[ $shown != yes ]]; then
+  log "magenta pixels: $before before, $after after"
+  log "home's tiles: $(ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | "\(.id) \(.size)@\(.x),\(.y)"]' 2>/dev/null)"
+  log "in front: $(front '.front.role // ""')"
+  log "The screen, in colour, as a base64 PNG:"
+  magick "$RUN_DIR/success-S3.5-tile.png" -resize 640x -colors 64 png:- 2>/dev/null | base64 -w 120
+  log "End of the screen"
+fi
 
 # The stand-ins, where Steam's and gamescope's own packages put them, on
 # this throwaway box only.
