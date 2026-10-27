@@ -16,6 +16,11 @@
 # daemon knows Steam's window as one from the gamescope it started, so the
 # rest is the box's own. Steam's own sign-in screen full screen in its real
 # gamescope is S1.5, on the NUC.
+#
+# Steam's tile shows the icon Steam's package installs, found through its
+# desktop entry the way the desktop's app launcher finds it. Here that's a
+# stand-in desktop entry and a plain magenta square where the package would
+# put them, never Valve's own file.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -25,6 +30,26 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 start_vm_from_base
 wait_for_ssh 300 failure-s3.5-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-s3.5-no-tv"; check "the TV session came up" false; stop_vm; finish; }
+
+# How much of the screen is the stand-in icon's magenta.
+magenta() {
+  magick "$1" -fuzz 6% -fill black +opaque "#ff00ff" -fill white -opaque "#ff00ff" -format '%[fx:int(mean*w*h)]' info: 2>/dev/null || echo 0
+}
+capture_console "success-S3.5-before"
+before=$(magenta "$RUN_DIR/success-S3.5-before.png")
+
+# What Steam's package installs for its icon: its desktop entry and its icon
+# in the hicolor theme, as stand-ins, on this throwaway box only.
+magick -size 256x256 xc:"#ff00ff" "$RUN_DIR/steam-icon.png"
+ssh_guest "cat >/tmp/steam.png" <"$RUN_DIR/steam-icon.png"
+ssh_guest "cat >/tmp/steam.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Steam stand-in
+Exec=/usr/bin/steam %U
+Icon=steam
+Type=Application
+DESKTOP
+ssh_sudo "install -D -m 644 /tmp/steam.png /usr/share/icons/hicolor/256x256/apps/steam.png && install -D -m 644 /tmp/steam.desktop /usr/share/applications/steam.desktop"
 
 # Steam's app, from agentv-apps on the same owner as this clone.
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
@@ -50,6 +75,26 @@ done
 ssh_sudo "record=/var/lib/agentv/apps/installed.json; [[ -f \$record ]] || echo '{}' >\$record; jq --arg commit '$commit' --arg repo 'https://github.com/$owner/agentv-apps' '. + {\"agentv.steam\": {id: \"agentv.steam\", name: \"Steam\", version: \"1.0.0\", tier: \"official\", repo: \$repo, commit: \$commit, path: \"apps/steam\", installedAt: (now | todate)}}' \$record >\$record.new && chmod 644 \$record.new && mv \$record.new \$record"
 check "Steam's app is on home's list of apps" \
   ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home | jq -e '.apps[] | select(.id == \"agentv.steam\")' >/dev/null"
+check "S3.5 Steam's tile has the icon Steam's package gives it" \
+  ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home | jq -e '.apps[] | select(.id == \"agentv.steam\") | .icon == \"/api/apps/agentv.steam/icon\"' >/dev/null"
+served_icon() {
+  [[ $(ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/apps/agentv.steam/icon | sha256sum" 2>/dev/null | cut -d' ' -f1) == "$(sha256sum <"$RUN_DIR/steam-icon.png" | cut -d' ' -f1)" ]]
+}
+check "S3.5 the daemon serves that icon as the package put it" served_icon
+# And home draws it on Steam's tile: a block of the stand-in's magenta that
+# wasn't on the screen before. A logo is 72 px square.
+tile_icon() {
+  local started=$SECONDS now=0
+  while (( SECONDS - started < 20 )); do
+    capture_console "success-S3.5-tile"
+    now=$(magenta "$RUN_DIR/success-S3.5-tile.png")
+    (( now - before >= 1000 )) && return 0
+    sleep 1
+  done
+  log "magenta pixels: $before before, $now after"
+  return 1
+}
+check "S3.5 home shows the icon on Steam's tile" tile_icon
 
 # The stand-ins, where Steam's and gamescope's own packages put them, on
 # this throwaway box only.
