@@ -82,7 +82,8 @@ ssh_guest "curl -fsS http://127.0.0.1:3000/api/ai" >"$RUN_DIR/ai.json" 2>&1 || t
 check "S5.5 once they're accepted, Claude Code arrives on its first run ($(jq -r '"\(.cli.state // "nothing"): \(.cli.version // .cli.error // "")"' "$RUN_DIR/ai.json" 2>/dev/null))" \
   jq -e '.cli.state == "ready" and .cli.cli == "claude"' "$RUN_DIR/ai.json"
 check "and claude runs for the owner" guest "claude --version"
-check "the TV says it's all set (OCR)" ocr_finds success-S5.5-done "all set|terms accepted" 30
+# A plan signs in at the first build (ADR-040): the TV says it's ready.
+check "the TV says it's ready, with the terms accepted (OCR)" ocr_finds success-S5.5-done "ready\\.|terms accepted" 30
 capture_console "success-S5.5-done"
 
 stop_vm

@@ -1,11 +1,13 @@
 #!/bin/bash
 #
 # The provider key on an installed box (ADR-009, S4.6). A key given to the
-# daemon, as Settings → AI gives it, ends up in /etc/agentv/env, root's
-# alone with mode 600: the user account can't read it, nothing of it stays in
-# the daemon's state, key.json says which provider has one with no key in
-# it, and no log has it. agentv selftest S4.6 says so too, and taking the
-# key off takes its line out.
+# daemon, as Settings → AI gives it, waits for its provider's terms when
+# nobody has accepted them (Q104): a phone on the box's own address accepts
+# them, as an adult, and the box records it. Then the key ends up in
+# /etc/agentv/env, root's alone with mode 600: the user account can't read
+# it, nothing of it stays in the daemon's state, key.json says which
+# provider has one with no key in it, and no log has it. agentv selftest
+# S4.6 says so too, and taking the key off takes its line out.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -21,7 +23,27 @@ sleep 3
 
 # A made-up key in the shape of a real one.
 KEY="sk-ant-api03-agentvimagecheck$(printf '0%.0s' {1..30})"
-ssh_guest "curl -fsS --max-time 20 -X PUT -H 'Content-Type: application/json' -d '{\"provider\":\"claude\",\"key\":\"$KEY\"}' http://127.0.0.1:3000/api/key" >"$RUN_DIR/stored.json" 2>&1 || true
+put_key() {
+  ssh_guest "curl -sS --max-time 20 -X PUT -H 'Content-Type: application/json' -d '{\"provider\":\"claude\",\"key\":\"$KEY\"}' http://127.0.0.1:3000/api/key" >"$RUN_DIR/$1.json" 2>&1 || true
+}
+
+# Nobody has accepted Claude's terms for a key: the key waits for them, and
+# a phone on the box's own address is asked to accept them.
+put_key asked
+check "Q104 a key for claude waits for claude's terms for a key" jq -e '.ok == false and .terms.provider == "claude" and .terms.terms[0].id == "anthropic-commercial-terms"' "$RUN_DIR/asked.json"
+code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
+token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
+check "a phone pairs" test -n "$token"
+ssh_guest "curl -fsS -H 'Authorization: Bearer $token' http://127.0.0.1:3001/api/phone/state" >"$RUN_DIR/phone.json" 2>&1 || true
+check "the phone is asked to accept claude's terms for a key" jq -e '.ai.ask == "terms" and .ai.provider == "claude" and .ai.path == "key"' "$RUN_DIR/phone.json"
+ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"provider\": \"claude\", \"path\": \"key\"}' http://127.0.0.1:3001/api/phone/terms" >"$RUN_DIR/accepted.json" 2>&1 || true
+check "Q104 an adult accepts them on the phone" jq -e '.ok and .accepted.provider == "claude" and .accepted.path == "key" and .accepted.by.phone == "image check"' "$RUN_DIR/accepted.json"
+recorded() {
+  ssh_sudo "jq -e 'map(select(.provider == \"claude\" and .path == \"key\")) | length == 1' /var/lib/private/agentv/daemon/terms.json" >/dev/null
+}
+check "and the box records it in terms.json, the daemon's own" recorded
+
+put_key stored
 check "the daemon takes a key for claude and says it's kept" jq -e '.set == true and .provider == "claude"' "$RUN_DIR/stored.json"
 
 root_only() {
