@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# agentv:summary=Put an ISO and its checksum where people download it
+# agentv:args=<iso>
+
+# Uploads an ISO and the .sha256 file beside it to AgenTV's Cloudflare R2
+# bucket, at iso/<name>.iso, and prints the link people download it from.
+# The ISO is over GitHub's 2 GiB cap for release files, so it lives there
+# instead. R2 speaks S3, so the AWS CLI on GitHub's runners does the upload,
+# in parts. The bucket and its keys come from the environment, which CI
+# fills from the repo's secrets and variables. None of them is in the repo.
+
+set -euo pipefail
+
+iso="${1:?usage: agentv-iso-publish <iso>}"
+: "${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID to the ID of the Cloudflare account}"
+: "${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID to the access key of the R2 token}"
+: "${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY to the secret of the R2 token}"
+: "${R2_BUCKET:?set R2_BUCKET to the name of the bucket}"
+: "${ISO_URL:?set ISO_URL to the public address of the bucket}"
+
+sum="$iso.sha256"
+[[ -f $iso && -f $sum ]] || { echo "agentv-iso-publish: need $iso and $sum" >&2; exit 1; }
+# The checksum file names the ISO, so check it before anything leaves.
+(cd "$(dirname "$iso")" && sha256sum --quiet -c "$(basename "$sum")")
+
+export AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=auto
+# R2 doesn't take the checksums newer AWS CLIs add to every upload.
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+
+for file in "$iso" "$sum"; do
+  aws s3 cp --endpoint-url "$endpoint" --only-show-errors "$file" "s3://$R2_BUCKET/iso/$(basename "$file")"
+done
+
+echo "${ISO_URL%/}/iso/$(basename "$iso")"
