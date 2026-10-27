@@ -92,7 +92,9 @@ installed() { [[ $(ssh_guest "sudo jq -r .state $BUILDS/$ID/1.0.0/status.json") 
 check "root's hand-over installed the approved theme" until_true 60 installed
 ssh_guest "sudo cat $RUN/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "cd $THEMES/$ID && sudo find . -printf '%P %m\n' | LC_ALL=C sort" >"$RUN_DIR/placed.txt" 2>&1 || true
-check "with only what Omarchy shows, for anyone to read" diff <(printf '%s\n' ' 755' 'about.json 644' 'backgrounds 755' 'backgrounds/1-scene.png 644' 'colors.toml 644' 'icons.theme 644' 'preview.png 644') "$RUN_DIR/placed.txt"
+# Compared in bash: the test's container has no diff.
+placed_is() { [[ $(<"$RUN_DIR/placed.txt") == "$(printf '%s\n' ' 755' 'about.json 644' 'backgrounds 755' 'backgrounds/1-scene.png 644' 'colors.toml 644' 'icons.theme 644' 'preview.png 644')" ]]; }
+check "with only what Omarchy shows, for anyone to read" placed_is
 
 # The screen daemon, as the owner, hands it to Omarchy and sets it.
 mine() { guest "test \"\$(cat ~/.config/omarchy/themes/$NAME/.agentv-theme)\" = $ID && test -f ~/.config/omarchy/themes/$NAME/colors.toml"; }
@@ -103,8 +105,13 @@ check "S6.4 the desktop has it: it's Omarchy's theme now" until_true 90 current
 check "S6.4 and the TV has its colours" until_true 30 tv_has
 background() { [[ $(guest "basename \"\$(readlink -f ~/.local/state/omarchy/current/background)\"") == 1-scene.png ]]; }
 check "and Omarchy's background is the theme's own picture" until_true 30 background
-ssh_guest "curl -fsS http://127.0.0.1:3000/api/themes" >"$RUN_DIR/themes.json" 2>&1 || true
-check "Look lists it after Omarchy's own, made by your agent" jq -e '.current == "calm-forest" and ([.themes[] | select(.note == "made by your agent") | .id] == ["calm-forest"])' "$RUN_DIR/themes.json"
+# Look lists it once the screen daemon says Omarchy has it, which is once
+# omarchy-theme-set is done, a few seconds after the desktop shows it.
+looks() {
+  ssh_guest "curl -fsS http://127.0.0.1:3000/api/themes" >"$RUN_DIR/themes.json" 2>&1 &&
+    jq -e '.current == "calm-forest" and ([.themes[] | select(.note == "made by your agent") | .id] == ["calm-forest"])' "$RUN_DIR/themes.json"
+}
+check "Look lists it after Omarchy's own, made by your agent" until_true 30 looks
 sleep 2
 capture_console "success-S6.4-theme"
 
