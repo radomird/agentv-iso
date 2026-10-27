@@ -101,11 +101,23 @@ if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
 else
   log "No newer agentv to update to; getting ready finds nothing to install"
   # Unless edge got a newer build while this run went on, as other work
-  # lands: then getting ready installs it first, which is the update this
-  # check makes on a run with its own repo.
-  check "with nothing newer, or once edge's newer build is in, getting ready moves on to the next step" \
+  # lands. Then getting ready installs it first, and that's taken only when
+  # it's exactly edge's newest, newer than what the box started on.
+  check "getting ready moves on to the next step" \
     until_setup '(.setup.ready.update | IN("none", "failed", "done")) and .setup.step != "ready" and .setup.step != "welcome"' 400
-  log "getting ready said: $(jq -c '.setup.ready | {update, to}' <<<"$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" 2>/dev/null)" 2>/dev/null)"
+  ready=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -c '.setup.ready' 2>/dev/null)
+  log "getting ready said: $ready (the box started on agentv $before)"
+  check "and says how it went" test -n "$ready"
+  if [[ $(jq -r '.update' <<<"$ready" 2>/dev/null) == "done" ]]; then
+    # Edge's newest, as the box's own package lists have it since that update.
+    newest=$(ssh_guest "pacman -Si agentv 2>/dev/null" | awk '/^Version/ { print $3; exit }')
+    edge_moved() {
+      [[ -n $newest && $(jq -r '.to // ""' <<<"$ready") == "$newest" && $newest != "$before" ]] &&
+        [[ $(ssh_guest "vercmp $newest $before") == 1 ]] &&
+        [[ $(ssh_guest "pacman -Q agentv" | cut -d' ' -f2) == "$newest" ]]
+    }
+    check "edge got a newer build mid-run, and getting ready installed exactly that one ($before to ${newest:-none})" edge_moved
+  fi
 fi
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-next.json" 2>&1 || true
 next=$(jq -r '.setup.step // ""' "$RUN_DIR/setup-next.json")
