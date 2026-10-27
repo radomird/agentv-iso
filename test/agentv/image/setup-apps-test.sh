@@ -57,14 +57,19 @@ setup_post /api/setup/goal '{"goal": "media"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 check "setup is at its apps" until_json /api/setup '.setup.step == "apps"' 30
 
-check "the official apps for photos come from the signed index: Jellyfin, then Immich" \
-  until_json /api/setup/apps '([.for[].id] == ["agentv.jellyfin", "agentv.immich"]) and (.error == null)' 120
+# The goal's apps are the index's own, in the daemon's order, so one the
+# index adds (Plex was) comes in between.
+check "the official apps for photos come from the signed index: Jellyfin first, and Immich" \
+  until_json /api/setup/apps '(.for[0].id == "agentv.jellyfin") and ([.for[].id] | index("agentv.immich") != null) and (.error == null)' 120
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup/apps" >"$RUN_DIR/setup-apps.json" 2>&1 || true
+# The second of them, right of Jellyfin, is the one the keys tick.
+picked=$(jq -r '.for[1].id // empty' "$RUN_DIR/setup-apps.json" 2>/dev/null)
+check "there's a second app to tick (${picked:-none})" test -n "$picked"
 check "Steam and the built-in Music are under more" jq -e '[.more[].id] | index("agentv.steam") != null and index("agentv.music") != null' "$RUN_DIR/setup-apps.json"
 check "the apps step is on the TV (OCR)" ocr_finds success-setup-apps "pick your apps|add your own" 30
 capture_console "success-setup-apps"
 
-# Immich ticked with the remote's keys, then continue, above it.
+# The second app ticked with the remote's keys, then continue, above it.
 for key in right enter up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
@@ -76,16 +81,18 @@ guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "and home takes over${took:+ (after $took s)}" test -n "$took"
 
-log "Waiting for Immich to install"
-until_file '.apps["agentv.immich"].state == "installed" or .apps["agentv.immich"].state == "failed"' /run/agentv-setup-apps/state.json 600 || true
+log "Waiting for $picked to install"
+until_file ".apps[\"$picked\"].state == \"installed\" or .apps[\"$picked\"].state == \"failed\"" /run/agentv-setup-apps/state.json 600 || true
 ssh_guest "cat /run/agentv-setup-apps/state.json" >"$RUN_DIR/setup-apps-state.json" 2>&1 || true
 ssh_guest "journalctl -u agentv-setup-apps.service --no-pager" >"$RUN_DIR/setup-apps-service.log" 2>&1 || true
-check "the ticked app installed as root, from the index ($(jq -r '.apps["agentv.immich"] | "\(.state) \(.error // "")"' "$RUN_DIR/setup-apps-state.json" 2>/dev/null))" \
-  jq -e '.apps["agentv.immich"].state == "installed"' "$RUN_DIR/setup-apps-state.json"
-check "and only that one" jq -e '.apps | keys == ["agentv.immich"]' "$RUN_DIR/setup-apps-state.json"
+# shellcheck disable=SC2016 # $id is jq's
+check "the ticked app installed as root, from the index ($picked: $(jq -r --arg id "$picked" '.apps[$id] | "\(.state) \(.error // "")"' "$RUN_DIR/setup-apps-state.json" 2>/dev/null))" \
+  jq -e --arg id "$picked" '.apps[$id].state == "installed"' "$RUN_DIR/setup-apps-state.json"
+# shellcheck disable=SC2016 # $id is jq's
+check "and only that one" jq -e --arg id "$picked" '.apps | keys == [$id]' "$RUN_DIR/setup-apps-state.json"
 guest "agentv app list" >"$RUN_DIR/app-list.txt" 2>&1 || true
-check "agentv app list has it" grep -q '^agentv.immich ' "$RUN_DIR/app-list.txt"
-check "home has it" until_json /api/home '[.apps[].id] | index("agentv.immich") != null' 30
+check "agentv app list has it" grep -q "^$picked " "$RUN_DIR/app-list.txt"
+check "home has it" until_json /api/home "[.apps[].id] | index(\"$picked\") != null" 30
 check "the daemon's drop is gone" test -z "$(ssh_sudo "ls /var/lib/private/agentv/daemon/apps-drop 2>/dev/null")"
 
 stop_vm
