@@ -28,9 +28,16 @@ guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 
 home_shut() { ! ssh_guest "ls /var/lib/agentv/builder" >/dev/null 2>&1; }
 # sudo -l -U lists what a user may run with sudo, and says so when there's
-# nothing. Its answer is kept with the run.
+# nothing. Its answer is kept with the run. A rule for everyone that only
+# takes a command away, like Omarchy's "(ALL) !/usr/bin/asdcontrol", lets
+# the builder run nothing, so only a command without "!" counts.
 ssh_guest "sudo -l -U agentv-builder" >"$RUN_DIR/sudo-list.txt" 2>&1 || true
-no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! grep -qiE "may run|NOPASSWD|ALL\)" "$RUN_DIR/sudo-list.txt"; }
+granted() {
+  sed -n '/may run the following/,$p' "$RUN_DIR/sudo-list.txt" | tail -n +2 |
+    sed -E 's/^[[:space:]]*(\([^)]*\))?[[:space:]]*([A-Z_]+:[[:space:]]*)*//' | tr ',' '\n' |
+    sed -E 's/^[[:space:]]+//' | grep -v '^!' | grep -q .
+}
+no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! granted; }
 check "the builder has its own user, with a home only it reads" ssh_guest "id agentv-builder && test \"\$(stat -c %U:%a /var/lib/agentv/builder)\" = agentv-builder:700"
 check "the person's account can't read the builder's home" home_shut
 check "the builder may run nothing with sudo" no_sudo
@@ -72,6 +79,12 @@ say relay-env 'grep -a $MARK /proc/*/environ'
 # and only the work folder to write.
 mkdir -p $DIR/work
 mapfile -t jail < <(node --disable-warning=ExperimentalWarning --input-type=module -e "const { jail } = await import('/usr/share/agentv/builder/packages.ts'); console.log(jail('$DIR/work', '/var/lib/agentv/builder').join('\\n'))")
+# What bubblewrap says when it can't, with the jail it was given, and
+# whether the sandbox lets the builder make a user namespace at all, which
+# bubblewrap and the test TV's Chromium both need. Kept with the run.
+printf '%s\n' "\${jail[@]}" >$DIR/bwrap.txt
+bwrap "\${jail[@]}" true >>$DIR/bwrap.txt 2>&1
+say userns 'unshare -U true'
 say bwrap 'bwrap "\${jail[@]}" true'
 say bwrap-home 'bwrap "\${jail[@]}" test -e /var/lib/agentv/builder/.local/bin/claude'
 say bwrap-work 'bwrap "\${jail[@]}" touch $DIR/work/$MARK'
@@ -122,6 +135,7 @@ done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
 ssh_guest "sudo cat $DIR/try.json $DIR/try.err" >"$RUN_DIR/try.txt" 2>&1 || true
+ssh_guest "sudo cat $DIR/bwrap.txt" >"$RUN_DIR/bwrap.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
 
@@ -147,6 +161,7 @@ check "S6.8 the builder can't push to GitHub: its filter refuses github.com" sai
 check "S6.8 so nothing from GitHub reaches it" said no github
 check "the filter won't take it to this box either" said no box-through-filter
 check "the relay passes on only a model's calls" said yes relay-refuses
+check "the build's sandbox lets the builder make a user namespace, for bubblewrap" said yes userns
 check "ADR-044 bubblewrap runs in the builder's sandbox, for install scripts with safeguards off" said yes bwrap
 check "ADR-044 an install script can't see the builder's home, its CLI or a plan's sign-in" said no bwrap-home
 check "ADR-044 an install script writes the work folder" said yes bwrap-work
