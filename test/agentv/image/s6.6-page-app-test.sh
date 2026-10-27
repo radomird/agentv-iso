@@ -63,11 +63,14 @@ const kit = window.agentv;
 (async () => {
   await kit.storage.set("opened", { at: Date.now(), origin: String(origin), host: location.host });
   await kit.tile.set({ headline: { label: "probe", value: "ok" } });
+  // A site it doesn't declare, put together as it runs: the contract's own
+  // check refuses one written out, before the app ever runs.
+  const away = ["https:", "", "example.org", ""].join("/");
   let reach = "refused";
-  try { await fetch("https://example.org/"); reach = "reached"; } catch {}
+  try { await fetch(away); reach = "reached"; } catch {}
   await kit.storage.set("reach", reach);
   kit.ready();
-  setTimeout(() => { location.href = "https://example.org/"; }, 1500);
+  setTimeout(() => { location.href = away; }, 1500);
 })();
 PROBE
 
