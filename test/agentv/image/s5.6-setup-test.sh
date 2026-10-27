@@ -61,7 +61,13 @@ fi
 
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
 check "Enter on the welcome screen carries on with the keyboard, to getting ready" until_setup '.setup.step == "ready" and .setup.keyboard' 60
-check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "getting ready" 30
+if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
+  check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "getting ready" 30
+else
+  # With nothing newer, getting ready moves on by itself in a few seconds,
+  # which can be before OCR reads it: then the AI step is on the TV.
+  check "getting ready is on the TV, or the AI step it moved on to (OCR)" ocr_finds success-S5.6-getting-ready "getting ready|which ai do you use" 30
+fi
 capture_console "success-S5.6-getting-ready"
 
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
