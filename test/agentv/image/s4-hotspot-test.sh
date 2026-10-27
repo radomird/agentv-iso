@@ -146,7 +146,7 @@ ssh_sudo "iptables -t nat -S PREROUTING" >"$RUN_DIR/nat.txt" 2>&1 || true
 check "port 80 goes to the captive page" grep -q -- "-i $box_if -p tcp -m tcp --dport 80 .*agentv-setup-hotspot.* -j REDIRECT --to-ports 3002" "$RUN_DIR/nat.txt"
 
 # The welcome screen shows its QR code.
-check "the welcome screen says to scan it (OCR)" ocr_finds welcome "scan this" 15
+check "the welcome screen says to scan it (OCR)" ocr_finds welcome "scan th(is|e code)" 15
 capture_console "success-hotspot-welcome"
 qr() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/hotspot/qr" 2>/dev/null | grep -q "<svg"

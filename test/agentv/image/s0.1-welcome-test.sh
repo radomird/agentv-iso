@@ -6,6 +6,7 @@
 # screen. The screenshot goes with the run for a person to look at.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -31,11 +32,9 @@ check "S0.1 the welcome screen is on the TV (daemon /health)" \
 # The kiosk fills the screen with the page; give it a beat to settle.
 sleep 5
 capture_console "success-S0.1-welcome"
-screen_says() {
-  tesseract "$1" - 2>/dev/null | grep -qi "$2"
-}
-check "S0.1 the screen shows the welcome page (OCR)" \
-  screen_says "$RUN_DIR/success-S0.1-welcome.png" "tv setup"
+# TV setup's welcome screen has the code to pair the phone beside its words,
+# so OCR reads it as scattered text too (ocr_finds).
+check "S0.1 the screen shows the welcome page (OCR)" ocr_finds success-S0.1-welcome-ocr "tv setup" 15
 
 stop_vm
 finish

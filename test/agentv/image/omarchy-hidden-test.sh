@@ -9,6 +9,7 @@
 # terminal opened over it anyway.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -49,20 +50,20 @@ check "the TV is a Chromium kiosk app window" \
 # screen, which would bring back Omarchy's bar with its clock and weekday.
 press esc
 sleep 3
-ocr_screen >"$RUN_DIR/screen-after-esc.txt" 2>/dev/null || true
 capture_console "tv-after-esc"
-check "after Esc the TV is still the full-screen welcome page" \
-  bash -c "grep -q 'TV setup starts here' '$RUN_DIR/screen-after-esc.txt' && ! grep -Eqi '(mon|tues|wednes|thurs|fri|satur|sun)day' '$RUN_DIR/screen-after-esc.txt'"
+check "after Esc the TV is still the full-screen welcome page" ocr_finds screen-after-esc "$WELCOME_TEXT" 15
+check "and no bar with its weekday came back over it" \
+  bash -c "! grep -Eqi '(mon|tues|wednes|thurs|fri|satur|sun)day' '$RUN_DIR/screen-after-esc.txt'"
 
 # As on the NUC: Super+Return. On Omarchy's desktop it opened a terminal
 # over the TV; in the TV session it opens nothing, and the TV stays as it is.
 press meta_l-ret
 sleep 5
 check "Super+Return opens no terminal over the TV" ssh_guest "! pgrep -u \$(id -u) -x foot >/dev/null"
-ocr_screen >"$RUN_DIR/screen-after-super-return.txt" 2>/dev/null || true
 capture_console "tv-after-super-return"
-check "after Super+Return the TV is still the welcome page, with no browser tabs or address bar" \
-  bash -c "grep -q 'TV setup starts here' '$RUN_DIR/screen-after-super-return.txt' && ! grep -Eq '127\.0\.0\.1|AgenTV setup' '$RUN_DIR/screen-after-super-return.txt'"
+check "after Super+Return the TV is still the welcome page" ocr_finds screen-after-super-return "$WELCOME_TEXT" 15
+check "with no browser tabs or address bar" \
+  bash -c "! grep -Eq '127\.0\.0\.1|AgenTV setup' '$RUN_DIR/screen-after-super-return.txt'"
 
 ssh_guest "bash -lc 'agentv-update-confirm' </dev/null" >"$RUN_DIR/update-question.txt" 2>&1 || true
 cat "$RUN_DIR/update-question.txt"
