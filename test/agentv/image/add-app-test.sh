@@ -60,8 +60,10 @@ wait_home 60 >/dev/null || true
 work="$RUN_DIR/add-app"
 rm -rf "$work"
 mkdir -p "$work/repo/apps/standin" "$work/index"
-export GNUPGHOME="$work/gnupg"
-mkdir -m 700 "$GNUPGHOME"
+# gpg's agent listens on a socket in GNUPGHOME, whose path has a length
+# limit the run's folder is past, so the key is made in a short one.
+GNUPGHOME=$(mktemp -d /tmp/agentv-gpg.XXXXXX)
+export GNUPGHOME
 gpg --batch --quiet --passphrase '' --quick-gen-key "AgenTV image check <check@agentv.invalid>" ed25519 sign never
 gpg --batch --armor --export >"$work/keyring.asc"
 cat >"$work/repo/apps/standin/manifest.json" <<'MANIFEST'
@@ -97,6 +99,9 @@ commit=$(git -C "$work/repo" rev-parse HEAD)
 jq -n --arg commit "$commit" --arg repo "file://$CHECK/repo" \
   '{schema: 1, apps: [{id: "agentv.standin", tier: "official", name: "Stand-in game", version: "1.0.0", description: "A stand-in game for AgenTV'"'"'s image check", repo: $repo, commit: $commit, path: "apps/standin"}]}' >"$work/index/index.json"
 gpg --batch --quiet --detach-sign --output "$work/index/index.json.sig" "$work/index/index.json"
+# The key's done its job: nothing of it is kept.
+gpgconf --kill gpg-agent 2>/dev/null || true
+rm -rf -- "${GNUPGHOME:?}"
 
 # The stand-in game's package, built on the box, in a repository of its own
 # that pacman uses from now on, as it would any other.
