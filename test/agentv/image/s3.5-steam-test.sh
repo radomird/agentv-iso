@@ -30,6 +30,9 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 start_vm_from_base
 wait_for_ssh 300 failure-s3.5-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-s3.5-no-tv"; check "the TV session came up" false; stop_vm; finish; }
+# Past TV setup, to home, where Steam's tile will be.
+guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
+wait_home 60 >/dev/null || true
 
 # How much of the screen is the stand-in icon's magenta.
 magenta() {
