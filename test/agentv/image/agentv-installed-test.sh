@@ -17,7 +17,17 @@ wait_for_ssh 300 failure-agentv-ssh-timeout || exit 1
 
 check "Omarchy's own package is installed" ssh_guest "pacman -Q omarchy"
 check "agentv and agentv-keyring are installed" ssh_guest "pacman -Q agentv agentv-keyring"
-check "pacman trusts AgenTV's key" ssh_guest "pacman-key --list-keys $fingerprint"
+# Right after boot, root's pacman (the update check's) can have the keyring
+# open, as a root gpg-agent did in agentv-iso #55's run, and a read as the
+# box's own account fails while it does. So it's tried for up to 30 s.
+trusts() {
+  local started=$SECONDS
+  until ssh_guest "pacman-key --list-keys $fingerprint" >/dev/null 2>&1; do
+    (( SECONDS - started < 30 )) || return 1
+    sleep 2
+  done
+}
+check "pacman trusts AgenTV's key" trusts
 check "agentv runs" ssh_guest "agentv version"
 check "nothing of AgenTV's is in Omarchy's folder" \
   ssh_guest "! pacman -Ql agentv | grep -q ' /usr/share/omarchy/'"
