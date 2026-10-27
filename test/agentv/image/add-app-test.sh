@@ -92,16 +92,6 @@ cat >"$work/repo/apps/standin/app.ts" <<'APP'
 // A stand-in game for AgenTV's image check: the box opens its program.
 export default { id: "agentv.standin", async launch() {} };
 APP
-git -C "$work/repo" init -q
-git -C "$work/repo" add -A
-git -C "$work/repo" -c user.name="AgenTV image check" -c user.email=check@agentv.invalid commit -qm "A stand-in game"
-commit=$(git -C "$work/repo" rev-parse HEAD)
-jq -n --arg commit "$commit" --arg repo "file://$CHECK/repo" \
-  '{schema: 1, apps: [{id: "agentv.standin", tier: "official", name: "Stand-in game", version: "1.0.0", description: "A stand-in game for AgenTV'"'"'s image check", repo: $repo, commit: $commit, path: "apps/standin"}]}' >"$work/index/index.json"
-gpg --batch --quiet --detach-sign --output "$work/index/index.json.sig" "$work/index/index.json"
-# The key's done its job: nothing of it is kept.
-gpgconf --kill gpg-agent 2>/dev/null || true
-rm -rf -- "${GNUPGHOME:?}"
 
 # The stand-in game's package, built on the box, in a repository of its own
 # that pacman uses from now on, as it would any other.
@@ -130,9 +120,24 @@ grep -q '^\[agentv-check\]' /etc/pacman.conf || printf '\n[agentv-check]\nSigLev
 install -m 644 "$pkg/agentv-check.db.tar.gz" /var/lib/pacman/sync/agentv-check.db
 PACKAGE
 
-tar -C "$work" -czf "$work/check.tgz" repo index keyring.asc package.sh
+tar -C "$work" -czf "$work/check.tgz" repo keyring.asc package.sh
 ssh_guest "cat >/tmp/agentv-check.tgz" <"$work/check.tgz"
 ssh_sudo "install -d -m 755 $CHECK && tar -xzf /tmp/agentv-check.tgz -C $CHECK && chown -R root:root $CHECK && chmod -R a+rX $CHECK && bash $CHECK/package.sh" >"$RUN_DIR/check-setup.log" 2>&1 || true
+
+# The app's repo is made on the box, which has git as any box does for
+# its installs, and the index pins the commit it made, signed here.
+ssh_sudo "git -C $CHECK/repo init -q && git -C $CHECK/repo add -A && git -C $CHECK/repo -c user.name='AgenTV image check' -c user.email=check@agentv.invalid commit -qm 'A stand-in game'" >>"$RUN_DIR/check-setup.log" 2>&1 || true
+commit=$(ssh_sudo "git -C $CHECK/repo rev-parse HEAD" 2>/dev/null | tr -d '\r' | tail -n 1)
+check "the stand-in game's repo is on the box, at a commit ($commit)" test "${#commit}" = 40
+jq -n --arg commit "$commit" --arg repo "file://$CHECK/repo" \
+  '{schema: 1, apps: [{id: "agentv.standin", tier: "official", name: "Stand-in game", version: "1.0.0", description: "A stand-in game for AgenTV'"'"'s image check", repo: $repo, commit: $commit, path: "apps/standin"}]}' >"$work/index/index.json"
+gpg --batch --quiet --detach-sign --output "$work/index/index.json.sig" "$work/index/index.json"
+# The key's done its job: nothing of it is kept.
+gpgconf --kill gpg-agent 2>/dev/null || true
+rm -rf -- "${GNUPGHOME:?}"
+tar -C "$work" -czf "$work/index.tgz" index
+ssh_guest "cat >/tmp/agentv-check-index.tgz" <"$work/index.tgz"
+ssh_sudo "tar -xzf /tmp/agentv-check-index.tgz -C $CHECK && chown -R root:root $CHECK/index && chmod -R a+rX $CHECK/index" >>"$RUN_DIR/check-setup.log" 2>&1 || true
 check "the stand-in game's package is in a repository pacman uses, and not installed" \
   ssh_guest "pacman -Si agentv-stand-in-game >/dev/null && ! pacman -Q agentv-stand-in-game >/dev/null 2>&1"
 
