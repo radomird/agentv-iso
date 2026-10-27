@@ -27,7 +27,10 @@ passwordless_sudo
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 
 home_shut() { ! ssh_guest "ls /var/lib/agentv/builder" >/dev/null 2>&1; }
-no_sudo() { ssh_guest "sudo -l -U agentv-builder" 2>&1 | grep -q "not allowed"; }
+# sudo -l -U lists what a user may run with sudo, and says so when there's
+# nothing. Its answer is kept with the run.
+ssh_guest "sudo -l -U agentv-builder" >"$RUN_DIR/sudo-list.txt" 2>&1 || true
+no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! grep -qiE "may run|NOPASSWD|ALL\)" "$RUN_DIR/sudo-list.txt"; }
 check "the builder has its own user, with a home only it reads" ssh_guest "id agentv-builder && test \"\$(stat -c %U:%a /var/lib/agentv/builder)\" = agentv-builder:700"
 check "the person's account can't read the builder's home" home_shut
 check "the builder may run nothing with sudo" no_sudo
@@ -117,12 +120,12 @@ while (( SECONDS - started < 240 )); do
   sleep 2
 done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
-ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.out" 2>&1 || true
+ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
 ssh_guest "sudo cat $DIR/try.json $DIR/try.err" >"$RUN_DIR/try.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
 
-said() { grep -qx "$1 $2" "$RUN_DIR/probe.out"; }
+said() { grep -qx "$1 $2" "$RUN_DIR/probe.txt"; }
 check "root's hand-over took the ask and started the build's sandbox" jq -e '.build == "b1" and .started == true' "$RUN_DIR/answer.json"
 check "the probe ran as agentv-builder" said yes user
 check "S6.3 the builder can't read /etc/agentv/env" said no env
@@ -149,7 +152,9 @@ check "ADR-044 an install script can't see the builder's home, its CLI or a plan
 check "ADR-044 an install script writes the work folder" said yes bwrap-work
 check "ADR-044 and nothing else of the build" said no bwrap-build
 check "ADR-044 nor reads the key" said no bwrap-env
-check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-enabled --quiet agentv-npm-check.timer"
+# The package wants its timer through /usr/lib's timers.target.wants, which
+# systemctl is-enabled doesn't count, so this asks whether it's waiting.
+check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-active --quiet agentv-npm-check.timer"
 check "ADR-043 the test TV's Chromium runs in the build's sandbox, with its own" said yes testtv-ready
 check "ADR-043 a small page app passes AgenTV's checks there" said yes testtv-checks
 check "ADR-043 and the approval gets its screenshot" said yes testtv-shot
