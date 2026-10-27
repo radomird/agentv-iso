@@ -9,6 +9,7 @@
 # what a misled agent or a bad package would: the key in /etc/agentv/env,
 # the TV's sign-ins, other services' state, the person's home, sudo, the
 # OS's files, the network on its own, this box, GitHub, and the relay's key.
+# Then a package's install script, as it runs with safeguards off.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -63,6 +64,16 @@ say internet 'curl -sS --max-time 5 -o /dev/null https://1.1.1.1/'
 say daemon 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:3000/'
 say credential 'cat /run/credentials/agentv-build-net.service/env'
 say relay-env 'grep -a $MARK /proc/*/environ'
+# A package's install script with safeguards off runs in bubblewrap, in the
+# jail packages.ts builds: the builder's home, with its CLI, out of sight,
+# and only the work folder to write.
+mkdir -p $DIR/work
+mapfile -t jail < <(node --disable-warning=ExperimentalWarning --input-type=module -e "const { jail } = await import('/usr/share/agentv/builder/packages.ts'); console.log(jail('$DIR/work', '/var/lib/agentv/builder').join('\\n'))")
+say bwrap 'bwrap "\${jail[@]}" true'
+say bwrap-home 'bwrap "\${jail[@]}" test -e /var/lib/agentv/builder/.local/bin/claude'
+say bwrap-work 'bwrap "\${jail[@]}" touch $DIR/work/$MARK'
+say bwrap-build 'bwrap "\${jail[@]}" touch $DIR/$MARK-outside-work'
+say bwrap-env 'bwrap "\${jail[@]}" cat /etc/agentv/env'
 # The way out, as the builder reaches it.
 node --disable-warning=ExperimentalWarning --input-type=module -e "const { forward } = await import('/usr/share/agentv/builder/sandbox/start.ts'); await forward(8080, '/run/agentv-build-net/proxy.sock'); setTimeout(() => process.exit(0), 20000);" &
 sleep 2
@@ -108,6 +119,12 @@ check "S6.8 the builder can't push to GitHub: its filter refuses github.com" sai
 check "S6.8 so nothing from GitHub reaches it" said no github
 check "the filter won't take it to this box either" said no box-through-filter
 check "the relay passes on only a model's calls" said yes relay-refuses
+check "ADR-044 bubblewrap runs in the builder's sandbox, for install scripts with safeguards off" said yes bwrap
+check "ADR-044 an install script can't see the builder's home, its CLI or a plan's sign-in" said no bwrap-home
+check "ADR-044 an install script writes the work folder" said yes bwrap-work
+check "ADR-044 and nothing else of the build" said no bwrap-build
+check "ADR-044 nor reads the key" said no bwrap-env
+check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-enabled --quiet agentv-npm-check.timer"
 check "the build's unit ended, and its ticket with it" ssh_guest "! systemctl is-active --quiet '$UNIT' && ! test -e /run/agentv-build/ticket.json"
 
 stop_vm
