@@ -57,15 +57,24 @@ setup_post /api/setup/goal '{"goal": "media"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 check "setup is at its apps" until_json /api/setup '.setup.step == "apps"' 30
 
-check "the official apps for photos come from the signed index: Jellyfin, then Immich" \
-  until_json /api/setup/apps '([.for[].id] == ["agentv.jellyfin", "agentv.immich"]) and (.error == null)' 120
+# The goal's apps are Jellyfin, Plex and Immich, in that order, each once
+# it's in the index.
+# shellcheck disable=SC2016 # $f and $id are jq's own
+check "the official apps for photos come from the signed index, in the goal's order: Jellyfin first, Immich among them" \
+  until_json /api/setup/apps '[.for[].id] as $f | ($f | index("agentv.jellyfin")) == 0 and ($f | index("agentv.immich")) != null and ($f == (["agentv.jellyfin", "agentv.plex", "agentv.immich"] | map(select(. as $id | $f | index($id) != null)))) and (.error == null)' 120
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup/apps" >"$RUN_DIR/setup-apps.json" 2>&1 || true
+log "the goal's apps: $(jq -c '[.for[].id]' "$RUN_DIR/setup-apps.json" 2>/dev/null)"
 check "Steam and the built-in Music are under more" jq -e '[.more[].id] | index("agentv.steam") != null and index("agentv.music") != null' "$RUN_DIR/setup-apps.json"
 check "the apps step is on the TV (OCR)" ocr_finds success-setup-apps "pick your apps|add your own" 30
 capture_console "success-setup-apps"
 
-# Immich ticked with the remote's keys, then continue, above it.
-for key in right enter up enter; do
+# Immich ticked with the remote's keys, then continue, above it. The focus
+# starts on the goal's first app, so Immich is as many to the right as its
+# place in the row.
+rights=$(jq -r '[.for[].id] | index("agentv.immich") // 1' "$RUN_DIR/setup-apps.json" 2>/dev/null || echo 1)
+keys=()
+for (( i = 0; i < rights; i++ )); do keys+=(right); done
+for key in "${keys[@]}" enter up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
