@@ -81,6 +81,16 @@ printf '%s\n' "$page" >"$RUN_DIR/page.txt"
 check "its own origin serves its page, under the policy the box writes" grep -qi "^content-security-policy: default-src 'none'" "$RUN_DIR/page.txt"
 check "and that origin isn't the daemon's" test "$(ssh_guest "curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Host: $APP.app.localhost:3000' http://127.0.0.1:3000/api/home")" = "404"
 
+# Home lists it once root's install has told the daemon, as its tile shows.
+on_home() {
+  local started=$SECONDS
+  while (( SECONDS - started < 30 )); do
+    [[ $(ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -r --arg id "$APP" '[.apps[].id] | index($id) != null' 2>/dev/null) == "true" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+check "home has it" on_home
 guest "agentv screen app $APP" >"$RUN_DIR/open.log" 2>&1 || true
 check "it opens the way its tile would, on home" grep -q '"ok": *true' "$RUN_DIR/open.log"
 check "the app reached the box through the kit, from its own origin" until_kit opened 30

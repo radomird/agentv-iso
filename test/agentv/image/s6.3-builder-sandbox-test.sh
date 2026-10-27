@@ -27,7 +27,10 @@ passwordless_sudo
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 
 home_shut() { ! ssh_guest "ls /var/lib/agentv/builder" >/dev/null 2>&1; }
-no_sudo() { ssh_guest "sudo -l -U agentv-builder" 2>&1 | grep -q "not allowed"; }
+# sudo -l -U lists what a user may run with sudo, and says so when there's
+# nothing. Its answer is kept with the run.
+ssh_guest "sudo -l -U agentv-builder" >"$RUN_DIR/sudo-list.txt" 2>&1 || true
+no_sudo() { [[ -s $RUN_DIR/sudo-list.txt ]] && ! grep -qiE "may run|NOPASSWD|ALL\)" "$RUN_DIR/sudo-list.txt"; }
 check "the builder has its own user, with a home only it reads" ssh_guest "id agentv-builder && test \"\$(stat -c %U:%a /var/lib/agentv/builder)\" = agentv-builder:700"
 check "the person's account can't read the builder's home" home_shut
 check "the builder may run nothing with sudo" no_sudo
@@ -93,11 +96,11 @@ while (( SECONDS - started < 120 )); do
   sleep 2
 done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
-ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.out" 2>&1 || true
+ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
 
-said() { grep -qx "$1 $2" "$RUN_DIR/probe.out"; }
+said() { grep -qx "$1 $2" "$RUN_DIR/probe.txt"; }
 check "root's hand-over took the ask and started the build's sandbox" jq -e '.build == "b1" and .started == true' "$RUN_DIR/answer.json"
 check "the probe ran as agentv-builder" said yes user
 check "S6.3 the builder can't read /etc/agentv/env" said no env
