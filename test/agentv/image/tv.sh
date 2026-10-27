@@ -108,22 +108,30 @@ wait_desktop() {
   return 1
 }
 
-# The welcome page's text is on the screen, read with OCR.
+# What OCR reads on the welcome screen: TV setup's (stage 5), whose code
+# to pair the phone sits beside its words, or the stage 0 placeholder an
+# older release has, as before an update.
+# shellcheck disable=SC2034 # the checks that source this use it
+WELCOME_TEXT="TV setup starts here|use a keyboard|1/6 connect"
+
+# The welcome screen is on the TV, read with OCR, which reads it as scattered
+# text too, since the QR code beside it turns a block reading to noise.
 screen_shows_welcome() {
-  ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -q "TV setup starts here" "$RUN_DIR/$1.txt"
+  ocr_finds "$1" "$WELCOME_TEXT" 15
 }
 
 # ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
-# any case) on the screen. Each try reads one screenshot three ways: as a
+# any case) on the screen. Each try reads one screenshot four ways: as a
 # block of text, as ocr_screen does; as scattered text, which still reads a
 # headline with a QR code beside it, where the block reading turns to noise
-# at a VM's small screen; and the right 62% as a block, larger, which leaves
-# out a QR code on the left. What it read last is in $RUN_DIR/<name>.txt,
-# and the screenshot in $RUN_DIR/.ocr.ppm.
+# at a VM's small screen; the right 62% as a block, larger, which leaves
+# out a QR code on the left; and the bottom 30% as a block, larger, where a
+# small line such as the ambient screen's credit sits over a picture. What
+# it read last is in $RUN_DIR/<name>.txt, and the screenshot in
+# $RUN_DIR/.ocr.ppm.
 ocr_finds() {
-  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png"
+  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png"
 
   while true; do
     : >"$RUN_DIR/$1.txt"
@@ -135,6 +143,8 @@ ocr_finds() {
         tesseract "$prepped" - --psm 11 2>/dev/null
         magick "$shot" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
           tesseract "$right" - --psm 6 2>/dev/null
+        magick "$shot" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
+          tesseract "$bottom" - --psm 6 2>/dev/null
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
