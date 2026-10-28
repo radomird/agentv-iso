@@ -59,9 +59,15 @@ fi
 omarchy_themes() {
   guest "find /usr/share/omarchy/themes ~/.config/omarchy/themes -mindepth 1 -maxdepth 1 \\( -type d -o -type l \\) -printf '%f\\n' 2>/dev/null | sort -u" 2>/dev/null
 }
+# Look's list and Omarchy's, side by side in the log when they differ.
 same_themes() {
-  diff <(jq -r '.themes[].id' "$RUN_DIR/$1" | sort) <(omarchy_themes) >"$RUN_DIR/$1.diff"
+  jq -r '.themes[].id' "$RUN_DIR/$1" | sort >"$RUN_DIR/$1.look.txt"
+  omarchy_themes >"$RUN_DIR/$1.omarchy.txt"
+  diff "$RUN_DIR/$1.look.txt" "$RUN_DIR/$1.omarchy.txt" >"$RUN_DIR/$1.diff.txt" && return 0
+  printf 'Look and Omarchy differ (< Look, > Omarchy):\n%s\n' "$(cat "$RUN_DIR/$1.diff.txt")" >&3
+  return 1
 }
+exec 3>&1
 check "S5.7 Look lists every theme Omarchy ships ($(jq '.themes | length' "$RUN_DIR/themes-before.json"))" same_themes themes-before.json
 check "Tokyo Night first" jq -e '.themes[0].id == "tokyo-night"' "$RUN_DIR/themes-before.json"
 
@@ -104,9 +110,10 @@ guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "home takes over${took:+ (after $took s)}" test -n "$took"
 
-# Omarchy's desktop moves on to Rosé Pine.
-guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarchy-theme-set rose-pine" >>"$RUN_DIR/install.log" 2>&1 || true
-check "Omarchy's desktop moves on to rose pine, and so does the TV" until_json /api/themes '.current == "rose-pine"' 30
+# Omarchy's desktop moves on to Gruvbox, a dark theme, as the screen's OCR
+# reads light text on dark far better.
+guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarchy-theme-set gruvbox" >>"$RUN_DIR/install.log" 2>&1 || true
+check "Omarchy's desktop moves on to gruvbox, and so does the TV" until_json /api/themes '.current == "gruvbox"' 30
 
 # Settings → Look, at aurora with the TV's keys: into the list, up to its
 # first row, which is Tokyo Night, then right, to aurora.
