@@ -9,6 +9,7 @@
 # what a misled agent or a bad package would: the key in /etc/agentv/env,
 # the TV's sign-ins, other services' state, the person's home, sudo, the
 # OS's files, the network on its own, this box, GitHub, and the relay's key.
+# Then a package's install script, as it runs with safeguards off.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -73,6 +74,40 @@ say internet 'curl -sS --max-time 5 -o /dev/null https://1.1.1.1/'
 say daemon 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:3000/'
 say credential 'cat /run/credentials/agentv-build-net.service/env'
 say relay-env 'grep -a $MARK /proc/*/environ'
+# A package's install script with safeguards off runs in bubblewrap, in the
+# jail packages.ts builds: the builder's home, with its CLI, out of sight,
+# and only the work folder to write.
+mkdir -p $DIR/work
+mapfile -t jail < <(node --disable-warning=ExperimentalWarning --input-type=module -e "const { jail } = await import('/usr/share/agentv/builder/packages.ts'); console.log(jail('$DIR/work', '/var/lib/agentv/builder').join('\\n'))")
+# What bubblewrap says when it can't, with the jail it was given, and
+# whether the sandbox lets the builder make a user namespace at all, which
+# bubblewrap and the test TV's Chromium both need. Kept with the run.
+printf '%s\n' "\${jail[@]}" >$DIR/bwrap.txt
+bwrap "\${jail[@]}" true >>$DIR/bwrap.txt 2>&1
+say userns 'unshare -U true'
+say bwrap 'bwrap "\${jail[@]}" true'
+say bwrap-home 'bwrap "\${jail[@]}" test -e /var/lib/agentv/builder/.local/bin/claude'
+say bwrap-work 'bwrap "\${jail[@]}" touch $DIR/work/$MARK'
+say bwrap-build 'bwrap "\${jail[@]}" touch $DIR/$MARK-outside-work'
+say bwrap-env 'bwrap "\${jail[@]}" cat /etc/agentv/env'
+# S6.10: with safeguards off, a package's install script runs in that jail,
+# as packages.ts runs npm ci. The package is its own, so nothing is fetched.
+printf '%s' '{"name":"probe","version":"1.0.0","scripts":{"install":"touch installed-by-script"}}' >$DIR/work/package.json
+printf '%s' '{"name":"probe","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"probe","version":"1.0.0","hasInstallScript":true}}}' >$DIR/work/package-lock.json
+(cd $DIR/work && env HOME=/tmp/home npm_config_cache=/tmp/npm-cache npm_config_update_notifier=false bwrap "\${jail[@]}" npm ci --foreground-scripts --no-audit --no-fund) >$DIR/npm.txt 2>&1
+say npm-script '[ -f $DIR/work/installed-by-script ]'
+# S6.10: everything the builder writes is mounted nosuid and nodev. And a
+# set-user-ID and set-group-ID copy of id in its build's folder, which the
+# test runs as nobody below.
+flags() { awk -v p="\$1" '\$5 == p { o = \$6 } END { print o }' /proc/self/mountinfo | tr , '\n'; }
+nosuid_nodev() { flags "\$1" | grep -qx nosuid && flags "\$1" | grep -qx nodev; }
+for path in $DIR /var/lib/agentv/builder /tmp /var/tmp; do echo "\$path \$(flags \$path | paste -sd,)" >>$DIR/mounts.txt; done
+say nosuid-build 'nosuid_nodev $DIR'
+say nosuid-home 'nosuid_nodev /var/lib/agentv/builder'
+say nosuid-tmp 'nosuid_nodev /tmp'
+say nosuid-var-tmp 'nosuid_nodev /var/tmp'
+cp /usr/bin/id $DIR/suid-id
+say suid-bits 'chmod 6755 $DIR/suid-id'
 # The way out, as the builder reaches it.
 node --disable-warning=ExperimentalWarning --input-type=module -e "const { forward } = await import('/usr/share/agentv/builder/sandbox/start.ts'); await forward(8080, '/run/agentv-build-net/proxy.sock'); setTimeout(() => process.exit(0), 20000);" &
 sleep 2
@@ -93,6 +128,7 @@ while (( SECONDS - started < 120 )); do
 done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
+ssh_guest "sudo cat $DIR/bwrap.txt" >"$RUN_DIR/bwrap.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
 
@@ -118,6 +154,28 @@ check "S6.8 the builder can't push to GitHub: its filter refuses github.com" sai
 check "S6.8 so nothing from GitHub reaches it" said no github
 check "the filter won't take it to this box either" said no box-through-filter
 check "the relay passes on only a model's calls" said yes relay-refuses
+check "the build's sandbox lets the builder make a user namespace, for bubblewrap" said yes userns
+check "ADR-044 bubblewrap runs in the builder's sandbox, for install scripts with safeguards off" said yes bwrap
+check "ADR-044 an install script can't see the builder's home, its CLI or a plan's sign-in" said no bwrap-home
+check "ADR-044 an install script writes the work folder" said yes bwrap-work
+check "ADR-044 and nothing else of the build" said no bwrap-build
+check "ADR-044 nor reads the key" said no bwrap-env
+ssh_guest "sudo cat $DIR/npm.txt $DIR/mounts.txt" >"$RUN_DIR/npm-and-mounts.txt" 2>&1 || true
+check "S6.10 with safeguards off, an npm install script runs, inside bubblewrap" said yes npm-script
+check "S6.10 the builder's build folder is mounted nosuid and nodev" said yes nosuid-build
+check "S6.10 and so is its home" said yes nosuid-home
+check "S6.10 and its /tmp" said yes nosuid-tmp
+check "S6.10 and its /var/tmp" said yes nosuid-var-tmp
+# The builder can set the bits, with RestrictSUIDSGID= gone (ADR-052), but
+# its set-user-ID and set-group-ID copy of id, run as nobody, is still
+# nobody: on a nosuid mount the bits count for nothing.
+ssh_guest "sudo stat -c %A $DIR/suid-id; for flag in -u -g; do sudo setpriv --reuid=65534 --regid=65534 --clear-groups $DIR/suid-id \$flag; done" >"$RUN_DIR/suid.txt" 2>&1 || true
+still_nobody() { [[ $(tail -n 2 "$RUN_DIR/suid.txt" | paste -sd ' ') == "65534 65534" ]]; }
+check "S6.10 the builder can set a file's setuid and setgid bits" said yes suid-bits
+check "S6.10 and a setuid or setgid file the builder writes gives no one more rights" still_nobody
+# The package wants its timer through /usr/lib's timers.target.wants, which
+# systemctl is-enabled doesn't count, so this asks whether it's waiting.
+check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-active --quiet agentv-npm-check.timer"
 check "the build's unit ended, and its ticket with it" ssh_guest "! systemctl is-active --quiet '$UNIT' && ! test -e /run/agentv-build/ticket.json"
 
 stop_vm
