@@ -115,6 +115,30 @@ say github '[ "\$(curl -sS --max-time 10 -o /dev/null -w %{http_code} -x http://
 say github-refused 'curl -sS --max-time 10 -o /dev/null -x http://127.0.0.1:8080 https://github.com/ 2>&1 | grep -q 403'
 say box-through-filter 'curl -sS --max-time 10 -o /dev/null -x http://127.0.0.1:8080 https://127.0.0.1:3000/'
 say relay-refuses 'curl -sS --max-time 10 --unix-socket /run/agentv-build-net/relay.sock http://relay/v1/files | grep -q "isn.t a call the builder makes"'
+# The test TV, as the gates run it: Chromium in the build's sandbox, with
+# its own sandbox in namespaces, trying a small page app.
+mkdir -p $DIR/work/app
+cat >$DIR/work/app/manifest.json <<'APP'
+{"schemaVersion": 1, "id": "local.probe", "name": "Probe", "version": "1.0.0", "author": "your agent", "license": "MIT",
+ "description": "A page app for the test TV's image check", "kinds": ["tv-app"], "entryPoints": {"page": "index.html"},
+ "tv": {"contract": 2, "category": "utility", "runtime": "page", "capabilities": ["launch"], "tiles": {"s": "logo"}}}
+APP
+cat >$DIR/work/app/index.html <<'APP'
+<!doctype html><html><head><meta charset="utf-8"><title>Probe</title></head><body><canvas id="c" width="320" height="180"></canvas><script src="/_agentv/kit.js"></script><script src="main.js"></script></body></html>
+APP
+cat >$DIR/work/app/main.js <<'APP'
+var x = 0;
+var c = document.getElementById("c").getContext("2d");
+function draw() { x = (x + 2) % 320; c.fillStyle = "#123"; c.fillRect(0, 0, 320, 180); c.fillStyle = "#7cf"; c.fillRect(x, 80, 20, 20); requestAnimationFrame(draw); }
+agentv.input.on(function () {});
+agentv.onBack(function () { return false; });
+requestAnimationFrame(function () { draw(); agentv.ready(); });
+APP
+printf 'MIT\n' >$DIR/work/app/LICENSE
+node --disable-warning=ExperimentalWarning --input-type=module -e "const { tryApp } = await import('/usr/share/agentv/builder/gates/testtv.ts'); const r = await tryApp({ app: '$DIR/work/app', tests: [], checks: true, root: '/usr/share/agentv', chromium: '/usr/bin/chromium', storage: '$DIR/try-storage', shot: '$DIR/shot.png' }); console.log(JSON.stringify(r));" >$DIR/try.json 2>$DIR/try.err
+say testtv-ready 'jq -e .ready $DIR/try.json'
+say testtv-checks 'jq -e "(.problems | length) == 0" $DIR/try.json'
+say testtv-shot 'test -s $DIR/shot.png'
 echo done >>"\$out"
 PROBE
 
@@ -122,12 +146,13 @@ PROBE
 ssh_guest "sudo install -d -m 700 /var/lib/private/agentv/daemon/build-drop && printf '%s' '{\"build\":\"b1\",\"id\":\"local.probe\",\"version\":\"1.0.0\",\"sentence\":\"a probe\",\"phase\":\"build\",\"recipe\":\"game\",\"provider\":\"claude\",\"path\":\"key\",\"safeguards\":true}' | sudo tee /var/lib/private/agentv/daemon/build-drop/start.json >/dev/null"
 
 started=$SECONDS
-while (( SECONDS - started < 120 )); do
+while (( SECONDS - started < 240 )); do
   ssh_guest "sudo grep -q '^done' $DIR/probe.out" 2>/dev/null && break
   sleep 2
 done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
+ssh_guest "sudo cat $DIR/try.json $DIR/try.err" >"$RUN_DIR/try.txt" 2>&1 || true
 ssh_guest "sudo cat $DIR/bwrap.txt" >"$RUN_DIR/bwrap.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
@@ -176,6 +201,9 @@ check "S6.10 and a setuid or setgid file the builder writes gives no one more ri
 # The package wants its timer through /usr/lib's timers.target.wants, which
 # systemctl is-enabled doesn't count, so this asks whether it's waiting.
 check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-active --quiet agentv-npm-check.timer"
+check "ADR-043 the test TV's Chromium runs in the build's sandbox, with its own" said yes testtv-ready
+check "ADR-043 a small page app passes AgenTV's checks there" said yes testtv-checks
+check "ADR-043 and the approval gets its screenshot" said yes testtv-shot
 check "the build's unit ended, and its ticket with it" ssh_guest "! systemctl is-active --quiet '$UNIT' && ! test -e /run/agentv-build/ticket.json"
 
 stop_vm
