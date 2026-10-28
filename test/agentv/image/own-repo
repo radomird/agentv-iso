@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# For a pull request's image run (Q137): points the box's update check at
+# this run's own AgenTV packages instead of edge, and makes that the base
+# image every check starts from. Then getting ready, the daily check and
+# agentv update on a check's box find the pull request's build, not whatever
+# edge has that hour, so the run tests the pull request, updates included.
+# The checks that hand over a newer build (s0.5-update, update-tv and
+# s5.6-setup) still point the box at theirs, and edge-switch goes back to
+# the real channels, which are what it checks.
+#
+# ci serves AGENTV_TEST_OWN_REPO, the run's signed repository, on port
+# AGENTV_TEST_OWN_REPO_PORT in its container, which the box reaches as
+# 10.0.2.2, for as long as the checks run. Nightly and release runs don't
+# set it, and keep their channels.
+#
+# Usage: test/agentv/image/own-repo <iso>   (in ci's container; the ISO is
+#        only the name the base image goes by)
+
+set -euo pipefail
+
+DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+iso="${1:?usage: test/agentv/image/own-repo <iso>}"
+: "${AGENTV_TEST_OWN_REPO_PORT:?is the port ci serves the repository on}"
+export OMARCHY_INTEGRATION_ISO
+OMARCHY_INTEGRATION_ISO=$(realpath "$iso")
+export OMARCHY_INTEGRATION_SSH_PORT="${OMARCHY_INTEGRATION_SSH_PORT:-2322}"
+export OMARCHY_INTEGRATION_MEMORY="${OMARCHY_INTEGRATION_MEMORY:-8192}"
+export OMARCHY_INTEGRATION_NO_PREVIEW=true
+
+source "$DIR/../../../test/integration.d/base-test.sh"
+source "$DIR/tv.sh"
+
+base_image_ready || { echo "No base image to point at this run's own packages" >&2; exit 1; }
+
+start_vm_from_base
+wait_for_ssh 300 failure-own-repo-ssh-timeout || exit 1
+wait_tv 240 >/dev/null || true
+installed=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
+log "The box has agentv $installed; pointing its update check at this run's own packages"
+
+server="http://10.0.2.2:$AGENTV_TEST_OWN_REPO_PORT"
+ssh_sudo "install -d -m 755 /etc/agentv && echo $server >/etc/agentv/repository && agentv-pacman-conf" >"$RUN_DIR/pacman-conf.log" 2>&1 || true
+check "pacman takes AgenTV from this run's own packages" \
+  ssh_guest "grep -A3 '^\[agentv\]' /etc/pacman.conf | grep -qx 'Server = $server'"
+# The box reads the run's repository, its signature checked against
+# agentv-keyring's key, and finds the build it has on it: nothing newer.
+ssh_sudo "pacman -Sy" >"$RUN_DIR/sync.log" 2>&1 || { tail -n 20 "$RUN_DIR/sync.log"; }
+offered=$(ssh_guest "pacman -Sl agentv" 2>/dev/null | awk '$2 == "agentv" { print $3 }')
+check "and finds the build it has, agentv $installed (offered: ${offered:-none})" test "$offered" = "$installed"
+
+# Written down, then off, cleanly: the overlay becomes the base image.
+ssh_sudo "sync"
+stop_vm
+qemu-img commit -q "$RUN_DIR/run.qcow2"
+cp "$RUN_DIR/OVMF_VARS.4m.fd" "$BASE_OVMF"
+finish
