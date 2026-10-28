@@ -1,12 +1,12 @@
 #!/bin/bash
 #
 # S5.2: changing the theme on Omarchy's desktop changes the TV within 2 s
-# (ADR-012). First setup's look (board 12): Gruvbox, picked with the TV's
-# keys, is set with Omarchy's own omarchy-theme-set through the screen
-# daemon, and the TV turns Gruvbox. Then a theme set the way Omarchy's
-# desktop sets it, omarchy-theme-set as the owner, is timed on the box
-# itself, from the command's start to the daemon having its colours, and the
-# TV's own screen turns light with Catppuccin Latte.
+# (ADR-012). First setup's look (board 12): the look after Tokyo Night,
+# picked with the TV's keys, is set with Omarchy's own omarchy-theme-set
+# through the screen daemon, and the TV has it. Then a theme set the way
+# Omarchy's desktop sets it, omarchy-theme-set as the owner, is timed on the
+# box itself, from the command's start to the daemon having its colours, and
+# the TV's own screen turns light with Catppuccin Latte.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -48,8 +48,11 @@ setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
 check "setup is at its look" until_json /api/setup '.setup.step == "theme"' 30
-check "the look offers Tokyo Night, Gruvbox and Catppuccin Latte, and the TV has Tokyo Night" \
-  until_json /api/themes '([.themes[].id] == ["tokyo-night", "gruvbox", "catppuccin-latte"]) and .current == "tokyo-night"' 30
+# Tokyo Night first, then the rest (every theme Omarchy has since ADR-048,
+# three before it). The right arrow goes to the second.
+check "the look offers Tokyo Night first, Gruvbox and Catppuccin Latte among the rest, and the TV has Tokyo Night" \
+  until_json /api/themes '.themes[0].id == "tokyo-night" and ([.themes[].id] | index("gruvbox") and index("catppuccin-latte")) and .current == "tokyo-night"' 30
+next=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/themes" 2>/dev/null | jq -r '.themes[1].id // ""')
 check "the look is on the TV (OCR)" ocr_finds success-S5.2-look "pick a look|describe your own" 30
 capture_console "success-S5.2-look"
 
@@ -58,11 +61,11 @@ for key in right enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
-check "S5.2 Gruvbox picked on the TV is set with Omarchy's own command, and the TV has it" until_json /api/themes '.current == "gruvbox"' 60
-log "Gruvbox from the TV took $(( SECONDS - started )) s, Omarchy's own command included"
+check "S5.2 ${next:-the second look}, picked on the TV, is set with Omarchy's own command, and the TV has it" until_json /api/themes ".current == \"$next\"" 60
+log "${next:-The second look} from the TV took $(( SECONDS - started )) s, Omarchy's own command included"
 guest "cat ~/.local/state/omarchy/current/theme.name" >"$RUN_DIR/theme-name.txt" 2>&1 || true
-check "and it's Omarchy's theme now" grep -qx gruvbox "$RUN_DIR/theme-name.txt"
-capture_console "success-S5.2-gruvbox"
+check "and it's Omarchy's theme now" grep -qx "$next" "$RUN_DIR/theme-name.txt"
+capture_console "success-S5.2-picked"
 for key in up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
@@ -74,7 +77,7 @@ guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "and home takes over${took:+ (after $took s)}" test -n "$took"
 sleep 3
-dark=$(brightness gruvbox-home)
+dark=$(brightness picked-home)
 
 # As Omarchy's desktop does it: omarchy-theme-set, as the owner, timed on
 # the box from its start to the daemon having the new theme's colours. The
