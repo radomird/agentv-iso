@@ -35,7 +35,10 @@ wait_tv 240 >/dev/null || true
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "setup skipped, home is in front${took:+ (after $took s)}" test -n "$took"
-check "the TV starts on its pixel field, with no photo" until_json /api/backgrounds '.source == "field" and (.items | length) == 0' 30
+# Since ADR-048 a new box shows the theme's own backgrounds; the pixel field
+# first, so home starts in its plain colours.
+ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"source\": \"field\"}' http://127.0.0.1:3000/api/backgrounds" >"$RUN_DIR/field.json" 2>&1 || true
+check "the TV is on its pixel field, with no photo" until_json /api/backgrounds '.source == "field" and (.items | length) == 0' 30
 sleep 2
 before=$(brightness home-before)
 
