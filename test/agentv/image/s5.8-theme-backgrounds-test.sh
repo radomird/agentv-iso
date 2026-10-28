@@ -36,6 +36,18 @@ busyness() {
   magick "$shot" -colorspace gray -format '%[fx:standard_deviation]' info: 2>/dev/null || echo 0
 }
 
+# apart <shot> <shot>: how far apart two screens of busyness's are below
+# home's top row of tiles, 0 to 1. With the pixel field, home has the
+# theme's plain colour there; with a picture, the picture.
+apart() {
+  local w h one
+  read -r w h < <(magick identify -format '%w %h' "$RUN_DIR/$1.ppm" 2>/dev/null)
+  for one in "$1" "$2"; do
+    magick "$RUN_DIR/$one.ppm" -crop "${w:-0}x$(( ${h:-0} * 45 / 100 ))+0+$(( ${h:-0} * 45 / 100 ))" +repage "$RUN_DIR/$one-below.png" 2>/dev/null
+  done
+  magick compare -metric RMSE "$RUN_DIR/$1-below.png" "$RUN_DIR/$2-below.png" null: 2>&1 | sed -nE 's/.*\(([0-9.e+-]+)\).*/\1/p'
+}
+
 # The id of the picture Omarchy's current background links to, as the TV
 # names it: the start of its SHA-256.
 omarchy_current() {
@@ -76,8 +88,11 @@ capture_console "success-S5.8-home"
 ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"source\": \"field\"}' http://127.0.0.1:3000/api/backgrounds" >/dev/null 2>&1 || true
 sleep 3
 plain=$(busyness home-field)
-check "S5.8 home has it behind the tiles (how much the screen varies: $busy, $plain on the pixel field)" \
-  awk -v b="$busy" -v p="$plain" 'BEGIN { exit !(b > p + 0.02) }'
+# A dim picture varies little more than the plain colour does, so it's the
+# two screens' difference below the tiles that says the picture's there.
+gap=$(apart home-theme home-field)
+check "S5.8 home has it behind the tiles (the screen below them is ${gap:-?} apart from the pixel field's, out of 1; it varies $busy, and $plain on the field)" \
+  awk -v d="${gap:-0}" 'BEGIN { exit !(d > 0.03) }'
 ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"source\": \"theme\"}' http://127.0.0.1:3000/api/backgrounds" >/dev/null 2>&1 || true
 sleep 2
 
