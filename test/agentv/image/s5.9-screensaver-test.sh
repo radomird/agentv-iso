@@ -25,11 +25,14 @@ wait_front() {
   return 1
 }
 
-# The colour most of the screen is, as a hex colour.
+# The colour most of the screen is, as a hex colour. awk reads the whole
+# histogram: a head that stops early kills sort with SIGPIPE once ttfx puts
+# enough colours on the screen, and pipefail ends the check with it.
 most_of_screen() {
   local shot="$RUN_DIR/$1.ppm"
   screendump "$shot"
-  magick "$shot" -format %c histogram:info:- 2>/dev/null | sort -rn | head -n 1 | grep -o '#[0-9A-Fa-f]\{6\}' | head -n 1
+  { magick "$shot" -format %c histogram:info:- 2>/dev/null || true; } |
+    awk '$1 + 0 > most { most = $1 + 0; line = $0 } END { if (match(line, /#[0-9A-Fa-f]{6}/)) print substr(line, RSTART, RLENGTH) }'
 }
 
 # Leaves the TV alone until the screensaver is in front. Prints how many
