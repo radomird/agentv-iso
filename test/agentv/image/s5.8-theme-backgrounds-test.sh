@@ -38,14 +38,15 @@ busyness() {
 
 # apart <shot> <shot>: how far apart two screens of busyness's are below
 # home's top row of tiles, 0 to 1. With the pixel field, home has the
-# theme's plain colour there; with a picture, the picture.
+# theme's plain colour there; with a picture, the picture. magick compare
+# exits 1 when the two differ, which is the point here.
 apart() {
   local w h one
   read -r w h < <(magick identify -format '%w %h' "$RUN_DIR/$1.ppm" 2>/dev/null)
   for one in "$1" "$2"; do
     magick "$RUN_DIR/$one.ppm" -crop "${w:-0}x$(( ${h:-0} * 45 / 100 ))+0+$(( ${h:-0} * 45 / 100 ))" +repage "$RUN_DIR/$one-below.png" 2>/dev/null
   done
-  magick compare -metric RMSE "$RUN_DIR/$1-below.png" "$RUN_DIR/$2-below.png" null: 2>&1 | sed -nE 's/.*\(([0-9.e+-]+)\).*/\1/p'
+  { magick compare -metric RMSE "$RUN_DIR/$1-below.png" "$RUN_DIR/$2-below.png" null: 2>&1 || true; } | sed -nE 's/.*\(([0-9.e+-]+)\).*/\1/p'
 }
 
 # The id of the picture Omarchy's current background links to, as the TV
