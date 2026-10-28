@@ -125,7 +125,8 @@ keys right up up up up up up right
 # Aurora's own box in Settings → Look: the list's first row, on the right,
 # since it sorts after Tokyo Night. Tesseract reads a name in the list only
 # on its own: the colour swatches beside each one throw a whole screen's
-# reading off, in dark themes and light.
+# reading off, in dark themes and light. It reads JetBrains Mono's u as a v
+# at times, so "avrora" counts too.
 aurora_box() {
   local shot="$RUN_DIR/.box.ppm" w h started=$SECONDS
   while (( SECONDS - started < $1 )); do
@@ -134,7 +135,7 @@ aurora_box() {
     read -r w h < <(magick identify -format '%w %h' "$shot" 2>/dev/null)
     if [[ -n ${w:-} ]] && magick "$shot" -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
       tesseract "$RUN_DIR/.box.png" - --psm 7 >"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
-      grep -qi "aurora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
+      grep -Eqi "a[uv]rora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
     fi
     sleep 1
   done
