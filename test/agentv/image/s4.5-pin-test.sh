@@ -134,8 +134,11 @@ until says "success-pin-unlocked" "installed" || (( SECONDS - started > 30 )); d
 check "and home is back (OCR)" says "success-pin-unlocked" "installed"
 
 ssh_sudo "journalctl -u agentv-daemon --no-pager" >"$RUN_DIR/daemon.log" 2>&1 || true
+# Only what the daemon said, as words: the journal's boot IDs, PIDs and
+# times can hold 4826 by chance.
+ssh_sudo "journalctl -u agentv-daemon --no-pager -o cat" >"$RUN_DIR/daemon-said.log" 2>&1 || true
 not_logged() {
-  grep -q "a wrong pin" "$RUN_DIR/daemon.log" && ! grep -q 4826 "$RUN_DIR/daemon.log"
+  grep -q "a wrong pin" "$RUN_DIR/daemon-said.log" && ! grep -qw 4826 "$RUN_DIR/daemon-said.log"
 }
 check "the daemon logged the wrong PIN, and never the PIN itself" not_logged
 
