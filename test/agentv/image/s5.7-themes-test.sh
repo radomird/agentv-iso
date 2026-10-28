@@ -59,12 +59,14 @@ fi
 omarchy_themes() {
   guest "find /usr/share/omarchy/themes ~/.config/omarchy/themes -mindepth 1 -maxdepth 1 \\( -type d -o -type l \\) -printf '%f\\n' 2>/dev/null | sort -u" 2>/dev/null
 }
-# Look's list and Omarchy's, side by side in the log when they differ.
+# Look's list and Omarchy's, and what's in only one of them in the log when
+# they differ. The image check's container has no diff, so bash compares
+# them and comm says how.
 same_themes() {
   jq -r '.themes[].id' "$RUN_DIR/$1" | sort >"$RUN_DIR/$1.look.txt"
-  omarchy_themes >"$RUN_DIR/$1.omarchy.txt"
-  diff "$RUN_DIR/$1.look.txt" "$RUN_DIR/$1.omarchy.txt" >"$RUN_DIR/$1.diff.txt" && return 0
-  printf 'Look and Omarchy differ (< Look, > Omarchy):\n%s\n' "$(cat "$RUN_DIR/$1.diff.txt")" >&3
+  omarchy_themes | sort >"$RUN_DIR/$1.omarchy.txt"
+  [[ $(<"$RUN_DIR/$1.look.txt") == "$(<"$RUN_DIR/$1.omarchy.txt")" ]] && return 0
+  printf 'Look and Omarchy differ (only in Look, then only in Omarchy, indented):\n%s\n' "$(comm -3 "$RUN_DIR/$1.look.txt" "$RUN_DIR/$1.omarchy.txt")" >&3
   return 1
 }
 exec 3>&1
@@ -120,7 +122,25 @@ check "Omarchy's desktop moves on to gruvbox, and so does the TV" until_json /ap
 guest "agentv screen settings look" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 keys right up up up up up up right
-check "Settings → Look shows aurora (OCR)" ocr_finds success-S5.7-settings "aurora" 20
+# Aurora's own box in Settings → Look: the list's first row, on the right,
+# since it sorts after Tokyo Night. Tesseract reads a name in the list only
+# on its own: the colour swatches beside each one throw a whole screen's
+# reading off, in dark themes and light.
+aurora_box() {
+  local shot="$RUN_DIR/.box.ppm" w h started=$SECONDS
+  while (( SECONDS - started < $1 )); do
+    rm -f "$shot"
+    screendump "$shot"
+    read -r w h < <(magick identify -format '%w %h' "$shot" 2>/dev/null)
+    if [[ -n ${w:-} ]] && magick "$shot" -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
+      tesseract "$RUN_DIR/.box.png" - --psm 7 >"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
+      grep -qi "aurora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+check "Settings → Look shows aurora (OCR)" aurora_box 20
 capture_console "success-S5.7-settings"
 
 # Enter, timed on the box from the key to the TV's colours and Omarchy's
