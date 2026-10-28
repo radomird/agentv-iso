@@ -90,6 +90,24 @@ say bwrap-home 'bwrap "\${jail[@]}" test -e /var/lib/agentv/builder/.local/bin/c
 say bwrap-work 'bwrap "\${jail[@]}" touch $DIR/work/$MARK'
 say bwrap-build 'bwrap "\${jail[@]}" touch $DIR/$MARK-outside-work'
 say bwrap-env 'bwrap "\${jail[@]}" cat /etc/agentv/env'
+# S6.10: with safeguards off, a package's install script runs in that jail,
+# as packages.ts runs npm ci. The package is its own, so nothing is fetched.
+printf '%s' '{"name":"probe","version":"1.0.0","scripts":{"install":"touch installed-by-script"}}' >$DIR/work/package.json
+printf '%s' '{"name":"probe","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"probe","version":"1.0.0","hasInstallScript":true}}}' >$DIR/work/package-lock.json
+(cd $DIR/work && env HOME=/tmp/home npm_config_cache=/tmp/npm-cache npm_config_update_notifier=false bwrap "\${jail[@]}" npm ci --foreground-scripts --no-audit --no-fund) >$DIR/npm.txt 2>&1
+say npm-script '[ -f $DIR/work/installed-by-script ]'
+# S6.10: everything the builder writes is mounted nosuid and nodev. And a
+# set-user-ID and set-group-ID copy of id in its build's folder, which the
+# test runs as nobody below.
+flags() { awk -v p="\$1" '\$5 == p { o = \$6 } END { print o }' /proc/self/mountinfo | tr , '\n'; }
+nosuid_nodev() { flags "\$1" | grep -qx nosuid && flags "\$1" | grep -qx nodev; }
+for path in $DIR /var/lib/agentv/builder /tmp /var/tmp; do echo "\$path \$(flags \$path | paste -sd,)" >>$DIR/mounts.txt; done
+say nosuid-build 'nosuid_nodev $DIR'
+say nosuid-home 'nosuid_nodev /var/lib/agentv/builder'
+say nosuid-tmp 'nosuid_nodev /tmp'
+say nosuid-var-tmp 'nosuid_nodev /var/tmp'
+cp /usr/bin/id $DIR/suid-id
+say suid-bits 'chmod 6755 $DIR/suid-id'
 # The way out, as the builder reaches it.
 node --disable-warning=ExperimentalWarning --input-type=module -e "const { forward } = await import('/usr/share/agentv/builder/sandbox/start.ts'); await forward(8080, '/run/agentv-build-net/proxy.sock'); setTimeout(() => process.exit(0), 20000);" &
 sleep 2
@@ -167,6 +185,19 @@ check "ADR-044 an install script can't see the builder's home, its CLI or a plan
 check "ADR-044 an install script writes the work folder" said yes bwrap-work
 check "ADR-044 and nothing else of the build" said no bwrap-build
 check "ADR-044 nor reads the key" said no bwrap-env
+ssh_guest "sudo cat $DIR/npm.txt $DIR/mounts.txt" >"$RUN_DIR/npm-and-mounts.txt" 2>&1 || true
+check "S6.10 with safeguards off, an npm install script runs, inside bubblewrap" said yes npm-script
+check "S6.10 the builder's build folder is mounted nosuid and nodev" said yes nosuid-build
+check "S6.10 and so is its home" said yes nosuid-home
+check "S6.10 and its /tmp" said yes nosuid-tmp
+check "S6.10 and its /var/tmp" said yes nosuid-var-tmp
+# The builder can set the bits, with RestrictSUIDSGID= gone (ADR-052), but
+# its set-user-ID and set-group-ID copy of id, run as nobody, is still
+# nobody: on a nosuid mount the bits count for nothing.
+ssh_guest "sudo stat -c %A $DIR/suid-id; for flag in -u -g; do sudo setpriv --reuid=65534 --regid=65534 --clear-groups $DIR/suid-id \$flag; done" >"$RUN_DIR/suid.txt" 2>&1 || true
+still_nobody() { [[ $(tail -n 2 "$RUN_DIR/suid.txt" | paste -sd ' ') == "65534 65534" ]]; }
+check "S6.10 the builder can set a file's setuid and setgid bits" said yes suid-bits
+check "S6.10 and a setuid or setgid file the builder writes gives no one more rights" still_nobody
 # The package wants its timer through /usr/lib's timers.target.wants, which
 # systemctl is-enabled doesn't count, so this asks whether it's waiting.
 check "ADR-044 the nightly package check is on" ssh_guest "systemctl is-active --quiet agentv-npm-check.timer"
