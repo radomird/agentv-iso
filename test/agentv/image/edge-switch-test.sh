@@ -17,6 +17,10 @@ wait_for_ssh 300 failure-edge-switch-ssh-timeout || exit 1
 # test/upgrade-test does, as someone at the box would type theirs.
 ssh_sudo "printf '%s\n' '$GUEST_USER ALL=(ALL:ALL) NOPASSWD: ALL' 'Defaults:$GUEST_USER !authenticate' >/etc/sudoers.d/zzz-agentv-test && chmod 440 /etc/sudoers.d/zzz-agentv-test"
 
+# A pull request's run points the box at its own packages (own-repo, Q137).
+# This check is about the real channels, so that steps aside first.
+ssh_sudo "rm -f /etc/agentv/repository"
+
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 log "Installed: agentv $before, on $(ssh_guest "bash -lc 'agentv channel'")"
 
