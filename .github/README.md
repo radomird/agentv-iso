@@ -20,6 +20,10 @@ The latest is [the 0.1.3 ISO](https://pub-18fa48b004b845838c98225b8955c7e6.r2.de
 
 Every ISO passes a test run in GitHub Actions before you see it: a VM installs it by itself, then boots what it installed into AgenTV's TV session.
 
+## Support AgenTV
+
+AgenTV is free and open source. If you'd like to help, you can [chip in through Stripe](https://buy.stripe.com/7sY4gzeMjdZs1oo7Wbgfu00) and pick the amount yourself. Thank you!
+
 ## Powered by Omarchy
 
 - **This repo** is a fork of [omacom/omarchy-iso](https://github.com/omacom/omarchy-iso), pinned to an upstream commit.
