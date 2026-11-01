@@ -19,7 +19,15 @@ wait_tv 240 >/dev/null || { capture_console "failure-shutdown-no-tv"; check "the
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 5
 
-guest "agentv screen settings power" >"$RUN_DIR/settings.json" 2>&1 || true
+# Setup being done loads home's page again, and Settings opens only once
+# it's back, which a VM with no GPU can take longer than the 5 s above to
+# draw: on 2026-11-01 the screen was still black 12 s after, and the keys
+# went nowhere. So ask until home answers, for up to a minute.
+for _ in $(seq 1 30); do
+  guest "agentv screen settings power" >"$RUN_DIR/settings.json" 2>&1 || true
+  jq -e '.ok == true' "$RUN_DIR/settings.json" >/dev/null 2>&1 && break
+  sleep 2
+done
 check "agentv screen settings opens Settings at Power" jq -e '.ok == true' "$RUN_DIR/settings.json"
 sleep 2
 # OK on Power goes into it, down to Shut down, and OK on it asks.
