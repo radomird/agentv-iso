@@ -3,3 +3,7 @@
 # its update address written in when CI builds it. Moving the repos to an
 # organisation then changes no code (HANDOFF.md, "No GitHub owner in code").
 # Markdown is never scanned for it, so READMEs can link the repos.
+
+# GitHub's Sponsor button reads a Sponsors account by its name here. It names
+# the person, not where the repos live, so a move to an organisation keeps it.
+.github/FUNDING.yml
