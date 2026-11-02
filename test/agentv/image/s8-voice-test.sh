@@ -75,7 +75,9 @@ ssh_sudo "journalctl -b --no-pager -u agentv-voice" >"$RUN_DIR/voice-fetch.log" 
 check "the box asked root for Piper, which fetched it" ssh_guest "test -f /var/lib/agentv/voice/ready"
 check "and its checks passed" grep -q "Piper and its en_GB-cori-medium voice are in /var/lib/agentv/voice" "$RUN_DIR/voice-fetch.log"
 ssh_sudo "stat -c '%n %U %a' /var/lib/agentv/voice /var/lib/agentv/voice/piper/piper /var/lib/agentv/voice/en_GB-cori-medium.onnx" >"$RUN_DIR/voice-files.txt" 2>&1 || true
-check "Piper is root's, and anyone can read it" diff <(printf '%s\n' "/var/lib/agentv/voice root 755" "/var/lib/agentv/voice/piper/piper root 755" "/var/lib/agentv/voice/en_GB-cori-medium.onnx root 644") "$RUN_DIR/voice-files.txt"
+# Compared in bash: the test container has no diff.
+files=$(printf '%s\n' "/var/lib/agentv/voice root 755" "/var/lib/agentv/voice/piper/piper root 755" "/var/lib/agentv/voice/en_GB-cori-medium.onnx root 644")
+check "Piper is root's, and anyone can read it" test "$(cat "$RUN_DIR/voice-files.txt")" = "$files"
 check "the daemon's drop is gone" ssh_sudo "test ! -e /var/lib/private/agentv/daemon/voice-drop/fetch"
 
 # --- From then on, it's said ---------------------------------------------------------
