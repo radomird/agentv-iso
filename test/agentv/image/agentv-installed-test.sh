@@ -6,6 +6,7 @@
 # upstream's test/integration left behind, like its own scenarios do.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
