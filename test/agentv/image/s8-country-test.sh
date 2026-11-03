@@ -67,7 +67,7 @@ check "and the time zone stays Oslo's" test "$(zone_now)" = "Europe/Oslo"
 
 ssh_guest "curl -sS --max-time 30 -X PUT -H 'Content-Type: application/json' -d '{\"code\":\"US\"}' http://127.0.0.1:3000/api/country" >"$RUN_DIR/us.json" 2>&1 || true
 check "ADR-055 another country is kept" jq -e '.code == "US" and .picked == true' "$RUN_DIR/us.json"
-check "ADR-055 and root moves the time zone to the one most of its people live in (Q165)" until_zone America/New_York
+check "ADR-055 and root moves the time zone to the one most of its people live in (Q166)" until_zone America/New_York
 check "Clock and Weather follow it" until_json /api/weather '.zone == "America/New_York"' 30
 check "New this week's region follows it" until_json /api/whats-new/settings '.region == "US"' 10
 
