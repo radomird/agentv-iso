@@ -10,6 +10,9 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   exit 1
 fi
 
+# A failed wait for SSH says why (ssh.sh).
+source "$(dirname -- "${BASH_SOURCE[0]}")/ssh.sh"
+
 # A command in a login shell on the box, with the owner's environment.
 guest() {
   ssh_guest "bash -lc $(printf %q "$1") </dev/null"

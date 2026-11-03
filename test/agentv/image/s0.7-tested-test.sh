@@ -7,6 +7,7 @@
 # 1, after the publish.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
 
 if [[ ${AGENTV_TEST_TESTED_LIVE:-} != 1 ]]; then
   log "No tested.json published by this run; skipping"

@@ -9,6 +9,9 @@
 # so its VM gets that half (upstream gives a VM every CPU it can use), and
 # 6 GB of memory, and takes the next check from one list, the slow ones
 # first. A check's output is printed whole when it ends, so two never mix.
+# The checks that time the box against a bar run after the lanes, one at a
+# time, with every CPU and 8 GB, the way they ran when the bar was signed
+# off.
 #
 # Usage: test/agentv/image/run <iso> [<check>...]
 
@@ -38,6 +41,12 @@ SLOW=(s4.5-pin idle s1.1-tv-session update-tv s3.6-music s4-hotspot home selftes
 # The checks that look at the ISO itself, which a run from the night's disk
 # (AGENTV_TEST_NO_ISO, ci --from-disk) doesn't have.
 NEEDS_ISO=(s0.4-branding)
+# The checks that time the box against a bar (S1.3's 10 s). S1.3 was signed
+# off on 2026-10-25 at 2 to 5 s, with one VM on the whole runner. Beside
+# another VM, on half the CPUs, Omarchy's desktop back to the TV with the
+# keys took 6 to 10 s every night from 2026-10-27, on the release and on edge
+# alike, and failed at 10 s on 2026-11-01. So they run alone.
+ALONE=(s1.3-switch)
 
 tests=()
 if (( $# > 0 )); then
@@ -59,6 +68,19 @@ if [[ -n ${AGENTV_TEST_NO_ISO:-} ]]; then
     name=${test##*/}
     if [[ " ${NEEDS_ISO[*]} " == *" ${name%-test.sh} "* ]]; then
       printf "==> %s: skipped, since this run started from the night's disk and has no ISO\n" "$name"
+    else
+      kept+=("$test")
+    fi
+  done
+  tests=(${kept[@]+"${kept[@]}"})
+fi
+alone=()
+if (( lanes > 1 )); then
+  kept=()
+  for test in ${tests[@]+"${tests[@]}"}; do
+    name=${test##*/}
+    if [[ " ${ALONE[*]} " == *" ${name%-test.sh} "* ]]; then
+      alone+=("$test")
     else
       kept+=("$test")
     fi
@@ -104,6 +126,13 @@ if (( lanes > 1 )); then
   done
   for pid in "${pids[@]}"; do
     wait "$pid" || true
+  done
+  # The timed checks, with the lanes done: every CPU and 8 GB, as one lane.
+  for test in ${alone[@]+"${alone[@]}"}; do
+    name=${test##*/}
+    printf '\033[1;35m==> %s\033[0m\n' "$name"
+    printf '\033[1;35m==> %s\033[0m\n' "On its own, with every CPU: it times the box against a bar"
+    OMARCHY_INTEGRATION_MEMORY=8192 env -u SCENARIO bash "$test" || echo "$name" >>"$work/failed"
   done
 else
   lane 0 ""
