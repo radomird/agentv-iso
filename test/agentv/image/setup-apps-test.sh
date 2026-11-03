@@ -51,6 +51,8 @@ check "the hand-over to root is waiting for setup's apps" test "$(ssh_guest "sys
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Where the TV is (ADR-055), on a release that has the step.
+setup_post /api/setup/finish '{"step": "country"}' || true
 setup_post /api/setup/finish '{"step": "ai"}'
 setup_post /api/setup/finish '{"step": "people"}'
 setup_post /api/setup/goal '{"goal": "media"}'

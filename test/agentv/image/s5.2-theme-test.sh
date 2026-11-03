@@ -43,7 +43,10 @@ check "the owner's theme hand-over is waiting in their session" test "$(guest "s
 # Setup's look, with the steps before it moved on as the setup screens do.
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
-for step in ready ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
+setup_post /api/setup/finish '{"step": "ready"}'
+# Where the TV is (ADR-055), on a release that has the step.
+setup_post /api/setup/finish '{"step": "country"}' || true
+for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'

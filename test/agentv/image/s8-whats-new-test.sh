@@ -110,8 +110,9 @@ api() {
 
 # --- The key, as Settings → what's new keeps it -----------------------------------
 
-api PUT /api/whats-new/settings '{"region":"NL"}' region
-check "Settings → what's new keeps a region" jq -e '.region == "NL"' "$RUN_DIR/region.json"
+# TMDB's region is the box's country (ADR-055), as Settings → country picks it.
+api PUT /api/country '{"code":"NL"}' region
+check "Settings → country keeps NL, and the time zone follows it" jq -e '.code == "NL" and .zone == "Europe/Amsterdam"' "$RUN_DIR/region.json"
 api GET /api/whats-new "" no-key
 check "with no TMDB key yet, what's new says so" jq -e '.feed.ok == false and .feed.why == "no-key"' "$RUN_DIR/no-key.json"
 api PUT /api/tmdb-key "{\"key\":\"$TOKEN\"}" key

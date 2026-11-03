@@ -101,7 +101,10 @@ check "S5.7 and Look still lists every theme Omarchy has, aurora among them" sam
 # Setup's look lists it too.
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
-for step in ready ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
+setup_post /api/setup/finish '{"step": "ready"}'
+# Where the TV is (ADR-055), on a release that has the step.
+setup_post /api/setup/finish '{"step": "country"}' || true
+for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
