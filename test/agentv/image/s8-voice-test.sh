@@ -2,12 +2,11 @@
 #
 # The TV says its answers aloud on an installed box (stage 8, Q146, the
 # spoken half of S7.3), with a sound card that plays to nothing, as S2.19's
-# check has. A Claude key has no voice of its own, so the first answer asks
-# root for Piper: agentv-voice.service fetches Piper's release and its cori
-# voice, each checked against its checksum, into /var/lib/agentv/voice,
-# root's and readable by anyone. From then on "i didn't get that" is made by
-# Piper on the box and played by the TV session through PipeWire, the
-# daemon's log says which voice, and nothing logs the words.
+# check has. Piper and its cori voice come in the agentv-voice package, on
+# the box from its first boot (Q157), root's and readable by anyone. A
+# Claude key has no voice of its own, so the very first "i didn't get that"
+# is made by Piper on the box and played by the TV session through
+# PipeWire, the daemon's log says which voice, and nothing logs the words.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -29,8 +28,11 @@ passwordless_sudo
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 3
 
-check "the voice's hand-over to root runs" ssh_guest "systemctl is-active --quiet agentv-voice.path"
-check "a new box has no Piper until it's needed" ssh_guest "test ! -e /var/lib/agentv/voice/ready"
+check "agentv-voice is installed, as agentv needs it" ssh_guest "pacman -Q agentv-voice && pacman -Qi agentv | sed -n '/^Depends On/,/^Optional Deps/p' | grep -qw agentv-voice"
+ssh_guest "stat -c '%n %U %a' /usr/lib/agentv-voice/piper/piper /usr/lib/agentv-voice/en_GB-cori-medium.onnx" >"$RUN_DIR/voice-files.txt" 2>&1 || true
+# Compared in bash: the test container has no diff.
+files=$(printf '%s\n' "/usr/lib/agentv-voice/piper/piper root 755" "/usr/lib/agentv-voice/en_GB-cori-medium.onnx root 644")
+check "Piper is root's, and anyone can read it" test "$(cat "$RUN_DIR/voice-files.txt")" = "$files"
 
 # A stand-in for Anthropic's API, which can't route anything, and a key
 # for Claude with its terms accepted on a phone (Q104).
@@ -64,26 +66,13 @@ voice() {
   ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/voice" 2>/dev/null || echo '{}'
 }
 
-# --- The first answer asks root for Piper -------------------------------------
+# --- The first answer is said ------------------------------------------------------
 
+voice >"$RUN_DIR/voice-new.json"
+check "the daemon has Piper ready on a new box" jq -e '.piper == "ready" and .by == "piper"' "$RUN_DIR/voice-new.json"
+before=$(voice | jq -r '.last.clip // 0')
 say_it first
 check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/first.json"
-started=$SECONDS
-until ssh_guest "test -f /var/lib/agentv/voice/ready" 2>/dev/null || (( SECONDS - started > 600 )); do sleep 5; done
-log "Piper's fetch took $(( SECONDS - started )) s"
-ssh_sudo "journalctl -b --no-pager -u agentv-voice" >"$RUN_DIR/voice-fetch.log" 2>&1 || true
-check "the box asked root for Piper, which fetched it" ssh_guest "test -f /var/lib/agentv/voice/ready"
-check "and its checks passed" grep -q "Piper and its en_GB-cori-medium voice are in /var/lib/agentv/voice" "$RUN_DIR/voice-fetch.log"
-ssh_sudo "stat -c '%n %U %a' /var/lib/agentv/voice /var/lib/agentv/voice/piper/piper /var/lib/agentv/voice/en_GB-cori-medium.onnx" >"$RUN_DIR/voice-files.txt" 2>&1 || true
-# Compared in bash: the test container has no diff.
-files=$(printf '%s\n' "/var/lib/agentv/voice root 755" "/var/lib/agentv/voice/piper/piper root 755" "/var/lib/agentv/voice/en_GB-cori-medium.onnx root 644")
-check "Piper is root's, and anyone can read it" test "$(cat "$RUN_DIR/voice-files.txt")" = "$files"
-check "the daemon's drop is gone" ssh_sudo "test ! -e /var/lib/private/agentv/daemon/voice-drop/fetch"
-
-# --- From then on, it's said ---------------------------------------------------------
-
-before=$(voice | jq -r '.last.clip // 0')
-say_it second
 started=$SECONDS
 until voice | jq -e --argjson before "$before" '(.last.clip // 0) > $before and .last.played != null' >/dev/null || (( SECONDS - started > 60 )); do sleep 1; done
 voice >"$RUN_DIR/voice.json"

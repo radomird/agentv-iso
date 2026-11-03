@@ -43,8 +43,8 @@ if (( ${#agentv[@]} != 1 )); then
 fi
 
 # What agentv depends on, by name. Omarchy's own package and AgenTV's keyring
-# are in the mirror already, and asking for omarchy by name would fetch the
-# published one on top of a channel's own.
+# and voice are in the mirror already, and asking for omarchy by name would
+# fetch the published one on top of a channel's own.
 added=()
 while IFS= read -r name; do
   [[ -n $name ]] || continue
@@ -55,7 +55,7 @@ while IFS= read -r name; do
 done < <(
   tar -I zstd -xOf "${agentv[0]}" .PKGINFO |
     sed -n 's/^depend = //p' | sed 's/[<>=].*//' |
-    grep -vx -e omarchy -e agentv-keyring | sort -u
+    grep -vx -e omarchy -e agentv-keyring -e agentv-voice | sort -u
 )
 
 echo "agentv-iso-depends: the offline mirror also carries what agentv needs: ${added[*]:-nothing new}"

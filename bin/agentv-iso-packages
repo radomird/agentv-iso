@@ -3,10 +3,11 @@
 # agentv:summary=Fetch AgenTV's signed packages for the ISO's build step
 # agentv:args=<stable|edge> [<packages-dir>]
 
-# Downloads agentv and agentv-keyring from the agentv-pkgs release for a
-# channel and checks every signature against AgenTV's key, whose fingerprint
-# is pinned in configs/airootfs/usr/share/agentv-iso/key-fingerprint. They
-# land where the ISO's build step (customize.sh) picks them up. The owner
+# Downloads agentv, agentv-keyring and agentv-voice from the agentv-pkgs
+# release for a channel and checks every signature against AgenTV's key,
+# whose fingerprint is pinned in
+# configs/airootfs/usr/share/agentv-iso/key-fingerprint. They land where
+# the ISO's build step (customize.sh) picks them up. The owner
 # comes from AGENTV_OWNER, which CI sets from GitHub's own context, so moving
 # the repos changes no code.
 
@@ -34,14 +35,35 @@ fetch() {
 fetch agentv.db
 fetch agentv.db.sig
 
-# The packages the repository lists now, by file name.
+# The packages the repository lists now, by name and file name: agentv and
+# agentv-keyring, and agentv-voice, which has Piper and its cori voice
+# (Q157), when it's there. It has to be once agentv depends on it. Nothing
+# else belongs in AgenTV's repository.
 mkdir "$work/db"
 tar -xzf "$work/agentv.db" -C "$work/db"
+names=()
 files=()
-while IFS= read -r file; do
-  files+=("$file")
-done < <(awk '/^%FILENAME%$/ { getline; print }' "$work"/db/*/desc)
-(( ${#files[@]} == 2 )) || { echo "expected agentv and agentv-keyring in $url, found: ${files[*]}" >&2; exit 1; }
+for desc in "$work"/db/*/desc; do
+  names+=("$(awk '/^%NAME%$/ { getline; print; exit }' "$desc")")
+  files+=("$(awk '/^%FILENAME%$/ { getline; print; exit }' "$desc")")
+done
+has() {
+  printf '%s\n' "${names[@]}" | grep -qxF "$1"
+}
+for name in "${names[@]}"; do
+  case $name in
+    agentv | agentv-keyring | agentv-voice) ;;
+    *) echo "$url has a package this ISO doesn't expect: $name" >&2; exit 1 ;;
+  esac
+done
+if ! has agentv || ! has agentv-keyring; then
+  echo "expected agentv and agentv-keyring in $url, found: ${names[*]}" >&2
+  exit 1
+fi
+if sed -n '/^%DEPENDS%$/,/^$/p' "$work"/db/agentv-[0-9]*/desc | grep -qx agentv-voice && ! has agentv-voice; then
+  echo "agentv in $url needs agentv-voice, which isn't there" >&2
+  exit 1
+fi
 
 for file in "${files[@]}"; do
   fetch "$file"
