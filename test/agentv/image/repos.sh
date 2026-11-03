@@ -15,6 +15,9 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   exit 1
 fi
 
+# A failed wait for SSH says why (ssh.sh).
+source "$(dirname -- "${BASH_SOURCE[0]}")/ssh.sh"
+
 # sync_repos [<tries>]: pacman -Sy on the box until every repository
 # answers, a minute apart. Each try's output goes to $RUN_DIR/sync.log.
 sync_repos() {
