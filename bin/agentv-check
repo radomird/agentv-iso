@@ -324,6 +324,19 @@ else
     cp -- "$file" "$WORK/tree/$file"
   done <"$WORK/ours"
 
+  # A clone without file contents, as CI's checkout is, fetches each one
+  # the first time it's read, so gitleaks would fetch them a commit at a
+  # time. Fetch every version the AgenTV commits changed in one go first.
+  if [[ $(git config --get remote.origin.promisor) == "true" ]]; then
+    git log --no-merges --raw --no-abbrev --format= "$log_range" \
+      | awk '$1 != ":160000" { print $3 } $2 != "160000" { print $4 }' \
+      | grep -v '^0*$' | sort -u >"$WORK/blobs" || true
+    if [[ -s $WORK/blobs ]]; then
+      git -c fetch.negotiationAlgorithm=noop fetch --quiet --no-tags --no-write-fetch-head \
+        --recurse-submodules=no --filter=blob:none --stdin origin <"$WORK/blobs" || true
+    fi
+  fi
+
   # -v prints each finding, redacted, so the log says where it is.
   leaked=0
   gitleaks dir --no-banner --no-color --redact -v --log-level warn "$WORK/tree" >"$WORK/leaks" 2>&1 || leaked=1
