@@ -5,8 +5,9 @@
 # the household's services, so no real one is named. The TMDB key goes to
 # root the way Settings → what's new keeps it, and only the router's
 # service reads it: the stand-in sees it, the person's account can't. Then
-# what's new for the box's region is this week's titles on those two, a
-# new episode is yes with the next air date, both again from a sentence
+# what's new for the box's region is this week's titles on those two, and
+# home's New this week shows them, a new episode is yes with the next air
+# date, both again from a sentence
 # through a stand-in for Anthropic's API, and agentv selftest S8.1 and S8.2
 # pass. The journal has neither the key nor the show that was asked about.
 
@@ -138,6 +139,17 @@ check "S8.1 what's new is this week's titles on the household's services" \
 check "S8.1 for the box's region, from this week" jq -e --arg today "$today" '.feed.region == "NL" and .feed.to == $today' "$RUN_DIR/feed.json"
 check "S8.1 with TMDB's posters" jq -e '.feed.titles[0].poster == "https://image.tmdb.org/t/p/w342/night.jpg"' "$RUN_DIR/feed.json"
 check "the key reached TMDB, through the router's service" ssh_guest "grep -qx 'Bearer $TOKEN' /tmp/tmdb-standin-auth"
+
+# --- S8.1 on home: New this week, large, with this week's titles ------------------
+
+# Home with New this week in it, large, as a streaming household's has it.
+ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":[{\"id\":\"agentv.clock\",\"x\":0,\"y\":0,\"size\":\"s\"},{\"id\":\"agentv.new\",\"x\":1,\"y\":0,\"size\":\"l\"},{\"id\":\"apps\",\"x\":3,\"y\":0,\"size\":\"s\"}]}' http://127.0.0.1:3000/api/layout" >"$RUN_DIR/layout.json" 2>&1 || true
+guest "agentv screen home" >/dev/null 2>&1 || true
+api GET /api/tile/agentv.new/l "" tile
+check "S8.1 New this week's tile has this week's titles, each with its app and TMDB's poster" \
+  jq -e '[.tile.entries[] | "\(.label) \(.caption)"][:2] == ["night train kino", "copper hill lumen · season 3"] and (.tile.entries[0].image | startswith("https://image.tmdb.org/"))' "$RUN_DIR/tile.json"
+check "S8.1 home's top rail shows a title new this week on one of the household's services (OCR)" ocr_finds success-s8-rail "night train" 60
+check "S8.1 with TMDB's and JustWatch's credit under it (OCR)" grep -Eqi "justwatch|tmdb" "$RUN_DIR/success-s8-rail.txt"
 
 # --- S8.2 ---------------------------------------------------------------------------
 
