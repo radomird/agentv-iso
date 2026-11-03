@@ -34,7 +34,13 @@ check "setup starts on the welcome screen" until_json /api/setup '.setup.step ==
 # On to the AI step with the keyboard: Enter on the welcome screen, then
 # getting ready moves on once it's checked for a newer agentv.
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
-check "getting ready moves on to the AI step" until_json /api/setup '.setup.step == "ai"' 400
+check "getting ready moves on to the next step" until_json /api/setup '.setup.step == "country" or .setup.step == "ai"' 400
+# Where the TV is, on a release that has that step: finished as it stands,
+# so setup goes on to the AI step.
+if [[ $(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -r '.setup.step' 2>/dev/null) == "country" ]]; then
+  ssh_guest "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"step\": \"country\"}' http://127.0.0.1:3000/api/setup/finish" >>"$RUN_DIR/input.log" 2>&1 || true
+fi
+check "then the AI step" until_json /api/setup '.setup.step == "ai"' 60
 check "the AI step is on the TV (OCR)" ocr_finds success-S5.5-pick "which ai do you use|pick one" 30
 capture_console "success-S5.5-pick"
 
