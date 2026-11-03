@@ -149,6 +149,7 @@ check "S5.10 Open opens it in the share browser" wait_front share 30
 guest "pgrep -af -- '--user-data-dir=[^ ]*chromium-share'" >"$RUN_DIR/share-browser.txt" 2>&1 || true
 check "S5.10 on a profile of its own, not the services' one with the apps' sign-ins" grep -q -- "chromium-share" "$RUN_DIR/share-browser.txt"
 check "S5.10 with the page it was sent" grep -q -- "shared=1" "$RUN_DIR/share-browser.txt"
+check "and with Chromium's spatial navigation, so the phone's d-pad moves through the page (Q164)" grep -q -- "--enable-spatial-navigation" "$RUN_DIR/share-browser.txt"
 capture_console "success-S5.10-link"
 key back
 check "Back closes it, and home's in front" wait_front home 20
