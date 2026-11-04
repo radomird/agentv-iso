@@ -4,19 +4,31 @@
 # file lives in agentv-os and agentv-iso; keep the two copies identical.
 #
 #   agentv-os   merges Omarchy's release tag, such as v4.5.0.
-#   agentv-iso  merges the head of omarchy-iso's quattro, which has no tags,
-#               once Omarchy tags a new stable release.
+#   agentv-iso  merges omarchy-iso's release branch for that tag (v4-5-0 for
+#               v4.5.0), since omarchy-iso has no tags (ADR-058). Without
+#               that branch there's nothing to merge yet, and it says so.
 #
 # It merges, never rebases, because agentv is public, and AgenTV only adds
-# files, so the merge can't conflict unless a file of upstream's was edited.
+# files, so the merge can't conflict unless a file of upstream's was edited
+# or upstream added a file AgenTV has too.
+#
+# Omarchy can cut a release as a sibling of the line the fork is on, as it
+# did 4.5 beside 4.0.x (ADR-058): the tag doesn't descend from the base, and
+# a merge would fight over every file both lines changed. Then the sync
+# builds the tag's own tree plus AgenTV's files instead, as a merge commit
+# with the tag as its second parent, so later tags on the new line merge as
+# usual. Files only the old line has go. That pull request never merges
+# itself.
+#
 # Then it moves .github/omarchy-base (and, in agentv-iso, the release it
 # followed in .github/omarchy-release), pushes omarchy-sync/<tag> and opens a
 # pull request. Release candidates never count.
 #
 # It writes what it decided to $GITHUB_OUTPUT (or stdout): opened, pr,
-# branch, tag, automerge, and reason when automerge is false. Auto-merge is
-# only for a pull request whose every change is upstream's or the base files,
-# and never for a new major version: that one waits for Radomir.
+# branch, tag, automerge, sibling, and reason when automerge is false.
+# Auto-merge is only for a pull request whose every change is upstream's or
+# the base files, and never for a new major version or a sibling line: those
+# wait for Radomir.
 #
 # Usage: .github/scripts/omarchy-sync [--tag <vX.Y.Z>] [--base <branch>] [--dry-run]
 # Needs: GH_TOKEN that can push and open pull requests (SYNC_TOKEN in CI).
@@ -86,21 +98,84 @@ export GIT_AUTHOR_NAME="github-actions[bot]"
 export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
+# The base this fork sits on now, a tag or a commit of upstream's.
+base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
+if ! git rev-parse --quiet --verify "$base^{commit}" >/dev/null; then
+  if [[ $base =~ ^[0-9a-f]{40}$ ]]; then
+    git fetch --quiet --no-tags "$upstream_url" "$base"
+  else
+    git fetch --quiet --no-tags "$upstream_url" "+refs/tags/$base:refs/tags/$base"
+  fi
+fi
+base_commit=$(git rev-parse "$base^{commit}")
+
 if [[ $upstream == "omacom/omarchy" ]]; then
   git fetch --quiet --no-tags "$upstream_url" "+refs/tags/$tag:refs/tags/$tag"
   upstream_ref=$(git rev-parse "refs/tags/$tag^{commit}")
   new_base="$tag"
+  followed="the tag $tag"
 else
-  git fetch --quiet --no-tags "$upstream_url" quattro
+  release_branch=${tag//./-}
+  if ! git fetch --quiet --no-tags "$upstream_url" "refs/heads/$release_branch" 2>/dev/null; then
+    echo "Omarchy tagged $tag, but $upstream has no $release_branch branch yet, so there's nothing to merge. The next run looks again."
+    git switch --quiet --detach "origin/$target"
+    git branch --quiet -D "$branch"
+    output opened false
+    exit 0
+  fi
   upstream_ref=$(git rev-parse FETCH_HEAD)
   new_base="$upstream_ref"
+  followed="$release_branch at $upstream_ref"
 fi
 
-if ! git merge --quiet --no-ff --no-edit -m "Merge Omarchy $tag" "$upstream_ref"; then
-  echo "Merging Omarchy $tag conflicts. That only happens when a file of upstream's was edited here:" >&2
-  git diff --name-only --diff-filter=U >&2
-  exit 3
+sibling=false
+if git merge-base --is-ancestor "$base_commit" "$upstream_ref"; then
+  if ! git merge --quiet --no-ff --no-edit -m "Merge Omarchy $tag" "$upstream_ref"; then
+    {
+      echo "Merging Omarchy $tag conflicts in these files:"
+      git status --porcelain | grep -E '^(AA|UU|DU|UD|AU|UA|DD) ' || true
+      echo "UU or DU means a file of upstream's was edited or removed here, which AgenTV never does."
+      echo "AA means upstream added a file AgenTV has too: move AgenTV's file to a name of its own."
+    } >&2
+    git merge --abort || true
+    exit 3
+  fi
+else
+  # A sibling line: the tag's tree, plus every file AgenTV added since the
+  # base, in an index of its own so the working tree stays as it is.
+  sibling=true
+  ours=$(mktemp)
+  git diff -z --no-renames --name-only --diff-filter=A "$base_commit" HEAD >"$ours"
+  both=""
+  while IFS= read -r -d '' file; do
+    git cat-file -e "$upstream_ref:$file" 2>/dev/null && both+="$file"$'\n'
+  done <"$ours"
+  if [[ -n $both ]]; then
+    {
+      echo "Omarchy $tag is a sibling of $base's line, and it has files AgenTV added too:"
+      printf '%s' "$both"
+      echo "Move AgenTV's files to names of their own first."
+    } >&2
+    exit 3
+  fi
+  index=$(mktemp)
+  GIT_INDEX_FILE=$index git read-tree "$upstream_ref"
+  if [[ -s $ours ]]; then
+    xargs -0 git ls-tree -z HEAD -- <"$ours" | GIT_INDEX_FILE=$index git update-index -z --index-info
+  fi
+  rm -f "$ours"
+  tree=$(GIT_INDEX_FILE=$index git write-tree)
+  rm -f "$index"
+  dropped=$(git diff --no-renames --name-only --diff-filter=D "$base_commit" "$upstream_ref" | grep -c . || true)
+  message="Merge Omarchy $tag, a sibling of $base's line
+
+Omarchy cut $tag beside $base's line rather than on top of it, so this
+is $tag's own tree plus AgenTV's files, with $tag as the second parent.
+The $dropped files only the old line has are gone."
+  merge=$(git commit-tree "$tree" -p HEAD -p "$upstream_ref" -m "$message")
+  git reset --quiet --hard "$merge"
 fi
+output sibling "$sibling"
 
 printf '%s\n' "$new_base" >.github/omarchy-base
 [[ $release_file == .github/omarchy-release ]] && printf '%s\n' "$tag" >.github/omarchy-release
@@ -129,6 +204,9 @@ reason=""
 if (( new_major > current_major )); then
   automerge=false
   reason="Omarchy $tag is a new major version, so it waits for Radomir."
+elif [[ $sibling == true ]]; then
+  automerge=false
+  reason="Omarchy $tag is a sibling of $current's line, so this is its tree plus AgenTV's files, and it waits for Radomir."
 elif [[ -n $foreign ]]; then
   automerge=false
   reason="These files differ from upstream's $tag: ${foreign//$'\n'/ }"
@@ -137,8 +215,9 @@ fi
 body=$(cat <<BODY
 Merges Omarchy $tag into \`$target\` and moves \`.github/omarchy-base\` (ADR-026).
 
-- Upstream: \`$upstream\` at \`$upstream_ref\`
+- Upstream: \`$upstream\`, $followed
 - Was: $current
+- A sibling line, so the tag's tree plus AgenTV's files: $sibling
 - Merges itself when every gate is green: $automerge
 ${reason:+- Why not: $reason}
 ${new_workflows:+- New upstream workflows, switched off after the merge: $(echo "$new_workflows" | tr '\n' ' ')}

@@ -1,8 +1,9 @@
 name: Omarchy sync
 
 # Every day: when Omarchy has a new stable release, open a pull request that
-# merges the head of omarchy-iso's quattro (it has no tags of its own) and
-# moves .github/omarchy-base and .github/omarchy-release (ADR-026). The pull
+# merges omarchy-iso's release branch for it (v4-5-0 for v4.5.0, since
+# omarchy-iso has no tags of its own) and moves .github/omarchy-base and
+# .github/omarchy-release (ADR-026, ADR-058). The pull
 # request runs every gate, the Check workflow's and a full ISO build and
 # install, and merges itself only when they're all green. A new major version
 # never merges itself, and neither does a change that isn't upstream's own.

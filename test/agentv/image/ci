@@ -4,8 +4,10 @@
 # that needs it: agentv-iso's own ISO workflow, and agentv-os's sync and
 # nightly runs, which check out this repo next to theirs.
 #
-#   1. Builds the ISO with upstream's own omarchy-iso-make. AgenTV's packages
-#      have to be in configs/airootfs/usr/share/agentv-iso/packages/ already
+#   1. Builds the ISO with upstream's own omarchy-iso-make, from the Omarchy
+#      channel that serves the release it follows (bin/agentv-iso-channel).
+#      AgenTV's packages have to be in
+#      configs/airootfs/usr/share/agentv-iso/packages/ already
 #      (bin/agentv-iso-packages, or packages a workflow built itself).
 #   2. Runs upstream's test/integration <iso> boot in an Arch container with
 #      KVM, the way its install-test.yml does: an unattended install, then a
@@ -90,8 +92,12 @@ elif (( ${#again[@]} == 0 )); then
   bin/agentv-iso-depends
   depended=1
 
+  # Omarchy's stable channel, or rc's packages onto stable until stable
+  # serves the release this ISO follows (bin/agentv-iso-channel).
+  channel=$(bin/agentv-iso-channel)
   start=$(date +%s)
-  NO_BOOT_OFFER=1 ./bin/omarchy-iso-make
+  # shellcheck disable=SC2086 # one flag or none
+  NO_BOOT_OFFER=1 ./bin/omarchy-iso-make $channel
   echo $(( $(date +%s) - start )) >test-runs/build-seconds
   ls -l release/
 fi

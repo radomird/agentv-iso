@@ -156,7 +156,10 @@ fi
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 check "S2.12 the box is on agentv $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
-check "the owner's sudo goes back to asking for a password" ssh_sudo "! ls /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
+# AgenTV's own grant (99-agentv-update-<owner>) from 0.2 on, and the one
+# named like Omarchy's before it.
+check "the owner's sudo goes back to asking for a password" \
+  ssh_sudo "! ls /etc/sudoers.d/99-agentv-update-* /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
 # Omarchy's update ends by restarting its shell in the session that's
 # running; the TV session stops it again.
 check "after an update from the TV, Omarchy's shell isn't on the TV: no bar, no process (ADR-031)" no_omarchy_shell 30

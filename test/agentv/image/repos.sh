@@ -29,3 +29,14 @@ sync_repos() {
   done
   return 1
 }
+
+# omarchy_channel <stable|rc|edge>: the box takes Omarchy's packages and its
+# Arch mirror from that channel, the lines omarchy-refresh-pacman would
+# write, without its full update, and AgenTV's own repository stays. For a
+# run that tries the next Omarchy release before its stable channel has it.
+omarchy_channel() {
+  local channel=$1
+  ssh_sudo "sed -i -E 's#(pkgs\.omarchy\.org/)(stable|rc|edge)/#\1$channel/#; s#(https://)(stable|rc|edge)-mirror\.omarchy\.org#\1$channel-mirror.omarchy.org#' /etc/pacman.conf /etc/pacman.d/mirrorlist" &&
+    ssh_sudo "grep -q 'pkgs.omarchy.org/$channel/' /etc/pacman.conf" &&
+    ssh_sudo "pacman -Syy" >>"$RUN_DIR/sync.log" 2>&1
+}

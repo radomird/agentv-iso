@@ -42,6 +42,11 @@ switch() {
   else
     took=$(wait_tv 60 "$seen") || took=""
     capture_console "success-S1.3-$how-tv"
+    # What the box did while it switched, when it was slow.
+    if (( ${took:-999} >= 10 )); then
+      guest "journalctl --user --since '-3min' --no-pager -o short-precise" >"$RUN_DIR/slow-$how-tv-user.log" 2>&1 || true
+      ssh_sudo "journalctl --since '-3min' --no-pager -o short-precise" >"$RUN_DIR/slow-$how-tv-system.log" 2>&1 || true
+    fi
     check "S1.3 Omarchy's desktop back to the TV with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
     check "back on the TV, nothing of Omarchy's desktop is left" ssh_guest "! pgrep -f '$OMARCHY_SHELL' >/dev/null"

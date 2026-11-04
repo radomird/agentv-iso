@@ -1,49 +1,20 @@
 #!/bin/bash
 
-# Adds AgenTV to the live ISO without editing a file of omarchy-iso's
-# (ADR-025): AgenTV's packages go into the offline mirror the installer reads,
-# and onto the installer's package list beside Omarchy's own package, so the
-# installed box gets them in the same pacstrap. Runs once, in the live
-# system's chroot, from /root/customize_airootfs.sh. bin/agentv-iso-packages
-# put the packages here before the build, with their signatures checked.
+# Makes the live ISO's installer AgenTV's without editing a file of
+# omarchy-iso's (ADR-025, ADR-029): AgenTV's logo, tagline and words, no
+# encryption by default, and AgenTV's key trusted on the installed box. Runs
+# once, in the live system's chroot, from a line bin/agentv-iso-brand puts
+# in omarchy-iso's /root/customize_airootfs.sh for the build. Each change
+# stops the build if upstream has moved the line it changes.
+#
+# AgenTV's packages aren't added here. The installer installs a root image
+# that omarchy-iso's build makes before this runs, from a mirror whose
+# checksums it has recorded by then, so bin/agentv-iso-depends puts them in
+# that mirror and image before the build starts.
 
 set -euo pipefail
 
 here=/usr/share/agentv-iso
-mirror=/var/cache/omarchy/mirror/offline
-lists=/usr/share/omarchy-iso
-
-shopt -s nullglob
-packages=("$here"/packages/*.pkg.tar.zst)
-shopt -u nullglob
-if (( ${#packages[@]} == 0 )); then
-  echo "agentv-iso: no AgenTV packages in $here/packages; run bin/agentv-iso-packages first" >&2
-  exit 1
-fi
-
-added=()
-for package in "${packages[@]}"; do
-  cp "$package" "$mirror/"
-  added+=("$mirror/${package##*/}")
-done
-repo-add --quiet "$mirror/offline.db.tar.gz" "${added[@]}"
-
-# The installer installs every line of the list that fits this machine.
-for list in "$lists"/omarchy-base*.packages; do
-  for name in agentv-keyring agentv; do
-    grep -qxF "$name" "$list" || printf '%s\n' "$name" >>"$list"
-  done
-done
-
-# Everything AgenTV's packages need has to be in the mirror already, or the
-# install would stop halfway through on someone's box. Stop the build instead.
-dbpath=$(mktemp -d)
-pacman --dbpath "$dbpath" -Sy >/dev/null
-if ! pacman --dbpath "$dbpath" -S --print --print-format '%n %v' agentv-keyring agentv; then
-  echo "agentv-iso: AgenTV's packages need something the offline mirror doesn't have" >&2
-  exit 1
-fi
-rm -rf "$dbpath"
 
 # The installer's logo (ADR-021): the greeter, the configurator and the
 # install dashboard read /usr/share/omarchy/logo.txt. This changes the live
@@ -71,7 +42,6 @@ perl -pi -e 's/^  tagline="Beautiful, Fun & Agentic Linux by DHH"$/  tagline="$E
 # build if upstream has moved the line it replaces.
 install -D -m 644 "$here/logo.ansi" /usr/local/share/agentv/logo.ansi
 install -D -m 755 "$here/agentv-logo" /usr/local/bin/agentv-logo
-install -D -m 755 "$here/agentv-iso-release-target" /usr/local/bin/agentv-iso-release-target
 
 # patch <file> <description> <perl substitution, -0 so it can span lines>
 patch() {
@@ -109,12 +79,15 @@ patch "$configurator" "the free-space install's encryption default" \
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$configurator" "the full-disk install's encryption default" \
   's/^(confirm_disk_overwrite\(\) \{\n)  local mode="encrypted"$/$1  local mode="unencrypted"/m'
+# Each confirm says how to get the other kind: upstream's encrypted default
+# says Ctrl+C gives an unencrypted install, so AgenTV's unencrypted one says
+# Ctrl+C gives an encrypted install, in the catalog's words (below).
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$configurator" "the free-space confirm's Ctrl+C line" \
-  's/^(        )(affirmative="Yes, install without encryption")$/$1say --foreground 8 "Press Ctrl+C for encrypted install."\n$1$2/m'
+  's/^(        )(affirmative="\$\(t install\.yesUnencrypted\)")$/$1say --foreground 8 "\$(t encryption.hintEncrypted)"\n$1$2/m'
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$configurator" "the full-disk confirm's Ctrl+C line" \
-  's/^(      )(affirmative="Yes, install without encryption")$/$1say --foreground 8 "Press Ctrl+C for encrypted install."\n$1$2/m'
+  's/^(      )(affirmative="\$\(t install\.yesUnencrypted\)")$/$1say --foreground 8 "\$(t encryption.hintEncrypted)"\n$1$2/m'
 if (( $(grep -c '^  local mode="unencrypted"' "$configurator") != 2 )) || grep -q '^  local mode="encrypted"' "$configurator"; then
   echo "agentv-iso: the installer doesn't default to no encryption in both disk confirms" >&2
   exit 1
@@ -122,55 +95,119 @@ fi
 
 # The installer is AgenTV's (ADR-029): where it names what it installs, it
 # says AgenTV, the box is called agentv unless the owner names it, and the
-# tips while it installs are AgenTV's. Omarchy's own words about Omarchy,
-# such as the "Installing Arch + Omarchy" step, stay true and stay.
+# tips while it installs are AgenTV's.
 form=/usr/share/omarchy-iso/setup-form.sh
 patch "$form" "the hostname's default" \
   "s/^OMARCHY_HOSTNAME_DEFAULT='omarchy'\$/OMARCHY_HOSTNAME_DEFAULT='agentv'/m"
-patch "$form" "the hostname prompt" \
-  "s/\(or return for 'omarchy'\)/(or return for 'agentv')/"
-patch "$configurator" "an unattended install's hostname" \
+patch "$configurator" "a deferred install's hostname" \
   's/^  hostname="omarchy"$/  hostname="agentv"/m'
-# shellcheck disable=SC2016 # the single quotes hold perl
-patch "$configurator" "the disk screens' name for what they install" \
-  's/^([ \t]*(?:say|step|gum style)\b[^\n]*?)\bOmarchy\b/$1AgenTV/mg'
-# Upstream's line here has an em dash, which AgenTV's copy never has.
-# shellcheck disable=SC2016 # the single quotes hold perl
-patch "$configurator" "the free-space screen's dash" \
-  's/(an AgenTV partition here) \xE2\x80\x94 l(eave)/$1. L$2/'
-if grep -Eq '^[[:space:]]*(say|step|gum style)\b.*\bOmarchy\b' "$configurator"; then
-  echo "agentv-iso: a disk screen still says Omarchy" >&2
+
+# From Omarchy 4.5 on, the words are in catalogs: the installer's own
+# (/usr/share/omarchy-iso/i18n/<language>.json) and, for the setup form's
+# questions, Omarchy's (/usr/share/omarchy/default/i18n/<language>/cli.json).
+# A language that lacks a key falls back to English.
+#
+# catalog <file> <description> <jq filter>: fails when it changes nothing.
+catalog() {
+  local file="$1" what="$2" filter="$3" changed
+  changed=$(mktemp)
+  jq --indent 2 "$filter" "$file" >"$changed"
+  if cmp -s <(jq -S . "$file") <(jq -S . "$changed"); then
+    rm -f "$changed"
+    echo "agentv-iso: $what in $file has moved upstream" >&2
+    exit 1
+  fi
+  cat "$changed" >"$file"
+  rm -f "$changed"
+}
+
+iso_i18n=/usr/share/omarchy-iso/i18n
+dashboard_tips=$(sed -n '/^tips=($/,/^)$/p' "$dashboard" | sed '1d;$d' | tr -d ' ')
+
+# The hostname question's placeholder, in every language: "or return for
+# 'omarchy'" says what an empty answer gives, which is agentv now.
+for cli in /usr/share/omarchy/default/i18n/*/cli.json; do
+  if jq -e '."setupForm.hostnamePlaceholder" // "" | contains("'"'"'omarchy'"'"'")' "$cli" >/dev/null; then
+    catalog "$cli" "the hostname prompt" '."setupForm.hostnamePlaceholder" |= gsub("'"'"'omarchy'"'"'"; "'"'"'agentv'"'"'")'
+  fi
+done
+if ! jq -e '."setupForm.hostnamePlaceholder" | contains("'"'"'agentv'"'"'")' /usr/share/omarchy/default/i18n/en/cli.json >/dev/null; then
+  echo "agentv-iso: the hostname prompt doesn't say agentv" >&2
   exit 1
 fi
-patch "$dashboard" "the stopped install's headline" \
-  's/Omarchy installation stopped/AgenTV installation stopped/'
+
+# AgenTV's own lines, in English: the unencrypted confirm's Ctrl+C line, and
+# the tips while it installs, in place of Omarchy's.
+catalog "$iso_i18n/en.json" "AgenTV's own lines" '. + {
+  "encryption.hintEncrypted": "Press Ctrl+C for encrypted install.",
+  "agentv.tip.tv": "AgenTV starts straight on the TV, with no password at power on",
+  "agentv.tip.phone": "TV setup will run from your phone",
+  "agentv.tip.agent": "AgenTV'"'"'s own agent will build the apps your TV is missing",
+  "agentv.tip.local": "Apps the agent builds stay on this box",
+  "agentv.tip.update": "agentv update takes a snapshot first, then updates in place",
+  "agentv.tip.back": "A bad update? Pick the snapshot before it from the boot menu",
+  "agentv.tip.selftest": "agentv selftest checks the boot and the Wi-Fi, and says pass or fail",
+  "agentv.tip.omarchy": "Omarchy is underneath: Super + Return still opens a terminal"
+}'
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$dashboard" "the tips while it installs" \
   's/^tips=\(\n.*?^\)$/tips=(
-  "AgenTV starts straight on the TV, with no password at power on"
-  "TV setup will run from your phone"
-  "AgenTV'\''s own agent will build the apps your TV is missing"
-  "Apps the agent builds stay on this box"
-  "agentv update takes a snapshot first, then updates in place"
-  "A bad update? Pick the snapshot before it from the boot menu"
-  "agentv selftest checks the boot and the Wi-Fi, and says pass or fail"
-  "Omarchy is underneath: Super + Return still opens a terminal"
+  agentv.tip.tv
+  agentv.tip.phone
+  agentv.tip.agent
+  agentv.tip.local
+  agentv.tip.update
+  agentv.tip.back
+  agentv.tip.selftest
+  agentv.tip.omarchy
 )/ms'
 
-# The finish screen releases the installed system before it offers the
-# reboot, and reboots without the USB stick (agentv-iso-release-target,
-# omarchy-iso#125). If the release fails, it reboots the way upstream does.
-# shellcheck disable=SC2016 # the single quotes hold perl
-patch "$dashboard" "the finish screen's reboot" \
-  's/^if reboot_prompt; then\n(  if \[\[ \$\{OMARCHY_UI_AUTO_REBOOT:-\} == "no" \]\]; then\n    exit 0\n  fi\n  printf .%s. "\$CLEAR" >"\$TTY_PATH" 2>\/dev\/null \|\| true\n)  reboot /target_released=0\nagentv-iso-release-target >>"\$LOG_FILE" 2>&1 && target_released=1\nif reboot_prompt; then\n$1  (( target_released )) && echo b >\/proc\/sysrq-trigger\n  reboot /m'
+# The disk screens, the stopped install's headline and the finish screen
+# name what they install: AgenTV, in every language that names it. Omarchy's
+# own tips go unused, so they're left as they are, and so are AgenTV's.
+mapfile -t named < <(jq -r 'to_entries[] | select((.key | startswith("agentv.") | not) and (.value | type) == "string" and (.value | test("\\bOmarchy\\b"))) | .key' "$iso_i18n/en.json" |
+  grep -Fxv -f <(printf '%s\n' "$dashboard_tips"))
+(( ${#named[@]} > 0 )) || { echo "agentv-iso: no installer line names Omarchy any more; has upstream moved them?" >&2; exit 1; }
+named_json=$(printf '%s\n' "${named[@]}" | jq -R . | jq -s .)
+for language in "$iso_i18n"/*.json; do
+  jq --indent 2 --argjson keys "$named_json" \
+    'with_entries(if (.key as $k | $keys | index($k)) and (.value | type) == "string" then .value |= gsub("\\bOmarchy\\b"; "AgenTV") else . end)' \
+    "$language" >"$language.new"
+  mv "$language.new" "$language"
+done
+for key in disk.intro mode.intro freeSpace.title failure.title finish.title finish.titleWithTime; do
+  if ! jq -e --arg key "$key" '.[$key] | test("\\bAgenTV\\b")' "$iso_i18n/en.json" >/dev/null; then
+    echo "agentv-iso: the installer's $key doesn't say AgenTV; has upstream moved it?" >&2
+    exit 1
+  fi
+done
 
+# Upstream's English has em dashes, which AgenTV's copy never has.
+catalog "$iso_i18n/en.json" "the lines with a dash" '
+  ."bitlocker.suspend" |= sub(" \u2014 the drive"; ": the drive")
+  | ."esp.found" |= sub(" \u2014 leaving it"; ". Leaving it")
+  | ."tool.warning" |= sub(" \u2014 leave the"; ". Leave the")'
+if grep -q $'\xe2\x80\x94' "$iso_i18n/en.json"; then
+  echo "agentv-iso: the installer's English still has an em dash:" >&2
+  grep $'\xe2\x80\x94' "$iso_i18n/en.json" >&2
+  exit 1
+fi
+
+# The dashboard's logo, in AgenTV's colours, wherever it draws it.
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$dashboard" "the dashboard's logo" \
   's/^    while IFS= read -r line; do\n      printf .\\r%s%s%b%s%b\\n. "\$CLEAR_LINE" "\$pad" "\$GREEN" "\$line" "\$RESET"\n    done <"\$LOGO_PATH"$/    agentv-logo --prefix "\\r\$CLEAR_LINE\$pad"/m'
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$dashboard" "the finish screen's effect" \
   's/^      --final-gradient-stops 2 \\\n      >"\$TTY_PATH" 2>\/dev\/null \|\| \{\n        dashboard_log "logo effect skipped \(ttfx exited \$\?\)"$/      --final-gradient-stops 4 \\\n      >"\$TTY_PATH" 2>\/dev\/null || true; {\n        dashboard_log "AgenTV redraws its logo in its own colours"/m'
-patch "$dashboard" "the finish screen's title" \
-  's/title="Installed Omarchy"/title="Installed AgenTV"/'
 
-echo "agentv-iso: added ${#added[@]} AgenTV packages to the offline mirror and the install, AgenTV's logo and tagline, and no encryption by default"
+# The installed box trusts AgenTV's key, as it trusts Omarchy's. The image
+# comes with no pacman keyring, and the installer makes one on the box and
+# fills it from a list of keyrings that names Archlinux's and Omarchy's
+# (phases_impl._target_keyrings). agentv-keyring's own scriptlet ran in the
+# image, with no keyring to fill, so without AgenTV's name on that list the
+# box's first update would stop on a package signed by a key it doesn't know.
+patch /usr/share/omarchy-iso/orchestrator/phases_impl.py "the installed box's keyrings" \
+  's/^    keyrings = \["archlinux", "omarchy"\]$/    keyrings = ["archlinux", "omarchy", "agentv"]/m'
+
+echo "agentv-iso: AgenTV's logo, tagline and words in the installer, no encryption by default, and AgenTV's key on the box"
