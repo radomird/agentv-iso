@@ -1,18 +1,47 @@
-# Hosts of the services whose automation never goes into a public repo
-# (CLAUDE.md, ADR-017). bin/agentv-check fails on any of these in a file
-# AgenTV adds. Perl regular expressions, matched without regard to case.
+# Hosts of the streaming services whose automation never goes into a public
+# repo (CLAUDE.md, ADR-017, ADR-066). bin/agentv-check fails on any of these
+# in a file AgenTV adds. Perl regular expressions, matched without regard to
+# case.
+#
+# "#@ <id>" starts a service's lines. In agentv-apps only, the app in that
+# service's own folder (service-folders) may use them. Every other repo has
+# no service-folders, so there they're refused everywhere. Spotify comes
+# first, under no heading: it's agent-built only and never in a repo.
 
+spotify\.com
+spotifycdn\.com
+scdn\.co
+
+#@ disneyplus
 disneyplus\.com
 disney-plus\.net
 bamgrid\.com
 dssott\.com
+
+#@ primevideo
 primevideo\.com
 amazon\.[a-z.]+/(gp/video|amazon-video)
 aiv-cdn\.net
+
+#@ netflix
 netflix\.com
 nflxvideo\.net
 nflximg\.net
 nflxext\.com
-spotify\.com
-spotifycdn\.com
-scdn\.co
+
+#@ hbomax
+hbomax\.com
+\bmax\.com
+
+#@ youtube youtubekids
+youtube\.com
+youtu\.be
+youtube-nocookie\.com
+ytimg\.com
+googlevideo\.com
+
+#@ youtubekids
+youtubekids\.com
+
+#@ skyshowtime
+skyshowtime\.com
