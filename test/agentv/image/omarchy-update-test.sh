@@ -50,11 +50,11 @@ until_file() {
 }
 
 # back_up <boot id before> <what>: waits for the box to come back as a new
-# boot, with the TV on.
+# boot, with home in front. It's set up, so it shows no welcome page.
 back_up() {
   wait_for_ssh 300 "failure-omarchy-update-$2-ssh-timeout" || return 1
   [[ $(ssh_guest "cat /proc/sys/kernel/random/boot_id") != "$1" ]] || return 1
-  wait_tv 240 >/dev/null
+  wait_home 240 >/dev/null
 }
 
 # 1. The newer agentv, on the Omarchy the box has, as S0.5 takes it. The

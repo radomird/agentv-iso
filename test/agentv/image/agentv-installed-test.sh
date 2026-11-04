@@ -22,8 +22,9 @@ check "pacman has AgenTV's key" ssh_guest "pacman-key --list-keys $fingerprint"
 # Trusted, not only there: the installer fills the box's keyring itself,
 # from a list that has to name AgenTV's keyring (customize.sh), and a key
 # that isn't signed by the box's own master key fails every update.
+ssh_sudo "gpg --homedir /etc/pacman.d/gnupg --with-colons --list-keys $fingerprint" >"$RUN_DIR/agentv-key.txt" 2>&1 || true
 check "pacman trusts AgenTV's key fully" \
-  ssh_guest "sudo gpg --homedir /etc/pacman.d/gnupg --with-colons --list-keys $fingerprint | awk -F: '\$1 == \"pub\" { print \$2 }' | grep -qx '[fu]'"
+  test "$(awk -F: '$1 == "pub" { print $2; exit }' "$RUN_DIR/agentv-key.txt")" = f -o "$(awk -F: '$1 == "pub" { print $2; exit }' "$RUN_DIR/agentv-key.txt")" = u
 check "agentv runs" ssh_guest "agentv version"
 check "nothing of AgenTV's is in Omarchy's folder" \
   ssh_guest "! pacman -Ql agentv | grep -q ' /usr/share/omarchy/'"
