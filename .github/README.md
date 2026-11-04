@@ -14,11 +14,11 @@
 
 This is where the AgenTV USB stick comes from.
 
-It's Omarchy's own installer, set up to install AgenTV instead of plain Omarchy. You get the same questions, with AgenTV's logo at the top. When it's done, your box reboots into AgenTV. TV setup from your phone is coming soon, so for now a new box starts on a welcome page.
+It's Omarchy's own installer, set up to install AgenTV instead of plain Omarchy. You get the same questions, with AgenTV's logo at the top. When it's done, your box reboots into AgenTV, and TV setup starts on the TV. Scan its code with your phone, and setup takes it from there.
 
 ## Getting the ISO
 
-The latest is [the 0.1.3 ISO](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.3-x86_64.iso) (about 6.5 GB). Grab [its checksum](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.3-x86_64.iso.sha256) too, so you can check the download. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
+The latest is [the 0.1.4 ISO](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.4-x86_64.iso) (about 6.6 GB). Grab [its checksum](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.4-x86_64.iso.sha256) too, so you can check the download. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
 
 The ISO is too big for GitHub's release files, so it lives on Cloudflare R2, and each [release](https://github.com/radomird/agentv-iso/releases) here links to its own.
 
