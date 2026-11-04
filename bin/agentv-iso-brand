@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# agentv:summary=Give the ISO AgenTV's name, volume label and boot menu, for one build
+# agentv:summary=Give the ISO AgenTV's name, volume label, boot menu and build step, for one build
 # agentv:args=[--restore]
 
 # ADR-027: the ISO's file name, volume label, metadata and boot menu entries
@@ -12,6 +12,12 @@
 # people see change. It stops when a line it expects isn't there, so an
 # upstream change shows up as a red build, not as an ISO that quietly says
 # Omarchy again.
+#
+# It also hands the live system's build step to AgenTV's own customize.sh,
+# which puts AgenTV's logo, tagline and words in the installer. archiso runs
+# only /root/customize_airootfs.sh, which is omarchy-iso's, so one line goes
+# in near its top, right after set -euo pipefail, the way omarchy-iso's own
+# build adds its Snapdragon step: further down, the script can end early.
 
 set -euo pipefail
 
@@ -19,6 +25,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 profile=configs/profiledef.sh
+customize=configs/airootfs/root/customize_airootfs.sh
 menus=(
   configs/grub/grub.cfg
   configs/grub/loopback.cfg
@@ -29,12 +36,12 @@ menus=(
 )
 
 if [[ ${1:-} == "--restore" ]]; then
-  git checkout -- "$profile" "${menus[@]}"
+  git checkout -- "$profile" "$customize" "${menus[@]}"
   exit 0
 fi
 
 # git checkout puts these back afterwards, which would lose edits of anyone's.
-if ! git diff --quiet -- "$profile" "${menus[@]}"; then
+if ! git diff --quiet -- "$profile" "$customize" "${menus[@]}"; then
   echo "agentv-iso-brand: the ISO's own files are changed already; run it with --restore first" >&2
   exit 1
 fi
@@ -70,4 +77,13 @@ for menu in "${menus[@]}"; do
   change "$menu" 's/\bOmarchy\b/AgenTV/g'
 done
 
-echo "agentv-iso-brand: this build's ISO is named, labelled and menued AgenTV"
+# Whatever stops customize.sh stops the build: the line runs under upstream's
+# set -euo pipefail, and archiso fails the build on the script's exit status.
+# shellcheck disable=SC2016 # the single quotes hold perl
+change "$customize" 's/^set -euo pipefail$/set -euo pipefail\n\n# AgenTV'"'"'s installer, for this build only (bin\/agentv-iso-brand).\nbash \/usr\/share\/agentv-iso\/customize.sh\nrm -rf \/usr\/share\/agentv-iso/'
+if (( $(grep -c '^bash /usr/share/agentv-iso/customize.sh$' "$customize") != 1 )); then
+  echo "agentv-iso-brand: AgenTV's build step isn't in $customize exactly once" >&2
+  exit 1
+fi
+
+echo "agentv-iso-brand: this build's ISO is named, labelled and menued AgenTV, and runs AgenTV's build step"
