@@ -23,6 +23,11 @@
 # Runs on GitHub's ubuntu-26.04 runner, from anywhere. Results land in
 # test-runs/ at the root of this checkout.
 #
+# With AGENTV_ROOT_CACHE=1, the build keeps the slow part of the root image
+# in release/root-cache/, and takes it from there when nothing in it changed
+# (bin/agentv-iso-root-cache). With AGENTV_ROOT_CACHE_FRESH=1 too, it makes
+# it from scratch, for an ISO people download, and still leaves it there.
+#
 # With AGENTV_TEST_KEEP_DISK=<folder under /w>, a run where every check passed
 # also leaves the installed base image there, compressed, with what boots it,
 # for --from-disk (the nightly run keeps it as an artifact, Q100).
@@ -96,6 +101,7 @@ cd "$ROOT"
 mkdir -p test-runs
 branded=0
 depended=0
+cached=0
 # The container runs as root; hand what it wrote back to this user, also when
 # something fails, so later steps can read and upload it. And put omarchy-iso's
 # own files back the way upstream has them (ADR-027).
@@ -103,6 +109,7 @@ cleanup() {
   sudo chown -R "$(id -u):$(id -g)" test-runs release ${handon:+"$handon"} 2>/dev/null || true
   if (( branded )); then bin/agentv-iso-brand --restore || true; fi
   if (( depended )); then bin/agentv-iso-depends --restore || true; fi
+  if (( cached )); then bin/agentv-iso-root-cache --restore || true; fi
   return 0
 }
 trap cleanup EXIT
@@ -134,6 +141,10 @@ elif (( ${#again[@]} == 0 )); then
   branded=1
   bin/agentv-iso-depends
   depended=1
+  if [[ -n ${AGENTV_ROOT_CACHE:-} ]]; then
+    bin/agentv-iso-root-cache ${AGENTV_ROOT_CACHE_FRESH:+--fresh}
+    cached=1
+  fi
 
   # Omarchy's stable channel, or rc's packages onto stable until stable
   # serves the release this ISO follows (bin/agentv-iso-channel).
