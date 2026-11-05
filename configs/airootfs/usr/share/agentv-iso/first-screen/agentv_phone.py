@@ -184,6 +184,7 @@ class Hotspot:
         run(["ip", "addr", "add", f"{ADDRESS}/24", "dev", device])
         leases = RUN / "dnsmasq.leases"
         leases.unlink(missing_ok=True)
+        dnsmasq_log = open(RUN / "dnsmasq.log", "a")
         self.dnsmasq = subprocess.Popen(
             [
                 "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--no-poll",
@@ -191,11 +192,19 @@ class Hotspot:
                 "--dhcp-range=10.42.0.10,10.42.0.250,255.255.255.0,10m", "--dhcp-authoritative",
                 f"--dhcp-option=option:router,{ADDRESS}", f"--dhcp-option=option:dns-server,{ADDRESS}",
                 f"--dhcp-option=114,http://{ADDRESS}/",
-                f"--address=/#/{ADDRESS}", f"--dhcp-leasefile={leases}", "--log-facility=-",
+                f"--address=/#/{ADDRESS}", f"--dhcp-leasefile={leases}", "--log-facility=-", "--log-dhcp",
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            stdout=dnsmasq_log,
+            stderr=dnsmasq_log,
         )
+        dnsmasq_log.close()
+        time.sleep(1)
+        if self.dnsmasq.poll() is not None:
+            log(f"dnsmasq stopped as it started (exit {self.dnsmasq.returncode}); see dnsmasq.log")
+            self.dnsmasq = None
+            self.stop_supplicant()
+            return False
         self.device = device
         log(f"{self.ssid} is on {device}, with the page at http://{ADDRESS}/")
         return True

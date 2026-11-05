@@ -63,7 +63,7 @@ give_key() {
 # Keeps what the live system says about the install and the phone's side,
 # for a run that failed.
 keep_install_logs() {
-  ssh_live_root "cat /run/agentv-first-screen/phone.log /run/agentv-first-screen/wpa_supplicant.log" >"$RUN_DIR/phone-side.log" 2>&1 || true
+  ssh_live_root "cat /run/agentv-first-screen/phone.log /run/agentv-first-screen/wpa_supplicant.log /run/agentv-first-screen/dnsmasq.log" >"$RUN_DIR/phone-side.log" 2>&1 || true
   ssh_live_root "cat /run/agentv-first-screen/phone.json; iw dev; ip -br addr; systemctl is-active iwd" >"$RUN_DIR/radios.txt" 2>&1 || true
   ssh_live_root "cat /var/log/omarchy-install.log" >"$RUN_DIR/omarchy-install.log" 2>/dev/null || true
   ssh_live_root "cat /run/omarchy-install/state.json" >"$RUN_DIR/state.json" 2>/dev/null || true

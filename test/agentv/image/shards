@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# Shares a run's image checks out across its jobs (agentv-os's Image
+# workflow), so the jobs end at about the same time. Each job runs two VMs at
+# a time, the way one runner ran every check before. The checks that time
+# the box against a bar (ALONE in groups.sh) still run on their own after
+# the job's lanes, with every CPU, so they count for their whole time. The
+# checks that look at the ISO itself (NEEDS_ISO) stay with the job that
+# built it.
+#
+# Each check counts for as long as test/agentv/image/seconds says it takes,
+# or 60 s if it isn't there. The slowest goes first, each to the job with
+# the least to do so far. A job's checks come out slowest first too, which
+# is the order its lanes take them in.
+#
+# Prints JSON for the workflow:
+#   {"box": "<checks for the job with the ISO>",
+#    "parts": [{"part": 1, "of": 4, "about": <seconds>, "checks": "<check> ..."}, ...]}
+# A job takes about 3 minutes to start, fetch the box and set up its tools,
+# so each one gets at least 4 minutes of checks: a run that names a few
+# checks gets fewer jobs, down to one.
+#
+# Usage: test/agentv/image/shards <jobs> [<check>...]   (no checks: every one)
+
+set -euo pipefail
+
+DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$DIR/groups.sh"
+
+jobs="${1:?usage: test/agentv/image/shards <jobs> [<check>...]}"
+shift
+[[ $jobs =~ ^[1-9][0-9]?$ ]] || { echo "shards: the number of jobs is 1 to 99" >&2; exit 2; }
+lanes=${AGENTV_TEST_LANES:-2}
+least_per_job=240
+[[ $lanes =~ ^[1-4]$ ]] || { echo "AGENTV_TEST_LANES is 1 to 4" >&2; exit 2; }
+
+names=()
+if (( $# > 0 )); then
+  for name in "$@"; do
+    if [[ ! $name =~ ^[A-Za-z0-9._-]+$ || ! -f $DIR/$name-test.sh ]]; then
+      echo "There's no image check called '$name'. Name a file in test/agentv/image/ without -test.sh, like s5.6-setup." >&2
+      exit 2
+    fi
+    names+=("$name")
+  done
+else
+  for test in "$DIR"/*-test.sh; do
+    name=${test##*/}
+    names+=("${name%-test.sh}")
+  done
+fi
+
+declare -A seconds=()
+while read -r name took _; do
+  [[ -z $name || $name == \#* ]] && continue
+  seconds[$name]=$took
+done <"$DIR/seconds"
+
+box=()
+rows=()
+for name in "${names[@]}"; do
+  if [[ " ${NEEDS_ISO[*]} " == *" $name "* ]]; then
+    box+=("$name")
+    continue
+  fi
+  cost=${seconds[$name]:-60}
+  # A check that runs alone has the runner to itself, so it costs the job
+  # as much as all its lanes put together.
+  [[ " ${ALONE[*]} " == *" $name "* ]] && cost=$(( cost * lanes ))
+  rows+=("$cost $name")
+done
+
+parts=()
+loads=()
+if (( ${#rows[@]} > 0 )); then
+  mapfile -t rows < <(printf '%s\n' "${rows[@]}" | sort -k1,1nr -k2,2)
+  total=0
+  for row in "${rows[@]}"; do
+    total=$(( total + ${row%% *} ))
+  done
+  count=$(( (total / lanes + least_per_job - 1) / least_per_job ))
+  (( count <= jobs )) || count=$jobs
+  (( count <= ${#rows[@]} )) || count=${#rows[@]}
+  (( count >= 1 )) || count=1
+  for (( i = 0; i < count; i++ )); do
+    parts[i]=""
+    loads[i]=0
+  done
+  for row in "${rows[@]}"; do
+    read -r cost name <<<"$row"
+    least=0
+    for (( i = 1; i < count; i++ )); do
+      (( loads[i] < loads[least] )) && least=$i
+    done
+    loads[least]=$(( loads[least] + cost ))
+    parts[least]="${parts[least]:+${parts[least]} }$name"
+  done
+fi
+
+for (( i = 0; i < ${#parts[@]}; i++ )); do
+  printf '%s\t%s\n' "$(( loads[i] / lanes ))" "${parts[i]}"
+done | jq -Rn --arg box "${box[*]}" '
+  [inputs | split("\t") | {about: (.[0] | tonumber), checks: .[1]}] as $parts
+  | {box: $box,
+     parts: [range(0; $parts | length) as $i
+       | {part: ($i + 1), of: ($parts | length)} + $parts[$i]]}'

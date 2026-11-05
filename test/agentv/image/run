@@ -35,24 +35,16 @@ else
 fi
 export OMARCHY_INTEGRATION_NO_PREVIEW=true
 
-# The slow ones first, so two lanes end near the same time: each restarts
-# the box, waits out the idle minutes, or updates it.
-# The ones that install from the USB stick's first screen, and wait for it,
-# come first of all.
-SLOW=(t1.1-first-screen t1.2-omarchy-installer t1.4-phone s4.5-pin idle s1.1-tv-session update-tv s3.6-music s4-hotspot home selftest)
-# The checks that look at the ISO itself, which a run from the night's disk
-# (AGENTV_TEST_NO_ISO, ci --from-disk) doesn't have.
-NEEDS_ISO=(s0.4-branding t1.1-first-screen t1.2-omarchy-installer t1.4-phone)
-# The checks that time the box against a bar (S1.3's 10 s). S1.3 was signed
-# off on 2026-10-25 at 2 to 5 s, with one VM on the whole runner. Beside
-# another VM, on half the CPUs, Omarchy's desktop back to the TV with the
-# keys took 6 to 10 s every night from 2026-10-27, on the release and on edge
-# alike, and failed at 10 s on 2026-11-01. So they run alone.
-ALONE=(s1.3-switch)
+# Which checks go first, which need the ISO and which run alone.
+source "$DIR/groups.sh"
 
 tests=()
 if (( $# > 0 )); then
   for name in "$@"; do
+    if [[ ! $name =~ ^[A-Za-z0-9._-]+$ || ! -f $DIR/$name-test.sh ]]; then
+      echo "There's no image check called '$name'. Name a file in test/agentv/image/ without -test.sh, like s5.6-setup." >&2
+      exit 2
+    fi
     tests+=("$DIR/$name-test.sh")
   done
 else
@@ -81,6 +73,7 @@ if (( lanes > 1 )); then
   kept=()
   for test in ${tests[@]+"${tests[@]}"}; do
     name=${test##*/}
+    # shellcheck disable=SC2153 # ALONE is groups.sh's
     if [[ " ${ALONE[*]} " == *" ${name%-test.sh} "* ]]; then
       alone+=("$test")
     else
@@ -94,15 +87,23 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 : >"$work/failed"
 
+# How long a check took, after its output: test/agentv/image/seconds is
+# made from these lines, so a run's jobs can share the checks out evenly.
+took() {
+  printf '==> %s took %d s\n' "${1%-test.sh}" $(( $(date +%s) - $2 ))
+}
+
 # One lane: the next check no other lane has claimed, until none are left.
 lane() {
-  local n=$1 cpus=$2 test name status
+  local n=$1 cpus=$2 test name status start
   for test in "${tests[@]}"; do
     name=${test##*/}
     mkdir "$work/$name.claim" 2>/dev/null || continue
+    start=$(date +%s)
     if (( lanes == 1 )); then
       printf '\033[1;35m==> %s\033[0m\n' "$name"
       env -u SCENARIO bash "$test" || echo "$name" >>"$work/failed"
+      took "$name" "$start"
       continue
     fi
     status=0
@@ -111,6 +112,7 @@ lane() {
       flock 9
       printf '\033[1;35m==> %s\033[0m\n' "$name"
       cat "$work/$name.log"
+      took "$name" "$start"
       if (( status != 0 )); then echo "$name" >>"$work/failed"; fi
     } 9>"$work/print.lock"
   done
@@ -134,7 +136,9 @@ if (( lanes > 1 )); then
     name=${test##*/}
     printf '\033[1;35m==> %s\033[0m\n' "$name"
     printf '\033[1;35m==> %s\033[0m\n' "On its own, with every CPU: it times the box against a bar"
+    start=$(date +%s)
     OMARCHY_INTEGRATION_MEMORY=8192 env -u SCENARIO bash "$test" || echo "$name" >>"$work/failed"
+    took "$name" "$start"
   done
 else
   lane 0 ""

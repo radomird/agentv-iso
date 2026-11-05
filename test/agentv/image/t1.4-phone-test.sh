@@ -134,7 +134,11 @@ EOF
 }
 phone_conf | ssh_live_root "umask 077 && cat >/run/agentv-test-phone.conf"
 ssh_live_root "cat >/tmp/agentv-phone.py" <"$DIR/phone.py"
+# The DHCP offer comes to an interface with no address yet, which a strict
+# reverse-path filter drops, so it's off in the phone's namespace, as on
+# s4-hotspot's phone.
 ssh_live_root "ip netns exec phone ip link set lo up
+ip netns exec phone sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.default.rp_filter=0 net.ipv4.conf.$phone_if.rp_filter=0
 ip netns exec phone ip link set $phone_if up
 ip netns exec phone wpa_supplicant -B -i $phone_if -c /run/agentv-test-phone.conf" >"$RUN_DIR/phone.log" 2>&1 || true
 # associated <ssh command>: until the phone's radio is connected.
@@ -152,7 +156,9 @@ stop_unless "$before"
 ssh_live_root "ip netns exec phone python3 -I /tmp/agentv-phone.py dhcp $phone_if" >"$RUN_DIR/dhcp.json" 2>&1 || true
 cat "$RUN_DIR/dhcp.json"
 phone_address=$(jq -r '.address // empty' "$RUN_DIR/dhcp.json" 2>/dev/null || true)
+before=$FAILURES
 check "it gets an address" bash -c '[[ $1 == 10.42.0.* ]]' _ "$phone_address"
+stop_unless "$before"
 check "with the box as its name server" jq -e '.dns == "10.42.0.1"' "$RUN_DIR/dhcp.json"
 check "and the page's address (RFC 8910)" jq -e '.captive == "http://10.42.0.1/"' "$RUN_DIR/dhcp.json"
 ssh_live_root "ip netns exec phone ip addr add $phone_address/24 dev $phone_if" >/dev/null 2>&1 || true
@@ -250,6 +256,7 @@ phone_if=$(box_sudo "ip netns exec phone ls /sys/class/net | grep -vx lo | head 
 phone_conf | ssh_guest "sudo -n sh -c 'umask 077 && cat >/run/agentv-test-phone.conf'"
 ssh_guest "cat >/tmp/agentv-phone.py" <"$DIR/phone.py"
 box_sudo "ip netns exec phone ip link set lo up
+ip netns exec phone sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.default.rp_filter=0 net.ipv4.conf.$phone_if.rp_filter=0
 ip netns exec phone ip link set $phone_if up
 ip netns exec phone wpa_supplicant -B -i $phone_if -c /run/agentv-test-phone.conf" >"$RUN_DIR/phone-box.log" 2>&1 || true
 check "T1.4 the phone joins it again, with what it already had" associated box_sudo
