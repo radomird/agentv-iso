@@ -5,6 +5,7 @@
 # of Omarchy's is edited for it is the Check workflow's half.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -21,7 +22,9 @@ installer_shows_logo() {
     -drive "file=$ISO,media=cdrom,if=none,format=raw,id=cdrom0" \
     -device ide-cd,drive=cdrom0,bootindex=2
   local found=1
-  if wait_for_screen "powered by omarchy" 300; then
+  # 4.5's console font reads as "povered" to OCR at times, so match the
+  # words after it, which only that row has.
+  if wait_for_screen "by omarchy" 300; then
     capture_console "success-S0.4-installer"
     ocr_screen >"$RUN_DIR/greeter.txt"
     found=0
@@ -85,7 +88,7 @@ check "S0.4 the screensaver is AgenTV's logo" \
   ssh_guest "cmp -s ~/.config/omarchy/branding/screensaver.txt /usr/share/agentv/branding/logo.txt"
 check "About shows AgenTV's logo" \
   ssh_guest "cmp -s ~/.config/omarchy/branding/about.txt /usr/share/agentv/branding/logo.txt"
-check "first boot left no passwordless sudo behind" ssh_sudo "! ls /etc/sudoers.d/ | grep -q nopasswd"
+check "first boot left no passwordless sudo behind" ssh_sudo "! ls /etc/sudoers.d/ | grep -qE 'nopasswd|99-agentv-branding'"
 
 # The box's own boot menu (ADR-027): Limine's header and the entry say
 # AgenTV, and no entry is left under Omarchy's name.

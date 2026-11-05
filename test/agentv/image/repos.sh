@@ -15,6 +15,9 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   exit 1
 fi
 
+# A failed wait for SSH says why (ssh.sh).
+source "$(dirname -- "${BASH_SOURCE[0]}")/ssh.sh"
+
 # sync_repos [<tries>]: pacman -Sy on the box until every repository
 # answers, a minute apart. Each try's output goes to $RUN_DIR/sync.log.
 sync_repos() {
@@ -25,4 +28,15 @@ sync_repos() {
     (( try < tries )) && sleep 60
   done
   return 1
+}
+
+# omarchy_channel <stable|rc|edge>: the box takes Omarchy's packages and its
+# Arch mirror from that channel, the lines omarchy-refresh-pacman would
+# write, without its full update, and AgenTV's own repository stays. For a
+# run that tries the next Omarchy release before its stable channel has it.
+omarchy_channel() {
+  local channel=$1
+  ssh_sudo "sed -i -E 's#(pkgs\.omarchy\.org/)(stable|rc|edge)/#\1$channel/#; s#(https://)(stable|rc|edge)-mirror\.omarchy\.org#\1$channel-mirror.omarchy.org#' /etc/pacman.conf /etc/pacman.d/mirrorlist" &&
+    ssh_sudo "grep -q 'pkgs.omarchy.org/$channel/' /etc/pacman.conf" &&
+    ssh_sudo "pacman -Syy" >>"$RUN_DIR/sync.log" 2>&1
 }

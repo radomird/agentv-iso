@@ -1,19 +1,29 @@
 #!/bin/bash
 
-# agentv:summary=Put what AgenTV's package needs in the ISO's offline mirror, for one build
+# agentv:summary=Put AgenTV's packages in the ISO's offline mirror and root image, for one build
 # agentv:args=[--restore]
 
-# The installer installs from an offline mirror, which omarchy-iso's build
-# fills from Omarchy's package lists and its own builder/archinstall.packages.
-# AgenTV's agentv package needs a few packages Omarchy doesn't install, such
-# as nodejs for the TV session's screen daemon and gamescope for Steam
-# (ADR-031), and without them the install stops halfway. So this adds every
-# package agentv depends on to builder/archinstall.packages in the working
-# tree, for one build only: test/agentv/image/ci runs it before
-# omarchy-iso-make, and --restore puts upstream's file back from git. The
-# build fetches them, with what they need in turn, from the same mirror as
-# everything else, and customize.sh stops the build if anything is still
-# missing from the offline mirror.
+# The installer installs a prebuilt root image, which omarchy-iso's build
+# (builder/build-iso.sh) makes from its offline mirror before mkarchiso runs,
+# and it records the mirror's checksums as it goes. So AgenTV's packages have
+# to be there from the start, as a repository the build downloads from, and
+# on the list of what every install gets. Too late, and the box is installed
+# without AgenTV.
+#
+# For one build only, in the working tree:
+#   - AgenTV's packages, which bin/agentv-iso-packages or a workflow put in
+#     configs/airootfs/usr/share/agentv-iso/packages, become a local
+#     repository, [agentv-iso], indexed with repo-add in an Arch container;
+#   - each x86_64 configs/pacman-online-*.conf gets that repository, so the
+#     build downloads agentv and everything it depends on into the mirror;
+#   - builder/archinstall.packages names agentv-keyring and agentv, so they
+#     go into the root image, and so onto every box.
+# test/agentv/image/ci runs it before omarchy-iso-make, and --restore puts
+# upstream's files back from git and removes the index.
+#
+# Their signatures were checked before they got here (agentv-iso-packages),
+# or a workflow built and signed them itself, so the build's own pacman,
+# which doesn't know AgenTV's key, doesn't check them again.
 
 set -euo pipefail
 
@@ -21,41 +31,54 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 list=builder/archinstall.packages
+confs=(configs/pacman-online-stable.conf configs/pacman-online-rc.conf configs/pacman-online-edge.conf)
 packages=configs/airootfs/usr/share/agentv-iso/packages
+# Where the build's container sees the packages: omarchy-iso-make mounts
+# configs/ at /configs.
+server="file:///configs/airootfs/usr/share/agentv-iso/packages"
+repo="agentv-iso"
 
 if [[ ${1:-} == "--restore" ]]; then
-  git checkout -- "$list"
+  git checkout -- "$list" "${confs[@]}"
+  rm -f "$packages/$repo".{db,files}{,.tar.gz,.tar.gz.old}
   exit 0
 fi
 
-# git checkout puts it back afterwards, which would lose edits of anyone's.
-if ! git diff --quiet -- "$list"; then
-  echo "agentv-iso-depends: $list is changed already; run it with --restore first" >&2
+# git checkout puts them back afterwards, which would lose edits of anyone's.
+if ! git diff --quiet -- "$list" "${confs[@]}"; then
+  echo "agentv-iso-depends: $list or a pacman-online conf is changed already; run it with --restore first" >&2
   exit 1
 fi
 
 shopt -s nullglob
 agentv=("$packages"/agentv-[0-9]*.pkg.tar.zst)
+archives=("$packages"/*.pkg.tar.zst)
 shopt -u nullglob
 if (( ${#agentv[@]} != 1 )); then
   echo "agentv-iso-depends: expected one agentv package in $packages, found ${#agentv[@]}" >&2
   exit 1
 fi
 
-# What agentv depends on, by name. Omarchy's own package and AgenTV's keyring
-# are in the mirror already, and asking for omarchy by name would fetch the
-# published one on top of a channel's own.
+docker=(docker)
+docker version >/dev/null 2>&1 || docker=(sudo docker)
+names=()
+for archive in "${archives[@]}"; do
+  names+=("/packages/${archive##*/}")
+done
+"${docker[@]}" run --rm --user "$(id -u):$(id -g)" -v "$ROOT/$packages:/packages" \
+  ghcr.io/archlinux/archlinux:latest repo-add --quiet "/packages/$repo.db.tar.gz" "${names[@]}"
+
+for conf in "${confs[@]}"; do
+  printf '\n# AgenTV'\''s packages, for this build only (bin/agentv-iso-depends).\n[%s]\nSigLevel = Never\nServer = %s\n' \
+    "$repo" "$server" >>"$conf"
+done
+
 added=()
-while IFS= read -r name; do
-  [[ -n $name ]] || continue
+for name in agentv-keyring agentv; do
   if ! grep -qxF "$name" "$list"; then
     printf '%s\n' "$name" >>"$list"
     added+=("$name")
   fi
-done < <(
-  tar -I zstd -xOf "${agentv[0]}" .PKGINFO |
-    sed -n 's/^depend = //p' | sed 's/[<>=].*//' |
-    grep -vx -e omarchy -e agentv-keyring | sort -u
-)
+done
 
-echo "agentv-iso-depends: the offline mirror also carries what agentv needs: ${added[*]:-nothing new}"
+echo "agentv-iso-depends: [$repo] has ${#archives[@]} packages, and every install gets ${added[*]:-what it had}"

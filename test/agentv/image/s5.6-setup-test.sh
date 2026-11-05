@@ -61,7 +61,14 @@ fi
 
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
 check "Enter on the welcome screen carries on with the keyboard, to getting ready" until_setup '.setup.step == "ready" and .setup.keyboard' 60
-check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "getting ready" 30
+if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
+  check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "getting ready" 30
+else
+  # With nothing newer, getting ready moves on by itself in a few seconds,
+  # which can be before OCR reads it: then the step after it is on the TV,
+  # where the TV is (ADR-055), or the AI step on a release before it.
+  check "getting ready is on the TV, or the step it moved on to (OCR)" ocr_finds success-S5.6-getting-ready "getting ready|where is this tv|which ai do you use" 30
+fi
 capture_console "success-S5.6-getting-ready"
 
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
@@ -94,14 +101,31 @@ if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
     until_setup '.setup.ready.update == "done" and .setup.step != "ready" and .setup.step != "welcome"' 180
 else
   log "No newer agentv to update to; getting ready finds nothing to install"
-  check "with nothing newer, getting ready moves on to the next step" \
-    until_setup '(.setup.ready.update == "none" or .setup.ready.update == "failed") and .setup.step != "ready" and .setup.step != "welcome"' 400
+  # Unless edge got a newer build while this run went on, as other work
+  # lands. Then getting ready installs it first, and that's taken only when
+  # it's exactly edge's newest, newer than what the box started on.
+  check "getting ready moves on to the next step" \
+    until_setup '(.setup.ready.update | IN("none", "failed", "done")) and .setup.step != "ready" and .setup.step != "welcome"' 400
+  ready=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -c '.setup.ready' 2>/dev/null)
+  log "getting ready said: $ready (the box started on agentv $before)"
+  check "and says how it went" test -n "$ready"
+  if [[ $(jq -r '.update' <<<"$ready" 2>/dev/null) == "done" ]]; then
+    # Edge's newest, as the box's own package lists have it since that update.
+    newest=$(ssh_guest "pacman -Si agentv 2>/dev/null" | awk '/^Version/ { print $3; exit }')
+    edge_moved() {
+      [[ -n $newest && $(jq -r '.to // ""' <<<"$ready") == "$newest" && $newest != "$before" ]] &&
+        [[ $(ssh_guest "vercmp $newest $before") == 1 ]] &&
+        [[ $(ssh_guest "pacman -Q agentv" | cut -d' ' -f2) == "$newest" ]]
+    }
+    check "edge got a newer build mid-run, and getting ready installed exactly that one ($before to ${newest:-none})" edge_moved
+  fi
 fi
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-next.json" 2>&1 || true
 next=$(jq -r '.setup.step // ""' "$RUN_DIR/setup-next.json")
-# Each step after getting ready has its own headline: the AI provider's and
-# the goal's are "pick one", who watches says so.
-NEXT_TEXT="pick one|which ai|who watches|what is this tv for"
+# Each step after getting ready has its own headline: where the TV is asks
+# so (ADR-055), the AI provider's and the goal's are "pick one", who watches
+# says so.
+NEXT_TEXT="where is this tv|pick the country|pick one|which ai|who watches|what is this tv for"
 check "the step after getting ready ($next) is on the TV (OCR)" ocr_finds success-S5.6-next "$NEXT_TEXT" 30
 capture_console "success-S5.6-next"
 

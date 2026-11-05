@@ -6,8 +6,9 @@
 # brings them, with AgenTV's migrations after, and makes that the base image
 # every check starts from.
 #
-# Only AgenTV's packages move. The rest of the box stays as the night
-# installed it, so a check sees what this change does and nothing else.
+# Only AgenTV's packages move, with anything new they depend on. The rest of
+# the box stays as the night installed it, so a check sees what this change
+# does and nothing else.
 #
 # Usage: test/agentv/image/up-to-date <iso>   (in ci's container; the ISO is
 #        only the name the night's base image goes by)
@@ -48,7 +49,11 @@ for package in "${packages[@]}"; do
     if [[ -f $file ]]; then ssh_guest "cat >$remote" <"$file"; fi
   done
 done
-ssh_sudo "pacman -U --noconfirm /tmp/agentv-packages/*.pkg.tar.zst" >"$RUN_DIR/pacman.log" 2>&1 || { tail -n 20 "$RUN_DIR/pacman.log"; }
+# The box's own package lists first, from its mirrors, so a dependency
+# AgenTV's packages have gained since the night, such as esbuild and npm
+# with stage 6, comes from them. Nothing else is upgraded.
+ssh_sudo "pacman -Sy --noconfirm" >"$RUN_DIR/pacman.log" 2>&1 || { tail -n 20 "$RUN_DIR/pacman.log"; }
+ssh_sudo "pacman -U --noconfirm /tmp/agentv-packages/*.pkg.tar.zst" >>"$RUN_DIR/pacman.log" 2>&1 || { tail -n 20 "$RUN_DIR/pacman.log"; }
 # What AgenTV's post-update hook runs after every update, in a login shell,
 # where Omarchy's environment comes from.
 ssh_guest "bash -lc agentv-migrate </dev/null" >"$RUN_DIR/migrate.log" 2>&1 || { tail -n 20 "$RUN_DIR/migrate.log"; }

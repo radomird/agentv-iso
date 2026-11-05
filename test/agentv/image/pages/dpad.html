@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stand-in</title>
+<style>
+  * { outline: none; }
+  body { margin: 0; background: #111; color: #eee; font: 20px sans-serif; }
+  nav { display: flex; gap: 32px; padding: 24px 48px; }
+  nav a { color: #eee; text-decoration: none; }
+  .row { display: flex; gap: 24px; overflow-x: auto; scrollbar-width: none; padding: 24px 48px; }
+  .tile { flex: 0 0 360px; height: 200px; border-radius: 8px; background: #2a2a3a; display: grid; place-items: center; cursor: pointer; }
+</style>
+</head>
+<body>
+<!-- A web app made for a desktop: no focus outline and no arrow keys of its
+     own. Its title says what has focus and what was pressed, for the image
+     check to read from Hyprland. -->
+<nav>
+  <a id="films" href="?next">Films</a>
+  <a id="series" href="?next">Series</a>
+</nav>
+<div class="row" id="row"></div>
+<script>
+  if (location.search === "?next") {
+    document.body.innerHTML = "<h1>Next</h1>";
+    document.title = "next";
+  }
+  const row = document.getElementById("row");
+  for (let n = 1; row && n <= 8; n++) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.id = `tile-${n}`;
+    tile.textContent = `Title ${n}`;
+    tile.addEventListener("click", () => (document.title = `picked ${n}`));
+    row.append(tile);
+  }
+  addEventListener("focusin", (event) => (document.title = `focus ${event.target.id}`));
+</script>
+</body>
+</html>

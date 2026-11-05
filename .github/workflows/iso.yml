@@ -13,7 +13,8 @@ name: ISO
 #
 # The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
 # 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
-# workflow artifact instead.
+# workflow artifact, and a tag also publishes it to AgenTV's R2 bucket for
+# people to download (publish-iso.yml does the same for an ISO kept earlier).
 
 on:
   push:
@@ -177,3 +178,18 @@ jobs:
             release/*.iso.sha256
           compression-level: 0
           retention-days: 30
+
+      # A release's ISO also goes where people download it, AgenTV's R2
+      # bucket, once the repo has its secrets (bin/agentv-iso-publish).
+      - name: Publish the ISO
+        if: success() && startsWith(github.ref, 'refs/tags/v') && vars.R2_BUCKET != ''
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          ISO_URL: ${{ vars.ISO_URL }}
+          NAME: ${{ steps.name.outputs.name }}
+        run: |
+          url=$(bin/agentv-iso-publish "release/$NAME.iso")
+          echo "Download: $url" >>"$GITHUB_STEP_SUMMARY"

@@ -156,14 +156,19 @@ fi
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 check "S2.12 the box is on agentv $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
-check "the owner's sudo goes back to asking for a password" ssh_sudo "! ls /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
+# AgenTV's own grant (99-agentv-update-<owner>) from 0.2 on, and the one
+# named like Omarchy's before it.
+check "the owner's sudo goes back to asking for a password" \
+  ssh_sudo "! ls /etc/sudoers.d/99-agentv-update-* /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
 # Omarchy's update ends by restarting its shell in the session that's
 # running; the TV session stops it again.
 check "after an update from the TV, Omarchy's shell isn't on the TV: no bar, no process (ADR-031)" no_omarchy_shell 30
+# Home is the all apps tile: its "installed" count, or its name, since the
+# toast after Go back sits over the count's corner of the tile.
 screen_home() {
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -qi "installed" "$RUN_DIR/$1.txt"
+  grep -qiE "installed|all apps" "$RUN_DIR/$1.txt"
 }
 started=$SECONDS
 until screen_home "success-update-tv-home" || (( SECONDS - started > 120 )); do sleep 5; done

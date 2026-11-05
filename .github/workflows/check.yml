@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   policy:
-    name: "Layer 1: policy, lint and secrets"
+    name: "Lint, secrets and house rules"
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -54,7 +54,7 @@ jobs:
         run: test/agentv/policy/check-test.sh --ci
 
   report:
-    name: Acceptance ids
+    name: "Which acceptance checks passed"
     if: always()
     needs: [policy]
     runs-on: ubuntu-26.04

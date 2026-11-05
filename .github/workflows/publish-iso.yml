@@ -1,0 +1,57 @@
+name: Publish ISO
+
+# Puts an ISO that an earlier run kept where people download it: AgenTV's
+# Cloudflare R2 bucket, since the ISO is over GitHub's 2 GiB cap for release
+# files. A release tag's ISO run publishes its own ISO (iso.yml), so this is
+# for one kept before that, such as 0.1.3's. It needs the repo's secrets
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, and its variables
+# R2_BUCKET and ISO_URL (bin/agentv-iso-publish).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: "The ISO run that kept the ISO"
+        type: string
+        required: true
+      name:
+        description: "The kept ISO's name, such as agentv-0.1.3-x86_64"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    name: "Publish the ISO"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the kept ISO
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run-id }}
+          NAME: ${{ inputs.name }}
+        run: |
+          [[ $RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::run-id is a run's number"; exit 1; }
+          [[ $NAME =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64$ ]] || { echo "::error::name is an ISO's name, such as agentv-0.1.3-x86_64"; exit 1; }
+          echo "Free: $(df -BG --output=avail "$RUNNER_TEMP" | tail -1)"
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "$NAME" -D "$RUNNER_TEMP/iso"
+
+      - name: Upload it
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          ISO_URL: ${{ vars.ISO_URL }}
+          NAME: ${{ inputs.name }}
+        run: |
+          url=$(bin/agentv-iso-publish "$RUNNER_TEMP/iso/$NAME.iso")
+          echo "Download: $url" >>"$GITHUB_STEP_SUMMARY"

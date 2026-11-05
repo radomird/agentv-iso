@@ -5,6 +5,7 @@
 # the signed tested.json once every check has passed. Skips otherwise.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
 
 if [[ -z ${AGENTV_TEST_TESTED_OUT:-} ]]; then
   log "Not a nightly run; skipping"

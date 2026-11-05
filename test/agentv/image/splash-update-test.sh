@@ -24,7 +24,19 @@ tail -n 5 "$RUN_DIR/sync.log"
 
 # A marker from before the reinstall, so "rebuilt" means rebuilt by it.
 ssh_sudo "touch /root/before-omarchy-settings"
-ssh_sudo "pacman -S --noconfirm omarchy-settings" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
+# The version the box has, from its own repository, or else from whichever of
+# Omarchy's channels serves it: a box installed before stable serves the
+# release (rc's packages onto stable) has a newer one than stable's, and
+# pacman -S would try to go back to stable's.
+installed=$(ssh_guest "pacman -Q omarchy-settings" | cut -d' ' -f2)
+ssh_sudo "if pacman -Si omarchy-settings | grep -q '^Version *: $installed\$'; then
+    pacman -S --noconfirm omarchy-settings
+  else
+    for channel in rc edge; do
+      url=https://pkgs.omarchy.org/\$channel/x86_64/omarchy-settings-$installed-x86_64.pkg.tar.zst
+      curl -fsI \$url >/dev/null && { pacman -U --noconfirm \$url; break; }
+    done
+  fi" >"$RUN_DIR/omarchy-settings.log" 2>&1 || true
 tail -n 15 "$RUN_DIR/omarchy-settings.log"
 check "omarchy-settings was reinstalled, and AgenTV's hook ran after it" \
   grep -q "Putting AgenTV's logo on the boot splash" "$RUN_DIR/omarchy-settings.log"
