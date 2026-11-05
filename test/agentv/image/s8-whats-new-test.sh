@@ -61,6 +61,33 @@ APP
 done
 check "the two stand-in services install as the box's apps" ssh_guest "agentv app list | grep -q local.kino && agentv app list | grep -q local.lumen"
 
+# --- The country, and the daemon's clock following its zone -------------------
+
+# api <method> <path> <body or ""> <name>: the daemon's answer in <name>.json.
+# A body goes on stdin, so its quotes never meet the shell's.
+api() {
+  if [[ -n $3 ]]; then
+    ssh_guest "curl -sS --max-time 120 -X $1 -H 'Content-Type: application/json' --data-binary @- 'http://127.0.0.1:3000$2'" <<<"$3" >"$RUN_DIR/$4.json" 2>&1 || true
+  else
+    ssh_guest "curl -sS --max-time 120 -X $1 'http://127.0.0.1:3000$2'" >"$RUN_DIR/$4.json" 2>&1 || true
+  fi
+}
+
+# TMDB's region is the box's country (ADR-055), as Settings → country picks it.
+# The box was installed in UTC, so NL moves its zone to Amsterdam's, and the
+# daemon's clock follows without a restart. Everything after this reads its
+# dates on Amsterdam's clock: the stand-in for TMDB starts after it, and so
+# do today and the next air date here.
+daemon_pid=$(ssh_guest "systemctl show -p MainPID --value agentv-daemon.service")
+api PUT /api/country '{"code":"NL"}' region
+check "Settings → country keeps NL, and the time zone follows it" jq -e '.code == "NL" and .zone == "Europe/Amsterdam"' "$RUN_DIR/region.json"
+ssh_guest "curl -sS --max-time 10 http://127.0.0.1:3000/health" >"$RUN_DIR/health-zone.json" 2>&1 || true
+check "T12.3 the daemon's clock follows the box to Europe/Amsterdam" jq -e '.zone == "Europe/Amsterdam"' "$RUN_DIR/health-zone.json"
+same_daemon() { [[ $(ssh_guest "systemctl show -p MainPID --value agentv-daemon.service") == "$daemon_pid" ]]; }
+check "T12.3 without the daemon restarting" same_daemon
+today=$(ssh_guest "date +%F")
+next=$(ssh_guest "date -d '+3 days' +%F")
+
 # --- A stand-in for TMDB, behind the router's service --------------------------
 
 # It answers the few paths the box asks for, with this week's dates on the
@@ -96,23 +123,9 @@ createServer((request, response) => {
 STANDIN
 ssh_guest "nohup node /tmp/tmdb-standin.mjs $TMDB_PORT >/tmp/tmdb-standin.log 2>&1 </dev/null & disown" || true
 ssh_guest "sudo mkdir -p $DROPINS/agentv-router.service.d && printf '[Service]\nEnvironment=AGENTV_TMDB_UPSTREAM=http://127.0.0.1:$TMDB_PORT/3\nEnvironment=AGENTV_ROUTER_UPSTREAM=http://127.0.0.1:$ROUTER_PORT\n' | sudo tee $DROPINS/agentv-router.service.d/standin.conf >/dev/null && sudo systemctl daemon-reload && sudo systemctl restart agentv-router.service"
-today=$(ssh_guest "date +%F")
-next=$(ssh_guest "date -d '+3 days' +%F")
-# api <method> <path> <body or ""> <name>: the daemon's answer in <name>.json.
-# A body goes on stdin, so its quotes never meet the shell's.
-api() {
-  if [[ -n $3 ]]; then
-    ssh_guest "curl -sS --max-time 120 -X $1 -H 'Content-Type: application/json' --data-binary @- 'http://127.0.0.1:3000$2'" <<<"$3" >"$RUN_DIR/$4.json" 2>&1 || true
-  else
-    ssh_guest "curl -sS --max-time 120 -X $1 'http://127.0.0.1:3000$2'" >"$RUN_DIR/$4.json" 2>&1 || true
-  fi
-}
 
 # --- The key, as Settings → what's new keeps it -----------------------------------
 
-# TMDB's region is the box's country (ADR-055), as Settings → country picks it.
-api PUT /api/country '{"code":"NL"}' region
-check "Settings → country keeps NL, and the time zone follows it" jq -e '.code == "NL" and .zone == "Europe/Amsterdam"' "$RUN_DIR/region.json"
 api GET /api/whats-new "" no-key
 check "with no TMDB key yet, what's new says so" jq -e '.feed.ok == false and .feed.why == "no-key"' "$RUN_DIR/no-key.json"
 api PUT /api/tmdb-key "{\"key\":\"$TOKEN\"}" key
@@ -131,6 +144,8 @@ check "S8.1 what's new is this week's titles on the household's services" \
   jq -e '[.feed.titles[] | "\(.title) on \(.app)\(if .season then " s\(.season)" else "" end)"] == ["Night Train on local.kino", "Copper Hill on local.lumen s3", "The Long Field on local.kino", "Small Hours on local.lumen"]' "$RUN_DIR/feed.json"
 # shellcheck disable=SC2016 # $today is jq's own variable
 check "S8.1 for the box's region, from this week" jq -e --arg today "$today" '.feed.region == "NL" and .feed.to == $today' "$RUN_DIR/feed.json"
+# shellcheck disable=SC2016 # $today is jq's own variable
+check "T12.3 what's new's today is Amsterdam's, with no restart since the zone moved" jq -e --arg today "$today" '.feed.to == $today' "$RUN_DIR/feed.json"
 check "S8.1 with TMDB's posters" jq -e '.feed.titles[0].poster == "https://image.tmdb.org/t/p/w342/night.jpg"' "$RUN_DIR/feed.json"
 check "the key reached TMDB, through the router's service" ssh_guest "grep -qx 'Bearer $TOKEN' /tmp/tmdb-standin-auth"
 
