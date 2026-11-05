@@ -126,11 +126,17 @@ def netdev_of(phy: str) -> str:
 class Hotspot:
     def __init__(self) -> None:
         self.dnsmasq: subprocess.Popen | None = None
+        self.supplicant: subprocess.Popen | None = None
         self.device = ""
         self.ssid = ""
         self.password = ""
+        self.tries = 0
 
     def start(self, phy: str) -> bool:
+        """One try at opening the network on this radio. A try that fails
+        leaves iwd stopped and the radio's interface in place, so the next
+        one starts from the same state."""
+        self.tries += 1
         # iwd runs the live system's Wi-Fi, as a client. The access point is
         # wpa_supplicant's, as NetworkManager's is on the installed box.
         run(["systemctl", "stop", "iwd.service"])
@@ -161,19 +167,19 @@ class Hotspot:
             )
         run(["ip", "addr", "flush", "dev", device])
         run(["ip", "link", "set", device, "up"])
-        subprocess.run(
-            ["wpa_supplicant", "-B", "-i", device, "-c", str(conf), "-P", str(RUN / "wpa_supplicant.pid")],
-            capture_output=True,
-            timeout=20,
-            check=False,
-        )
-        for _ in range(40):
-            if "type AP" in run(["iw", "dev", device, "info"]):
+        self.stop_supplicant()
+        with open(RUN / "wpa_supplicant.log", "a") as output:
+            self.supplicant = subprocess.Popen(
+                ["wpa_supplicant", "-i", device, "-c", str(conf)], stdin=subprocess.DEVNULL, stdout=output, stderr=output
+            )
+        for _ in range(60):
+            if "type AP" in run(["iw", "dev", device, "info"]) or self.supplicant.poll() is not None:
                 break
             time.sleep(0.5)
-        else:
-            log(f"{device} didn't become an access point")
-            self.stop()
+        if "type AP" not in run(["iw", "dev", device, "info"]):
+            log(f"{device} on {phy} didn't become an access point (try {self.tries}); iw dev says:")
+            log(run(["iw", "dev"]).strip() or "(nothing)")
+            self.stop_supplicant()
             return False
         run(["ip", "addr", "add", f"{ADDRESS}/24", "dev", device])
         leases = RUN / "dnsmasq.leases"
@@ -200,14 +206,21 @@ class Hotspot:
         except OSError:
             return False
 
+    def stop_supplicant(self) -> None:
+        if self.supplicant and self.supplicant.poll() is None:
+            self.supplicant.terminate()
+            try:
+                self.supplicant.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.supplicant.kill()
+        self.supplicant = None
+
     def stop(self) -> None:
+        """Everything put back, for Omarchy's installer after Ctrl+C."""
         if self.dnsmasq:
             self.dnsmasq.terminate()
             self.dnsmasq = None
-        try:
-            os.kill(int((RUN / "wpa_supplicant.pid").read_text()), signal.SIGTERM)
-        except (OSError, ValueError):
-            pass
+        self.stop_supplicant()
         if self.device:
             run(["ip", "addr", "flush", "dev", self.device])
         NETWORKD.unlink(missing_ok=True)

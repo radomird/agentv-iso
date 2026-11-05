@@ -69,8 +69,15 @@ check "T1.4 erase and install from the home network without the token is refused
 # A Wi-Fi card that can host a network: two simulated radios, the box's and
 # the phone's.
 check "the live system gets two simulated Wi-Fi radios" ssh_live_root "modprobe mac80211_hwsim radios=2"
+before=$FAILURES
 check "T1.4 the first screen opens its own Wi-Fi network" wait_mode hotspot 120
 phone_json >"$RUN_DIR/phone-hotspot.json"
+if (( FAILURES != before )); then
+  keep_install_logs
+  cat "$RUN_DIR/phone-side.log" "$RUN_DIR/radios.txt"
+  stop_vm
+  finish
+fi
 jq '.password = "(kept out of the log)"' "$RUN_DIR/phone-hotspot.json"
 ssid=$(jq -r '.ssid // empty' "$RUN_DIR/phone-hotspot.json")
 password=$(jq -r '.password // empty' "$RUN_DIR/phone-hotspot.json")
