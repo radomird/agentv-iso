@@ -528,7 +528,9 @@ def first_screen() -> int:
     scanned = time.monotonic()
     drawn = None
 
-    with Console("/dev/tty") as console:
+    # The console by its own name (/dev/tty1), not /dev/tty, so it's known
+    # to be a VT, which takes this screen's colours.
+    with Console(tty) as console:
         while True:
             if time.monotonic() - scanned >= RESCAN_SECONDS:
                 chosen = disks[selected].path if disks else None

@@ -19,15 +19,17 @@ wait_for_live_root_ssh 300 || { stop_vm; finish; }
 check "AgenTV's first screen comes up (OCR)" wait_for_screen "of 12" 300
 capture_console "success-T1.2-first-screen"
 press ctrl-c
-# Omarchy's greeter, under AgenTV's logo and tagline.
-check "T1.2 Ctrl+C on it gives Omarchy's own installer (OCR)" wait_for_screen "Press Return" 60
+# Omarchy's greeter, under AgenTV's logo and tagline. Its "Press Return"
+# line is too dim for OCR, so the tagline it shows is what's looked for.
+check "T1.2 Ctrl+C on it gives Omarchy's own installer (OCR)" wait_for_screen "agentic TV" 60
 capture_console "success-T1.2-omarchy-greeter"
 give_key
 press ret
 
 # Omarchy's questions, answered as they come. The summary repeats every
 # field's name, so it's looked for first, and each question is answered
-# once.
+# once. OCR reads this font's w as u at times ("overuriting"), so the
+# overwrite confirm is matched without its w.
 drive_omarchy_installer() {
   local waited=0 text step
   local -A answered=()
@@ -36,7 +38,7 @@ drive_omarchy_installer() {
     step=""
     if grep -qi "look right" <<<"$text"; then
       step=summary; [[ -v answered[$step] ]] || { capture_console "success-T1.2-summary"; press ret; }
-    elif grep -qi "Confirm overwriting" <<<"$text"; then
+    elif grep -qi "Confirm over" <<<"$text"; then
       step=overwrite; [[ -v answered[$step] ]] || { capture_console "success-T1.2-overwrite"; press ret; }
     elif grep -qi "Select install disk" <<<"$text"; then
       step=disk; [[ -v answered[$step] ]] || { capture_console "success-T1.2-disk"; press ret; }
