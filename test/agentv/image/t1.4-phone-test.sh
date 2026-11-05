@@ -85,12 +85,34 @@ check "the box's radio is an access point" access_point
 sleep 3
 capture_console "success-T1.4-hotspot-code"
 
-# The phone: the other radio, in a namespace of its own.
-box_phy=$(ssh_live_root "cat /sys/class/net/$device/phy80211/name" 2>/dev/null || true)
+# stop_unless <failures before>: the rest needs what just failed, so the VM
+# stops here rather than wait out an install nobody started.
+stop_unless() {
+  (( FAILURES == $1 )) && return 0
+  keep_install_logs
+  stop_vm
+  finish
+}
+
+# The phone: the other radio, in a namespace of its own. Stopping iwd for
+# the hotspot took its interfaces with it, so the phone's radio may have
+# none, and it gets one. Each step's output is kept, one by one.
+box_phy=$(ssh_live_root "basename \$(readlink -f /sys/class/net/$device/phy80211)" 2>/dev/null || true)
 phone_phy=$(ssh_live_root "ls /sys/class/ieee80211 | grep -vx '$box_phy' | head -n 1" 2>/dev/null || true)
-ssh_live_root "ip netns add phone && iw phy $phone_phy set netns name phone" >"$RUN_DIR/netns.log" 2>&1 || true
+log "The box's radio: $box_phy, as $device. The phone's: $phone_phy"
+for step in "ls /sys/class/ieee80211; iw dev" \
+  "ip netns add phone" \
+  "iw phy $phone_phy set netns name phone" \
+  "ip netns exec phone sh -c 'ls /sys/class/net | grep -qvx lo || iw phy $phone_phy interface add phone0 type managed'" \
+  "ip netns exec phone iw dev"; do
+  printf '$ %s\n' "$step"
+  ssh_live_root "$step" 2>&1 || echo "(exit $?)"
+done >"$RUN_DIR/netns.log"
+cat "$RUN_DIR/netns.log"
 phone_if=$(ssh_live_root "ip netns exec phone ls /sys/class/net | grep -vx lo | head -n 1" 2>/dev/null || true)
+before=$FAILURES
 check "the phone's radio is in its own namespace" test -n "$phone_if"
+stop_unless "$before"
 phone_conf() {
   cat <<EOF
 network={
@@ -117,7 +139,9 @@ associated() {
   done
   return 1
 }
+before=$FAILURES
 check "T1.4 the phone joins the live system's network with the password from the code" associated ssh_live_root
+stop_unless "$before"
 ssh_live_root "ip netns exec phone python3 -I /tmp/agentv-phone.py dhcp $phone_if" >"$RUN_DIR/dhcp.json" 2>&1 || true
 cat "$RUN_DIR/dhcp.json"
 phone_address=$(jq -r '.address // empty' "$RUN_DIR/dhcp.json" 2>/dev/null || true)
@@ -201,12 +225,20 @@ check "with the same password" jq -e --arg password "$password" '.password == $p
 
 # The phone again: the radio that isn't the box's.
 box_device=$(jq -r '.device // empty' <<<"$(box_state)")
-box_phy=$(ssh_guest "cat /sys/class/net/$box_device/phy80211/name" 2>/dev/null || true)
+box_phy=$(ssh_guest "basename \$(readlink -f /sys/class/net/$box_device/phy80211)" 2>/dev/null || true)
 phone_phy=$(ssh_guest "ls /sys/class/ieee80211 | grep -vx '$box_phy' | head -n 1" 2>/dev/null || true)
-ssh_guest "sudo -n sh -c 'ip netns add phone && iw phy $phone_phy set netns name phone'" >"$RUN_DIR/netns-box.log" 2>&1 || true
 box_sudo() {
   ssh_guest "sudo -n sh -c $(printf %q "$1")"
 }
+for step in "ls /sys/class/ieee80211; iw dev" \
+  "ip netns add phone" \
+  "iw phy $phone_phy set netns name phone" \
+  "ip netns exec phone sh -c 'ls /sys/class/net | grep -qvx lo || iw phy $phone_phy interface add phone0 type managed'" \
+  "ip netns exec phone iw dev"; do
+  printf '$ %s\n' "$step"
+  box_sudo "$step" 2>&1 || echo "(exit $?)"
+done >"$RUN_DIR/netns-box.log"
+cat "$RUN_DIR/netns-box.log"
 phone_if=$(box_sudo "ip netns exec phone ls /sys/class/net | grep -vx lo | head -n 1" 2>/dev/null || true)
 phone_conf | ssh_guest "sudo -n sh -c 'umask 077 && cat >/run/agentv-test-phone.conf'"
 ssh_guest "cat >/tmp/agentv-phone.py" <"$DIR/phone.py"
