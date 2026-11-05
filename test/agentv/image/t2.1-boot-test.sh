@@ -2,11 +2,16 @@
 #
 # T2.1: straight to the TV (ADR-060). From power on to home, the TV shows the
 # firmware's own screen, then AgenTV's splash until home is drawn: no boot
-# menu, no text and no black screen on the way. A recorder reads the screen
-# about ten times a second from the moment the VM is switched on, and OCR
-# reads every frame that changed (frames.py). Then a key in the boot
-# loader's quiet second shows AgenTV's boot menu, which waits, and Enter on
-# it boots the first entry, back to the TV.
+# menu, no text and no black or white screen on the way. A recorder reads
+# the screen about ten times a second from the moment the VM is switched on,
+# and OCR reads every frame that changed (frames.py). That's an ordinary
+# boot, then a first boot again, whose work, such as rebuilding the boot
+# image, happens behind the splash too. Then a key in the boot loader's
+# quiet second shows AgenTV's boot menu, which waits, and Enter on it boots
+# the first entry, back to the TV.
+#
+# It takes about eight minutes: three boots, two of them read frame by
+# frame, and a first boot's rebuild of the boot image.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -40,11 +45,11 @@ wait_for_ssh 300 failure-T2.1-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-T2.1-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 
 # The switch for booting straight to the TV, on, while its default is off.
-if guest "agentv feature on boot" >"$RUN_DIR/feature.log" 2>&1; then
-  log "agentv feature on boot: $(tr '\n' ' ' <"$RUN_DIR/feature.log")"
-else
-  log "No switch for it on this box: $(tr '\n' ' ' <"$RUN_DIR/feature.log")"
-fi
+# Only an edge box turns a switch on.
+ssh_sudo "agentv channel edge" >"$RUN_DIR/channel.log" 2>&1 || true
+guest "agentv feature on boot" >"$RUN_DIR/feature.log" 2>&1 || true
+log "agentv feature on boot: $(tr '\n' ' ' <"$RUN_DIR/feature.log")"
+check "the boot switch is on" guest "agentv feature list | grep -qE '^boot +on\$'"
 
 # The boot loader as Omarchy 4.5 sets it: one quiet second (ADR-060).
 ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf.txt" 2>&1 || true
@@ -60,38 +65,57 @@ background=${background:-#1a1b26}
 log "The splash's background: $background"
 stop_vm
 
-log "Switching it on, with the screen recorded"
-rm -rf "$RUN_DIR/frames" "$RUN_DIR/frames.stop"
-# Started paused, so the recorder has the first frame before anything runs.
-power_on recorded -S -qmp "unix:$RUN_DIR/frames.qmp,server,nowait"
-python3 "$HERE/frames.py" record --qmp "$RUN_DIR/frames.qmp" --out "$RUN_DIR/frames" \
-  --serial "$RUN_DIR/serial-recorded.log" --stop "$RUN_DIR/frames.stop" --max 480 >"$RUN_DIR/frames-record.log" 2>&1 &
-recorder=$!
-up=0
-if wait_for_ssh 300 failure-T2.1-recorded-ssh-timeout && wait_tv 240 >"$RUN_DIR/tv-seconds.txt"; then
-  up=1
-  # A few seconds of home, so the recording has it settled.
-  sleep 5
-fi
-touch "$RUN_DIR/frames.stop"
-wait "$recorder" || true
-cat "$RUN_DIR/frames-record.log"
-check "the TV came up after the recorded boot" test "$up" = 1
+# record <name> <what>: switches the box on with the screen recorded until
+# home is up, then reads the recording and checks what the TV showed.
+record() {
+  local name=$1 what=$2 recorder up=0 frames="$RUN_DIR/frames-$1"
+  log "Switching it on, with the screen recorded: $what"
+  rm -rf "$frames" "$RUN_DIR/frames.stop"
+  # Started paused, so the recorder has the first frame before anything runs.
+  power_on "$name" -S -qmp "unix:$RUN_DIR/frames.qmp,server,nowait"
+  python3 "$HERE/frames.py" record --qmp "$RUN_DIR/frames.qmp" --out "$frames" \
+    --serial "$RUN_DIR/serial-$name.log" --stop "$RUN_DIR/frames.stop" --max 600 >"$RUN_DIR/frames-$name.log" 2>&1 &
+  recorder=$!
+  if wait_for_ssh 420 "failure-T2.1-$name-ssh-timeout" && wait_tv 300 >"$RUN_DIR/tv-seconds-$name.txt"; then
+    up=1
+    # A few seconds of home, so the recording has it settled.
+    sleep 5
+  fi
+  touch "$RUN_DIR/frames.stop"
+  wait "$recorder" || true
+  cat "$RUN_DIR/frames-$name.log"
+  check "the TV came up after the recorded $what" test "$up" = 1
 
-log "What the TV showed, frame by frame"
-python3 "$HERE/frames.py" analyse --out "$RUN_DIR/frames" --background "$background" --home "$WELCOME_TEXT|installed" |
-  tee "$RUN_DIR/timeline.txt" || true
-verdict() {
-  jq -r "$1" "$RUN_DIR/frames/timeline.json" 2>/dev/null
+  log "What the TV showed, frame by frame: $what"
+  python3 "$HERE/frames.py" analyse --out "$frames" --background "$background" --home "$WELCOME_TEXT|installed" |
+    tee "$RUN_DIR/timeline-$name.txt" || true
+  verdict() {
+    jq -r "$1" "$frames/timeline.json" 2>/dev/null
+  }
+  jq '.verdict' "$frames/timeline.json" 2>/dev/null || true
+  check "the recorder saw the firmware hand over to the boot loader ($what)" test "$(verdict .verdict.handover)" = true
+  check "T2.1 no boot menu on the screen from power on to home, $what (OCR every frame)" test "$(verdict '.verdict.menu | length')" = 0
+  check "T2.1 no text on the screen from the boot loader to home, $what (OCR every frame)" test "$(verdict '.verdict.text | length')" = 0
+  check "T2.1 AgenTV's splash shows on the way, $what" test "$(verdict .verdict.splash)" = true
+  check "T2.1 the splash stays until home is drawn, with no black or white screen between them, $what" \
+    test "$(verdict '.verdict.gaps | length')" = 0
+  check "home is on the recording, $what" test "$(verdict .verdict.home)" = true
+  log "The splash's background alone, before the TV session's splash drew: $(verdict .verdict.background_seconds) s"
 }
-jq '.verdict' "$RUN_DIR/frames/timeline.json" 2>/dev/null || true
-check "the recorder saw the firmware hand over to the boot loader" test "$(verdict .verdict.handover)" = true
-check "T2.1 no boot menu on the screen from power on to home (OCR every frame)" test "$(verdict '.verdict.menu | length')" = 0
-check "T2.1 no text on the screen from the boot loader to home (OCR every frame)" test "$(verdict '.verdict.text | length')" = 0
-check "T2.1 AgenTV's splash shows on the way" test "$(verdict .verdict.splash)" = true
-check "T2.1 the splash stays until home is drawn, with no black screen or anything else between them" \
-  test "$(verdict '.verdict.gaps | length')" = 0
-check "home is on the recording" test "$(verdict .verdict.home)" = true
+
+record recorded "an ordinary boot"
+check "T2.1 the kernel keeps the splash up with a serial console (plymouth.ignore-serial-consoles)" \
+  ssh_guest "grep -qw plymouth.ignore-serial-consoles /proc/cmdline"
+ssh_sudo "journalctl -b --no-pager -o short-unix -u plymouth-quit -u sddm -u agentv-firstboot" >"$RUN_DIR/boot-units.log" 2>&1 || true
+guest "journalctl --user -b --no-pager -o short-unix -u agentv-screen" >"$RUN_DIR/screen.log" 2>&1 || true
+
+# First boot again: its work runs before the login manager, behind the
+# splash, rebuilding the boot image among the rest.
+ssh_sudo "rm -f /var/lib/agentv/firstboot.done" >/dev/null 2>&1 || true
+stop_vm
+record firstboot "a first boot"
+check "first boot ran again, behind the splash" ssh_sudo "test -f /var/lib/agentv/firstboot.done"
+ssh_sudo "journalctl -b --no-pager -o short-unix -u plymouth-quit -u sddm -u agentv-firstboot" >"$RUN_DIR/firstboot-units.log" 2>&1 || true
 stop_vm
 
 log "Switching it on again, with a key pressed in the boot loader's quiet second"
@@ -113,7 +137,9 @@ if wait_for_screen "AgenTV" 30; then
 fi
 check "T2.1 a key in the boot loader's first second shows AgenTV's boot menu (OCR)" test "$menu" = 1
 if (( menu )); then
-  check "the menu has AgenTV's snapshots on it" grep -qi "snapshot" "$RUN_DIR/menu.txt"
+  # AgenTV's entry, with the kernel under it (and the snapshots, once an
+  # update has made one).
+  check "the menu has AgenTV's entry on it" grep -qiE "omarchy|linux" "$RUN_DIR/menu.txt"
   # A key stops the countdown, so the menu waits for a choice.
   sleep 10
   check "the menu is still there 10 s later" wait_for_screen "AgenTV" 5

@@ -15,8 +15,8 @@
 #   frames.py analyse --out <dir> --background <#rrggbb> --home <regex>
 #       Reads every kept frame after the firmware's and says what it is:
 #       AgenTV's splash (the splash's background with the logo's colours on
-#       it), the splash's background alone, black, Limine's menu, text, or
-#       home (OCR finds the regex). It prints the timeline, writes it to
+#       it), the splash's background alone, black, white, Limine's menu,
+#       text, or home (OCR finds the regex). It prints the timeline, writes it to
 #       <dir>/timeline.json with a verdict for each rule, and keeps one frame
 #       of each stretch as a PNG, deleting the rest.
 #
@@ -35,8 +35,8 @@ import time
 
 # AgenTV's logo, as branding/plymouth-logo.png draws it: "agen" and "tv".
 LOGO_COLOURS = ("#C0CAF5", "#7AA2F7")
-# What Limine's menu says when it shows (its help line and its entries).
-MENU_WORDS = re.compile(r"\b(limine|snapshots?|booting automatically|arrows|edit|firmware setup)\b", re.I)
+# What Limine's menu says when it shows: its help lines and its countdown.
+MENU_WORDS = re.compile(r"arrows\s+select|enter\s+boot|blank\s+entry|firmware\s+setup|booting\s+automatically", re.I)
 # A word, for the text rule: three letters or more. OCR reads a picture's
 # edges as one or two letters at times, never as a word.
 WORD = re.compile(r"[A-Za-z]{3,}")
@@ -199,6 +199,7 @@ def classify(path, work, background, home):
     counts, total = histogram(path)
     total = total or 1
     black = sum(n for colour, n in counts.items() if max(rgb(colour)) <= 16) / total
+    white = sum(n for colour, n in counts.items() if min(rgb(colour)) >= 236) / total
     ground = sum(n for colour, n in counts.items() if near(rgb(colour), rgb(background))) / total
     logo = sum(counts.get(colour, 0) for colour in LOGO_COLOURS)
     splash = ground >= 0.6 and logo >= 1000
@@ -210,6 +211,8 @@ def classify(path, work, background, home):
         return "text", words
     if black >= 0.9:
         return "black", ""
+    if white >= 0.9:
+        return "white", ""
     if splash:
         return "splash", ""
     if ground >= 0.9:
@@ -241,14 +244,15 @@ def analyse(args):
         kind, words = ("firmware", "") if i <= firmware_until else classify(path, args.out, args.background, home)
         timeline.append({"file": frame["file"], "t": frame["t"], "until": frame["until"], "kind": kind, "words": words})
 
-    # The rules, from the hand-over on, until home.
+    # The rules, from the hand-over on, until home. The splash counts only
+    # on the way: home's own pages can have the logo on them too.
     after = timeline[firmware_until + 1 :]
-    first_splash = next((i for i, f in enumerate(after) if f["kind"] == "splash"), None)
     first_home = next((i for i, f in enumerate(after) if f["kind"] == "home"), None)
     end = first_home if first_home is not None else len(after)
-    # Home's page being drawn: the last moment before its words are all
-    # there, when a frame can be anything of home's.
-    drawing = (after[first_home]["t"] - 1.5) if first_home is not None else None
+    first_splash = next((i for i, f in enumerate(after[:end]) if f["kind"] == "splash"), None)
+    # Home's page being drawn: the last second before its words are all
+    # there, when a frame can be part of home's page. Never a blank one.
+    drawing = (after[first_home]["t"] - 1.0) if first_home is not None else None
 
     def before(frame):
         return drawing is None or frame["until"] < drawing
@@ -262,7 +266,7 @@ def analyse(args):
         "home": first_home is not None,
         "menu": [f"{f['file']}: {f['words']}" for f in on_the_way if f["kind"] == "menu"],
         "text": [f"{f['file']}: {f['words']}" for f in on_the_way if f["kind"] == "text" and before(f)],
-        "gaps": [f"{f['file']} ({f['kind']}, {seconds(f):.1f} s)" for f in since_splash if f["kind"] == "black" or (f["kind"] == "other" and before(f))],
+        "gaps": [f"{f['file']} ({f['kind']}, {seconds(f):.1f} s)" for f in since_splash if f["kind"] in ("black", "white") or (f["kind"] == "other" and before(f))],
         "background_seconds": round(sum(seconds(f) for f in since_splash if f["kind"] == "background"), 1),
         "boot_loader_at": handover,
         "splash_at": after[first_splash]["t"] if first_splash is not None else None,
