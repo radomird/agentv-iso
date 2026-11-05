@@ -27,7 +27,12 @@
 # also leaves the installed base image there, compressed, with what boots it,
 # for --from-disk (the nightly run keeps it as an artifact, Q100).
 #
-# Usage: test/agentv/image/ci [--again <check>...] [--from-disk <folder>]
+# Usage: test/agentv/image/ci [--from-disk <folder>] [<check>...]
+#        test/agentv/image/ci --again <check>...
+#   <check>      runs only these checks, named after their file without
+#                -test.sh (s5.6-setup for s5.6-setup-test.sh). With none,
+#                every check runs. A run that names its checks never keeps
+#                the disk, since it didn't run every check.
 #   --again      skips the build and the install, and runs only the named
 #                checks (test/agentv/image/<check>-test.sh) against the same
 #                base image, for a step that needs something the first pass
@@ -35,21 +40,36 @@
 #   --from-disk  skips the build and the install too, and starts from a base
 #                image a night's run kept: test/agentv/image/up-to-date brings
 #                it up to AgenTV's packages in the ISO's package folder, then
-#                every check runs, apart from those that need the ISO itself.
+#                the checks run, apart from those that need the ISO itself.
 
 set -euo pipefail
 
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+
 again=()
+checks=()
 disk=""
 if [[ ${1:-} == "--again" ]]; then
   shift
   again=("$@")
   (( ${#again[@]} > 0 )) || { echo "--again needs the checks to run" >&2; exit 2; }
-elif [[ ${1:-} == "--from-disk" ]]; then
-  disk=$(realpath "${2:?--from-disk needs the folder a nightly run kept}")
+else
+  if [[ ${1:-} == "--from-disk" ]]; then
+    disk=$(realpath "${2:?--from-disk needs the folder a nightly run kept}")
+    shift 2
+  fi
+  checks=("$@")
 fi
 
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+# A name that isn't a check stops the run here, before the build rather
+# than after it.
+for name in ${again[@]+"${again[@]}"} ${checks[@]+"${checks[@]}"}; do
+  if [[ ! $name =~ ^[A-Za-z0-9._-]+$ || ! -f $ROOT/test/agentv/image/$name-test.sh ]]; then
+    echo "There's no image check called '$name'. Name a file in test/agentv/image/ without -test.sh, like s5.6-setup." >&2
+    exit 2
+  fi
+done
+
 cd "$ROOT"
 
 mkdir -p test-runs
@@ -109,7 +129,7 @@ done < <(env | grep '^AGENTV_TEST_' || true)
 
 sudo chmod 0666 /dev/kvm
 docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
-  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" -e FROM_DISK="${disk:+1}" ${env_args[@]+"${env_args[@]}"} \
+  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" -e CHECKS="${checks[*]}" -e FROM_DISK="${disk:+1}" ${env_args[@]+"${env_args[@]}"} \
   ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
     # pacman 7 fails every sync on a kernel without Landlock; upstream does the same.
     if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
@@ -142,11 +162,12 @@ docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
     if [ -n "${AGENTV_TEST_OWN_REPO:-}" ] && [ -z "$AGAIN" ]; then
       ./test/agentv/image/own-repo "$iso"
     fi
-    # shellcheck disable=SC2086 # a list of check names
-    ./test/agentv/image/run "$iso" $AGAIN
-    # Every check passed: the base image, compressed, and what boots it. Not
-    # one pointed at a pull request'"'"'s own packages, which won'"'"'t be there later.
-    if [ -n "${AGENTV_TEST_KEEP_DISK:-}" ] && [ -z "$AGAIN" ] && [ -z "$FROM_DISK" ] && [ -z "${AGENTV_TEST_OWN_REPO:-}" ]; then
+    # shellcheck disable=SC2086 # lists of check names, at most one of them set
+    ./test/agentv/image/run "$iso" $AGAIN $CHECKS
+    # Every check ran and passed: the base image, compressed, and what boots
+    # it. Not one pointed at a pull request'"'"'s own packages, which won'"'"'t be
+    # there later.
+    if [ -n "${AGENTV_TEST_KEEP_DISK:-}" ] && [ -z "$AGAIN" ] && [ -z "$CHECKS" ] && [ -z "$FROM_DISK" ] && [ -z "${AGENTV_TEST_OWN_REPO:-}" ]; then
       base="test-runs/$(basename "$iso" .iso)-integration"
       mkdir -p "$AGENTV_TEST_KEEP_DISK"
       qemu-img convert -c -O qcow2 "$base/base.qcow2" "$AGENTV_TEST_KEEP_DISK/base.qcow2"
