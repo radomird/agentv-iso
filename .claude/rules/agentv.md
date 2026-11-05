@@ -16,4 +16,4 @@ The plan lives in `../agentic-tv-os`: read `HANDOFF.md` first ("Next: stage 0" i
 - **Build and test the ISO in CI only.** The Mac can't run the x86_64 ISO, and it has little free disk. The ISO is about 6.4 GB, so it travels as a workflow artifact, not a release asset.
 - **No secrets** in the repo. The signing key and test keys live as GitHub Actions secrets.
 - **Copy**, commit messages included, reads like an indie dev talking about the project: first to the person who'll use it, then to another dev. Short sentences, plain words, no inside references (ADRs, acceptance ids) in public text or commit subjects, "coming soon" for planned things, "Powered by Omarchy", and no em dashes anywhere. The `agentv-copy` skill in agentv-os has the rules and examples.
-- **Commit** with this repo's own git identity, and end the message with the Co-Authored-By trailer. Log progress in `../agentic-tv-os/LOG.md`.
+- **Commit** with this repo's own git identity. Leave out any AI attribution: no Co-Authored-By or session trailers in commit messages, and no "Generated with" line in pull requests. Log progress in `../agentic-tv-os/LOG.md`.
