@@ -78,8 +78,14 @@ record() {
   recorder=$!
   if wait_for_ssh 420 "failure-T2.1-$name-ssh-timeout" && wait_tv 300 >"$RUN_DIR/tv-seconds-$name.txt"; then
     up=1
-    # A few seconds of home, so the recording has it settled.
-    sleep 5
+    # Home is up, and the splash goes once its page has drawn: until OCR
+    # reads home on the screen, for 20 s at most, then a few seconds of it
+    # settled.
+    for (( i = 0; i < 20; i++ )); do
+      ocr_screen_once 2>/dev/null | grep -Eqi "$WELCOME_TEXT|installed" && break
+      sleep 1
+    done
+    sleep 3
   fi
   touch "$RUN_DIR/frames.stop"
   wait "$recorder" || true
@@ -101,13 +107,16 @@ record() {
     test "$(verdict '.verdict.gaps | length')" = 0
   check "home is on the recording, $what" test "$(verdict .verdict.home)" = true
   log "The splash's background alone, before the TV session's splash drew: $(verdict .verdict.background_seconds) s"
+  # What the boot and the screen daemon said about the splash, with when.
+  ssh_sudo "journalctl -b --no-pager -o short-unix -t agentv-boot-splash -u plymouth-quit -u agentv-boot-splash-release -u sddm" \
+    >"$RUN_DIR/splash-$name.log" 2>&1 || true
+  guest "journalctl --user -b --no-pager -o short-unix -u agentv-screen" >"$RUN_DIR/screen-$name.log" 2>&1 || true
+  grep -hE "agentv-boot-splash|plymouth|Plymouth|in front: home|splash goes" "$RUN_DIR/splash-$name.log" "$RUN_DIR/screen-$name.log" | cut -c1-200 || true
 }
 
 record recorded "an ordinary boot"
 check "T2.1 the kernel keeps the splash up with a serial console (plymouth.ignore-serial-consoles)" \
   ssh_guest "grep -qw plymouth.ignore-serial-consoles /proc/cmdline"
-ssh_sudo "journalctl -b --no-pager -o short-unix -u plymouth-quit -u sddm -u agentv-firstboot" >"$RUN_DIR/boot-units.log" 2>&1 || true
-guest "journalctl --user -b --no-pager -o short-unix -u agentv-screen" >"$RUN_DIR/screen.log" 2>&1 || true
 
 # First boot again: its work runs before the login manager, behind the
 # splash, rebuilding the boot image among the rest.
@@ -115,7 +124,6 @@ ssh_sudo "rm -f /var/lib/agentv/firstboot.done" >/dev/null 2>&1 || true
 stop_vm
 record firstboot "a first boot"
 check "first boot ran again, behind the splash" ssh_sudo "test -f /var/lib/agentv/firstboot.done"
-ssh_sudo "journalctl -b --no-pager -o short-unix -u plymouth-quit -u sddm -u agentv-firstboot" >"$RUN_DIR/firstboot-units.log" 2>&1 || true
 stop_vm
 
 log "Switching it on again, with a key pressed in the boot loader's quiet second"
