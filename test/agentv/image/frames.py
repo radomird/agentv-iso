@@ -14,11 +14,11 @@
 #
 #   frames.py analyse --out <dir> --background <#rrggbb> --home <regex>
 #       Reads every kept frame after the firmware's and says what it is:
-#       AgenTV's splash (the splash's background with the logo's colours on
-#       it), the splash's background alone, black, white, Limine's menu,
-#       text, or home (OCR finds the regex). It prints the timeline, writes it to
-#       <dir>/timeline.json with a verdict for each rule, and keeps one frame
-#       of each stretch as a PNG, deleting the rest.
+#       AgenTV's splash (the logo alone, in the middle of the splash's
+#       background), the splash's background alone, black, white, Limine's
+#       menu, text, or home (OCR finds the regex). It prints the timeline,
+#       writes it to <dir>/timeline.json with a verdict for each rule, and
+#       keeps one frame of each stretch as a PNG, deleting the rest.
 #
 # It needs python3, magick and tesseract, as the image checks' container has.
 
@@ -166,24 +166,35 @@ def histogram(path):
     return counts, total
 
 
+# The box around everything in the logo's colours, as (w, h, x, y), and the
+# frame's own size, or None when there's none of them.
+def logo_box(path):
+    found = re.match(
+        r"(\d+)x(\d+)\+(\d+)\+(\d+) (\d+) (\d+)",
+        run(
+            [
+                "magick", path, "-fuzz", "3%", "-fill", "white",
+                "-opaque", LOGO_COLOURS[0], "-opaque", LOGO_COLOURS[1],
+                "-fill", "black", "+opaque", "white", "-format", "%@ %w %h", "info:",
+            ]
+        ).strip(),
+    )
+    if not found:
+        return None, None
+    w, h, x, y, width, height = map(int, found.groups())
+    return ((w, h, x, y) if w > 1 and h > 1 else None), (width, height)
+
+
 # What OCR reads. With mask, the logo's own box is painted over in the
 # background colour first, so the logo itself never reads as text.
 def ocr(path, work, background=None):
     prepared = os.path.join(work, ".ocr.png")
     command = ["magick", path]
     if background:
-        box = run(
-            [
-                "magick", path, "-fuzz", "3%", "-fill", "white",
-                "-opaque", LOGO_COLOURS[0], "-opaque", LOGO_COLOURS[1],
-                "-fill", "black", "+opaque", "white", "-format", "%@", "info:",
-            ]
-        ).strip()
-        found = re.match(r"(\d+)x(\d+)\+(\d+)\+(\d+)", box)
-        if found:
-            w, h, x, y = map(int, found.groups())
-            if w > 1 and h > 1:
-                command += ["-fill", background, "-draw", f"rectangle {x - 8},{y - 8} {x + w + 8},{y + h + 8}"]
+        box, _ = logo_box(path)
+        if box:
+            w, h, x, y = box
+            command += ["-fill", background, "-draw", f"rectangle {x - 8},{y - 8} {x + w + 8},{y + h + 8}"]
     command += ["-colorspace", "gray", "-negate", "-resize", "150%", prepared]
     subprocess.run(command, capture_output=True)
     return run(["tesseract", prepared, "-", "--psm", "11"])
@@ -202,7 +213,15 @@ def classify(path, work, background, home):
     white = sum(n for colour, n in counts.items() if min(rgb(colour)) >= 236) / total
     ground = sum(n for colour, n in counts.items() if near(rgb(colour), rgb(background))) / total
     logo = sum(counts.get(colour, 0) for colour in LOGO_COLOURS)
-    splash = ground >= 0.6 and logo >= 1000
+    # The splash is the logo alone, in the middle of its background. Home's
+    # pages use the same colours, but all over the screen.
+    splash = False
+    if ground >= 0.85 and logo >= 1000:
+        box, size = logo_box(path)
+        if box:
+            w, h, x, y = box
+            width, height = size
+            splash = abs(x + w / 2 - width / 2) <= width * 0.05 and abs(y + h / 2 - height / 2) <= height * 0.05
     if splash:
         # Read again without the logo: anything left is text.
         text = ocr(path, work, background)
@@ -250,12 +269,19 @@ def analyse(args):
     first_home = next((i for i, f in enumerate(after) if f["kind"] == "home"), None)
     end = first_home if first_home is not None else len(after)
     first_splash = next((i for i, f in enumerate(after[:end]) if f["kind"] == "splash"), None)
-    # Home's page being drawn: the last second before its words are all
-    # there, when a frame can be part of home's page. Never a blank one.
-    drawing = (after[first_home]["t"] - 1.0) if first_home is not None else None
+    last_splash = next((i for i in range(end - 1, -1, -1) if after[i]["kind"] == "splash"), None)
+    # Home's page being drawn: from when the splash goes, for five seconds
+    # at most, until OCR reads home's words. Its page fades in, and its words
+    # can come a moment after its first frames. The last second before home
+    # counts too, with no splash before it. Never a black or white frame.
+    drawing = None
+    if first_home is not None:
+        drawing = after[first_home]["t"] - 1.0
+        if last_splash is not None:
+            drawing = min(drawing, max(after[last_splash]["until"], after[first_home]["t"] - 5.0))
 
     def before(frame):
-        return drawing is None or frame["until"] < drawing
+        return drawing is None or frame["t"] < drawing
 
     on_the_way = after[:end]
     since_splash = after[first_splash:end] if first_splash is not None else []

@@ -19,6 +19,10 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Home, or setup's welcome page on a box not set up yet, as OCR reads it.
+# "scan the code" is the welcome page's line OCR reads best, over its
+# moving background.
+HOME_TEXT="$WELCOME_TEXT|scan the code|phone waiting|installed"
 
 # power_on <name> [<qemu option>...]: switches this run's own disk on again.
 # start_vm_from_base would make the disk anew and lose what an earlier boot
@@ -82,7 +86,7 @@ record() {
     # reads home on the screen, for 20 s at most, then a few seconds of it
     # settled.
     for (( i = 0; i < 20; i++ )); do
-      ocr_screen_once 2>/dev/null | grep -Eqi "$WELCOME_TEXT|installed" && break
+      ocr_screen_once 2>/dev/null | grep -Eqi "$HOME_TEXT" && break
       sleep 1
     done
     sleep 3
@@ -93,7 +97,7 @@ record() {
   check "the TV came up after the recorded $what" test "$up" = 1
 
   log "What the TV showed, frame by frame: $what"
-  python3 "$HERE/frames.py" analyse --out "$frames" --background "$background" --home "$WELCOME_TEXT|installed" |
+  python3 "$HERE/frames.py" analyse --out "$frames" --background "$background" --home "$HOME_TEXT" |
     tee "$RUN_DIR/timeline-$name.txt" || true
   verdict() {
     jq -r "$1" "$frames/timeline.json" 2>/dev/null
@@ -107,11 +111,14 @@ record() {
     test "$(verdict '.verdict.gaps | length')" = 0
   check "home is on the recording, $what" test "$(verdict .verdict.home)" = true
   log "The splash's background alone, before the TV session's splash drew: $(verdict .verdict.background_seconds) s"
-  # What the boot and the screen daemon said about the splash, with when.
-  ssh_sudo "journalctl -b --no-pager -o short-unix -t agentv-boot-splash -u plymouth-quit -u agentv-boot-splash-release -u sddm" \
+  # What the boot and the screen daemon said about the splash, with when,
+  # in seconds since the kernel started.
+  # journalctl takes a tag and a unit together as both, so they're asked
+  # for one after the other.
+  ssh_sudo "{ journalctl -b --no-pager -o short-monotonic -t agentv-boot-splash; journalctl -b --no-pager -o short-monotonic -u plymouth-start -u plymouth-quit -u plymouth-quit-wait -u agentv-boot-splash-release -u sddm; } | sort -u" \
     >"$RUN_DIR/splash-$name.log" 2>&1 || true
-  guest "journalctl --user -b --no-pager -o short-unix -u agentv-screen" >"$RUN_DIR/screen-$name.log" 2>&1 || true
-  grep -hE "agentv-boot-splash|plymouth|Plymouth|in front: home|splash goes" "$RUN_DIR/splash-$name.log" "$RUN_DIR/screen-$name.log" | cut -c1-200 || true
+  guest "journalctl --user -b --no-pager -o short-monotonic -u agentv-screen" >"$RUN_DIR/screen-$name.log" 2>&1 || true
+  grep -hE "agentv-boot-splash|plymouth|Plymouth|Display Manager|in front: home|splash goes" "$RUN_DIR/splash-$name.log" "$RUN_DIR/screen-$name.log" | cut -c1-200 || true
 }
 
 record recorded "an ordinary boot"
