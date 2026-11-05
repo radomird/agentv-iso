@@ -48,7 +48,7 @@ drive_omarchy_installer() {
       step=username; [[ -v answered[$step] ]] || { type_text "$GUEST_USER"; press ret; }
     elif grep -qi "Conf *irm" <<<"$text"; then
       step=confirm; [[ -v answered[$step] ]] || { type_text "$GUEST_PASSWORD"; press ret; }
-    elif grep -qi "Password" <<<"$text"; then
+    elif grep -qi "Pass.ord" <<<"$text"; then
       step=password; [[ -v answered[$step] ]] || { type_text "$GUEST_PASSWORD"; press ret; }
     elif grep -qi "Hostname" <<<"$text"; then
       step=hostname; [[ -v answered[$step] ]] || { capture_console "success-T1.2-hostname"; press ret; }
