@@ -21,3 +21,4 @@ S1.7  iso       signing in to a test page in the services' Chromium shows no bro
 T1.1  iso       the USB stick boots to AgenTV's first screen, and one press of Enter installs and lands in TV setup, with no Omarchy question on screen
 T1.2  iso       Ctrl+C on the first screen gives Omarchy's own installer, and an install from it lands in TV setup
 T1.3  manual    a fresh install on the NUC from the phone, with no keyboard after the boot key
+T1.4  iso       a stand-in phone on the live system's hotspot picks the disk with the token, is refused without it, and rejoins the installed box's network

@@ -216,6 +216,47 @@ patch /usr/share/omarchy-iso/orchestrator/phases_impl.py "the installed box's ke
 # itself. Ctrl+C on it gives Omarchy's configurator, every question included.
 # An autoinstall drive still comes first, and skips both.
 install -D -m 755 "$here/first-screen/agentv-first-screen" /usr/local/bin/agentv-first-screen
+# The phone's way: the live system's own Wi-Fi network and the page on it,
+# and the QR code the TV shows for it.
+for file in agentv_phone.py agentv_qr.py phone.html; do
+  install -D -m 644 "$here/first-screen/$file" "/usr/local/lib/agentv-first-screen/$file"
+done
+
+# The live system's Wi-Fi network needs its radio's firmware. omarchy-iso's
+# own build step removes every radio's firmware from the live system right
+# after this one, since its installer never goes online. The kernel looks in
+# firmware/updates first, and that removal leaves it alone, so the Wi-Fi
+# cards' firmware goes there: Intel's, Atheros', MediaTek's and Realtek's.
+# The installed box gets its firmware from the root image either way.
+fw=/usr/lib/firmware
+wifi_firmware=(intel/iwlwifi iwlwifi-* ath9k_htc ath10k ath11k ath12k mediatek/WIFI_* mediatek/mt79* rtw88 rtw89 rtlwifi)
+(
+  cd "$fw"
+  shopt -s nullglob
+  found=()
+  # shellcheck disable=SC2068 # the globs are meant to expand here
+  for path in ${wifi_firmware[@]}; do
+    [[ -e $path || -L $path ]] && found+=("$path")
+  done
+  if ! compgen -G "iwlwifi-*" >/dev/null && [[ ! -d intel/iwlwifi ]]; then
+    echo "agentv-iso: no Intel Wi-Fi firmware in $fw; has linux-firmware moved it?" >&2
+    exit 1
+  fi
+  mkdir -p updates
+  cp -a --parents "${found[@]}" updates/
+  # A link that leads outside what was copied would lead nowhere once the
+  # originals are gone, so it gets what it points at.
+  updates=$(realpath updates)
+  while IFS= read -r link; do
+    target=$(realpath -m "$link")
+    if [[ $target != "$updates"/* ]]; then
+      rm -f "$link"
+      cp -rL "$target" "$link"
+    fi
+  done < <(find updates -type l)
+  echo "agentv-iso: kept $(du -sm updates | cut -f1) MB of Wi-Fi firmware for the live system's hotspot"
+)
+
 automated=/root/.automated_script.sh
 # shellcheck disable=SC2016 # the single quotes hold perl
 patch "$automated" "where the configurator starts" \

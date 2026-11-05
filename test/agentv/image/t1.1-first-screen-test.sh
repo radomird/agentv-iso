@@ -27,10 +27,11 @@ capture_console "success-T1.1-first-screen"
 ocr_screen >"$RUN_DIR/first-screen.txt"
 cat "$RUN_DIR/first-screen.txt"
 check "it asks which disk to install on" grep -qi "install agentv on" "$RUN_DIR/first-screen.txt"
-# OCR reads this font's w as u at times ("uill", "oun"), so these are
-# matched without one.
-check "and says everything on it will be erased" grep -qi "everything on it .ill be erased" "$RUN_DIR/first-screen.txt"
-check "and that Ctrl+C gives Omarchy's own installer" grep -qiE "ctrl.c omarchy.s o.n installer" "$RUN_DIR/first-screen.txt"
+# OCR reads this font's w as u, or uw, at times ("uill", "oun", "ouwn"),
+# and the QR code beside these lines adds stray letters ("bhe erased"). So
+# each is matched by the words OCR reads steadily, at both ends of its line.
+check "and says everything on it will be erased" grep -qiE "everything on it .*erased" "$RUN_DIR/first-screen.txt"
+check "and that Ctrl+C gives Omarchy's own installer" grep -qiE "ctrl.c omarchy.s .*installer" "$RUN_DIR/first-screen.txt"
 # shellcheck disable=SC2016 # the single quotes hold the inner bash's own
 check "T1.1 no question of Omarchy's on it (OCR)" \
   bash -c '! grep -qiE "$1|password|language|email" "$2"' _ "$OMARCHY_QUESTIONS" "$RUN_DIR/first-screen.txt"
