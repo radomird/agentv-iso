@@ -51,6 +51,10 @@ ALONE=(s1.3-switch)
 tests=()
 if (( $# > 0 )); then
   for name in "$@"; do
+    if [[ ! $name =~ ^[A-Za-z0-9._-]+$ || ! -f $DIR/$name-test.sh ]]; then
+      echo "There's no image check called '$name'. Name a file in test/agentv/image/ without -test.sh, like s5.6-setup." >&2
+      exit 2
+    fi
     tests+=("$DIR/$name-test.sh")
   done
 else
