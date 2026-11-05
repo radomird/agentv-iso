@@ -43,20 +43,32 @@ def load(name: str, path: Path):
 
 
 screen = load("agentv_first_screen", HERE / "agentv-first-screen")
+# The logo the ISO draws, from agentv-os's branding.
+screen.LOGO = ROOT / "configs/airootfs/usr/share/agentv-iso/logo.ansi"
 handover = load("agentv_handover", HERE / "agentv_handover.py")
 
 DISKS = [
     screen.Disk("/dev/nvme0n1", 500107862016, "samsung ssd 970 evo"),
     screen.Disk("/dev/sda", 2000398934016, "wd blue hdd"),
 ]
+HOTSPOT = {
+    "mode": "hotspot",
+    "ssid": "AgenTV-1a2b",
+    "password": "abcdefghjk",
+    "device": "wlan0",
+    "qr": "WIFI:T:WPA;S:AgenTV-1a2b;P:abcdefghjk;;",
+    "joined": False,
+}
 
 
 def plain(text: str) -> str:
-    """The screen's text, one line per row it's drawn on, without colours."""
-    rows: dict[int, str] = {}
-    for row, line in re.findall(r"\x1b\[(\d+);\d+H([^\x1b]*(?:\x1b\[[0-9;?]*m[^\x1b]*)*)", text):
-        rows[int(row)] = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line)
-    return "\n".join(rows[r] for r in sorted(rows))
+    """The screen's text, one line per row it's drawn on, without colours.
+    What's drawn on the same row (the disks and the phone's code) is joined
+    left to right, with a wide gap between."""
+    rows: dict[int, list[tuple[int, str]]] = {}
+    for row, col, line in re.findall(r"\x1b\[(\d+);(\d+)H([^\x1b]*(?:\x1b\[[0-9;?]*m[^\x1b]*)*)", text):
+        rows.setdefault(int(row), []).append((int(col), re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line)))
+    return "\n".join("    ".join(t for _, t in sorted(rows[r])) for r in sorted(rows))
 
 
 def configurator_block(start: str, stop: str) -> str:
@@ -194,6 +206,23 @@ class Drawing(unittest.TestCase):
         self.assertNotIn("enter install", text)
         self.assertIn("ctrl+c omarchy's own installer", text)
 
+    def test_the_phones_code_beside_the_disks(self):
+        for cols, rows in ((160, 50), (120, 33), (240, 67)):
+            drawn = screen.render(DISKS, 0, cols, rows, HOTSPOT)
+            text = plain(drawn)
+            self.assertIn("or set it up from your phone", text, f"{cols}x{rows}")
+            rows_drawn = [int(r) for r in re.findall(r"\x1b\[(\d+);\d+H", drawn)]
+            self.assertLessEqual(max(rows_drawn), rows, f"{cols}x{rows}")
+            self.assertIn("everything on it will be erased", text)
+
+    def test_a_console_too_small_for_the_code_says_it_in_words(self):
+        text = plain(screen.render(DISKS, 0, 80, 25, HOTSPOT))
+        self.assertIn("or set it up from your phone: wi-fi AgenTV-1a2b, password abcdefghjk", text)
+
+    def test_no_code_without_a_way_in(self):
+        text = plain(screen.render(DISKS, 0, 160, 50, {"mode": "none", "qr": None}))
+        self.assertNotIn("from your phone", text)
+
     def test_fits_a_small_console(self):
         drawn = screen.render(DISKS, 0, 80, 25)
         rows = [int(r) for r in re.findall(r"\x1b\[(\d+);\d+H", drawn)]
@@ -204,17 +233,26 @@ class Drawing(unittest.TestCase):
 class Keys(unittest.TestCase):
     """The whole screen in a pseudo-terminal, with two disks."""
 
-    def drive(self, keys: list[bytes]) -> tuple[int, str, Path]:
+    def drive(self, keys: list[bytes], phone: dict | None = None, asks: list[dict] | None = None) -> tuple[int, str, Path]:
+        """Runs the screen with these keys pressed, and what the phone's side
+        would write: phone.json before it starts, and each ask in turn."""
         work = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, work, True)
+        run = work / "run"
+        run.mkdir()
+        if phone:
+            (run / "phone.json").write_text(json.dumps(phone))
         pid, fd = pty.fork()
         if pid == 0:  # the screen, with the pty as its console
             try:
-                screen.ANSWERS = work
-                screen.HANDOVER = work / "agentv-handover"
+                screen.ANSWERS = work / "answers"
+                screen.HANDOVER = work / "answers/agentv-handover"
+                screen.RUN = run
                 screen.list_disks = lambda: list(DISKS)
                 screen.console_font = lambda tty: None
                 screen.random_password_hash = lambda: "$6$test$hash"
+                screen.start_phone = lambda: None
+                screen.stop_phone = lambda: None
                 os._exit(screen.main(["agentv-first-screen"]))
             except BaseException:  # noqa: BLE001
                 os._exit(99)
@@ -229,6 +267,9 @@ class Keys(unittest.TestCase):
         for key in keys:
             os.write(fd, key)
             time.sleep(0.3)
+        for ask in asks or []:
+            (run / "ask.json").write_text(json.dumps(ask))
+            time.sleep(1)
         status = None
         while time.monotonic() < deadline:
             if select.select([fd], [], [], 0.2)[0]:
@@ -244,7 +285,7 @@ class Keys(unittest.TestCase):
         if status is None:
             os.kill(pid, 9)
             os.waitpid(pid, 0)
-        return status, output.decode("utf-8", "replace"), work
+        return status, output.decode("utf-8", "replace"), work / "answers"
 
     def test_enter_installs_on_the_highlighted_disk(self):
         status, _, work = self.drive([b"\r"])
@@ -262,7 +303,29 @@ class Keys(unittest.TestCase):
     def test_ctrl_c_leaves_for_omarchys_installer_with_nothing_written(self):
         status, _, work = self.drive([b"\x03"])
         self.assertEqual(status, 1)
-        self.assertEqual(sorted(p.name for p in work.iterdir()), [])
+        self.assertEqual(sorted(p.name for p in work.iterdir()) if work.exists() else [], [])
+
+    def test_the_phone_picks_and_installs(self):
+        status, output, work = self.drive([], phone=HOTSPOT, asks=[{"pick": "/dev/sda"}, {"install": "/dev/sda"}])
+        self.assertEqual(status, 0)
+        config = json.loads((work / "user_configuration.json").read_text())
+        self.assertEqual(config["disk_config"]["device_modifications"][0]["device"], "/dev/sda")
+        self.assertIn("\u203a sda", output)
+        handed = json.loads((work / "agentv-handover/etc/agentv/hotspot.json").read_text())
+        self.assertEqual(handed, {"ssid": "AgenTV-1a2b", "password": "abcdefghjk"})
+        self.assertEqual((work / "agentv-handover/etc/agentv/hotspot.json").stat().st_mode & 0o777, 0o600)
+
+    def test_a_disk_the_tv_doesnt_list_is_ignored(self):
+        status, _, work = self.drive([b"\x03"], phone=HOTSPOT, asks=[{"install": "/dev/sdz"}])
+        self.assertEqual(status, 1)
+        self.assertFalse((work / "user_configuration.json").exists())
+
+    def test_enter_hands_the_hotspot_over_only_when_a_phone_is_on_it(self):
+        _, _, work = self.drive([b"\r"], phone=HOTSPOT)
+        self.assertFalse((work / "agentv-handover/etc/agentv/hotspot.json").exists())
+        self.assertTrue((work / "agentv-handover/var/lib/agentv/account.json").exists())
+        _, _, work = self.drive([b"\r"], phone={**HOTSPOT, "joined": True})
+        self.assertTrue((work / "agentv-handover/etc/agentv/hotspot.json").exists())
 
     def test_other_keys_do_nothing(self):
         status, _, work = self.drive([b"x", b"\x1b[C", b"\x1b", b"\x03"])

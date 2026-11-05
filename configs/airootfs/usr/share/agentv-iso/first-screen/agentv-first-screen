@@ -8,6 +8,14 @@ user_encrypt_installation.txt), so Omarchy's install runs the way it always
 does, only without a question. Ctrl+C gives Omarchy's own installer, with
 every question.
 
+A phone can do the same. Next to the disks there's a QR code: the live
+system's own Wi-Fi network, which agentv_phone.py opens in the background,
+or the box's address on the home network when it has no Wi-Fi card that can
+host one. The phone that scans it picks the disk and taps "erase and
+install", and the install starts the way Enter starts it. The installed box
+gets the network's name and password, and opens the same one after the
+restart, so the phone carries on.
+
 The answers are always the same, apart from the disk: the account is agentv,
 with a random password nobody knows (the phone sets a real one later), the
 box is called agentv, the keyboard is English (US), the clock is UTC and the
@@ -47,6 +55,14 @@ ANSWERS = Path(os.environ.get("AGENTV_FIRST_SCREEN_ANSWERS", "/root"))
 HANDOVER = ANSWERS / "agentv-handover"
 LOGO = Path(os.environ.get("AGENTV_FIRST_SCREEN_LOGO", "/usr/local/share/agentv/logo.ansi"))
 OMARCHY_ISO = Path("/usr/share/omarchy-iso")
+# The phone's side and the QR code, beside this in the ISO, and beside it
+# in the repo.
+LIB = Path(os.environ.get("AGENTV_FIRST_SCREEN_LIB", "/usr/local/lib/agentv-first-screen"))
+if not LIB.is_dir():
+    LIB = Path(__file__).resolve().parent
+sys.path.insert(0, str(LIB))
+# What this screen and the phone's side tell each other (agentv_phone.py).
+RUN = Path(os.environ.get("AGENTV_FIRST_SCREEN_RUN", "/run/agentv-first-screen"))
 
 ACCOUNT = "agentv"
 HOSTNAME = "agentv"
@@ -324,9 +340,10 @@ def write_private(path: Path, text: str, mode: int = 0o600) -> None:
     os.chmod(path, mode)
 
 
-def write_answers(disk: Disk) -> None:
+def write_answers(disk: Disk, hotspot: dict | None = None) -> None:
     """Everything the install reads, the way the configurator leaves it, and
-    what the installed box gets from this screen."""
+    what the installed box gets from this screen: the account's note, and
+    the hotspot's name and password when a phone is on it."""
     arch = iso_arch()
     kernel = kernel_choice(arch)
     if not kernel:
@@ -343,6 +360,11 @@ def write_answers(disk: Disk) -> None:
         json.dumps({"name": ACCOUNT, "passwordKnown": False}) + "\n",
         0o644,
     )
+    if hotspot and hotspot.get("ssid") and hotspot.get("password"):
+        write_private(
+            HANDOVER / "etc/agentv/hotspot.json",
+            json.dumps({"ssid": hotspot["ssid"], "password": hotspot["password"]}) + "\n",
+        )
 
 
 # --- Drawing -------------------------------------------------------------------
@@ -375,6 +397,38 @@ def disk_row(disk: Disk, selected: bool, width: int, name_width: int) -> str:
     return f"{WHITE}   {text}{RESET}"
 
 
+def qr_lines(text: str) -> list[str]:
+    """The code in half blocks, two rows of modules to a line of the
+    console, which makes them square. The light modules are drawn, on the
+    console's dark background, with a quiet zone of two around them."""
+    from agentv_qr import matrix
+
+    modules = matrix(text)
+    size = len(modules)
+    border = 2
+
+    def light(x: int, y: int) -> bool:
+        if not -border <= y < size + border:
+            return False
+        return not (0 <= x < size and 0 <= y < size and modules[y][x])
+
+    lines = []
+    for y in range(-border, size + border, 2):
+        row = []
+        for x in range(-border, size + border):
+            top, bottom = light(x, y), light(x, y + 1)
+            row.append("\u2588" if top and bottom else "\u2580" if top else "\u2584" if bottom else " ")
+        lines.append(WHITE + "".join(row) + RESET)
+    return lines
+
+
+def phone_line(phone: dict) -> str:
+    """For a console too small for the code: what the code would say."""
+    if phone.get("mode") == "hotspot":
+        return f"{GREY}or set it up from your phone: wi-fi {phone['ssid']}, password {phone['password']}{RESET}"
+    return f"{GREY}or set it up from your phone: {phone['qr']}{RESET}"
+
+
 def hints(disks: list[Disk]) -> str:
     parts = []
     if disks:
@@ -385,13 +439,35 @@ def hints(disks: list[Disk]) -> str:
     return "   ".join(parts)
 
 
-def render(disks: list[Disk], selected: int, cols: int, rows: int) -> str:
+def render(disks: list[Disk], selected: int, cols: int, rows: int, phone: dict | None = None) -> str:
     """The whole screen at this size, as what to send to the console."""
     logo = logo_lines()
     pad = max(2, cols * 8 // 100)
     width = max(40, min(70, cols - pad - 2))
     name_width = max([len(d.name) for d in disks] + [7]) + 4
     pitch = 1
+    top = max(1, min(rows // 10, rows - len(logo) - 13 - 3 * len(disks)))
+    logo_col = max(1, pad - 6)
+
+    # The phone's code on the right, below the logo if the logo is in the
+    # way, and a line of text instead where the console is too small.
+    code: list[str] = []
+    code_col = code_top = 0
+    instead = ""
+    if phone and phone.get("qr"):
+        code = qr_lines(phone["qr"])
+        code_width = visible(code[0])
+        code_col = cols - pad - code_width + 1
+        logo_right = logo_col + max(visible(line) for line in logo)
+        lowest = top if code_col > logo_right else top + len(logo) + 1
+        body_row = top + len(logo) + 5
+        height = len(code) + 2
+        code_top = body_row if body_row + height - 1 <= rows else max(lowest, rows - height + 1)
+        if code_col < pad + 35 or code_top < lowest or code_top + height - 1 > rows:
+            code = []
+            instead = phone_line(phone)
+        else:
+            width = min(width, code_col - pad - 3)
 
     body: list[str] = []
     if disks:
@@ -412,11 +488,11 @@ def render(disks: list[Disk], selected: int, cols: int, rows: int) -> str:
         body.append(f"{WHITE}there's no disk to install agentv on{RESET}")
         body.append("")
         body.append(f"{GREY}plug one in, and it shows up here{RESET}")
-    body += ["", "", hints(disks)]
+    # The words in place of the code take one of the blank lines above the
+    # hints: only a small console shows them, and it has no room to spare.
+    body += ["", hints(disks), instead] if instead else ["", "", hints(disks)]
 
     lines = logo + ["", "", steps_line(1), "", ""] + body
-    top = max(1, min(rows // 10, rows - len(lines)))
-    logo_col = max(1, pad - 6)
     out = [CSI + "?25l", CSI + "H", CSI + "2J"]
     for i, line in enumerate(lines):
         row = top + i
@@ -424,6 +500,10 @@ def render(disks: list[Disk], selected: int, cols: int, rows: int) -> str:
             break
         col = logo_col if i < len(logo) else pad
         out.append(f"{CSI}{row};{col}H{line}")
+    for i, line in enumerate(code):
+        out.append(f"{CSI}{code_top + i};{code_col}H{line}")
+    if code:
+        out.append(f"{CSI}{code_top + len(code) + 1};{code_col}H{WHITE}or set it up from your phone{RESET}")
     out.append(RESET)
     return "".join(out)
 
@@ -512,6 +592,73 @@ def console_font(tty: str) -> None:
     run(["bash", "-c", 'source "$1" && i18n_console_font "$2"', "_", str(OMARCHY_ISO / "i18n.sh"), tty])
 
 
+def start_phone() -> None:
+    """The phone's side, in the background, unless it's running already. It
+    outlives this screen, so the phone keeps its page while it installs."""
+    try:
+        os.kill(int((RUN / "phone.pid").read_text()), 0)
+        return
+    except (OSError, ValueError):
+        pass
+    RUN.mkdir(parents=True, exist_ok=True, mode=0o755)
+    with open(RUN / "phone.log", "a") as log:
+        subprocess.Popen(
+            [sys.executable, str(LIB / "agentv_phone.py")],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+
+
+def stop_phone() -> None:
+    """For Omarchy's installer, which has no use for the phone: the hotspot
+    closes, and the page goes."""
+    try:
+        pid = int((RUN / "phone.pid").read_text())
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        return
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+
+
+def read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def take_ask() -> dict:
+    """What the phone asked for since last time, once."""
+    ask = read_json(RUN / "ask.json")
+    (RUN / "ask.json").unlink(missing_ok=True)
+    return ask
+
+
+def tell_phone(disks: list[Disk], selected: int, installing: Disk | None = None) -> None:
+    """The disks and the step, for the phone's page (agentv_phone.py)."""
+    state = {
+        "step": 2 if installing else 1,
+        "disks": [{"path": d.path, "name": d.name, "model": d.model, "size": size_label(d.size)} for d in disks],
+        "selected": disks[selected].path if disks else None,
+        "installing": installing.path if installing else None,
+    }
+    try:
+        RUN.mkdir(parents=True, exist_ok=True, mode=0o755)
+        temporary = RUN / ".screen.json.next"
+        temporary.write_text(json.dumps(state))
+        os.replace(temporary, RUN / "screen.json")
+    except OSError:
+        pass
+
+
 def forget_answers() -> None:
     """Nothing of this screen's is left for Omarchy's installer to find."""
     for name in ("user_configuration.json", "user_credentials.json", "user_encrypt_installation.txt"):
@@ -527,6 +674,19 @@ def first_screen() -> int:
     selected = 0
     scanned = time.monotonic()
     drawn = None
+    told = None
+    (RUN / "ask.json").unlink(missing_ok=True)
+    tell_phone(disks, selected)
+    start_phone()
+
+    def install(disk: Disk, from_phone: bool) -> int:
+        phone = read_json(RUN / "phone.json")
+        # The installed box opens the same network when a phone is on it,
+        # or asked for this install, so that phone carries on.
+        hotspot = phone if phone.get("mode") == "hotspot" and (from_phone or phone.get("joined")) else None
+        write_answers(disk, hotspot)
+        tell_phone(disks, selected, installing=disk)
+        return 0
 
     # The console by its own name (/dev/tty1), not /dev/tty, so it's known
     # to be a VT, which takes this screen's colours.
@@ -539,10 +699,21 @@ def first_screen() -> int:
                 selected = paths.index(chosen) if chosen in paths else 0
                 scanned = time.monotonic()
 
-            screen = (tuple(disks), selected, console.size())
+            ask = take_ask()
+            paths = [d.path for d in disks]
+            if ask.get("install") in paths:
+                return install(disks[paths.index(ask["install"])], from_phone=True)
+            if ask.get("pick") in paths:
+                selected = paths.index(ask["pick"])
+
+            phone = read_json(RUN / "phone.json")
+            screen = (tuple(disks), selected, console.size(), phone.get("qr"))
             if screen != drawn:
-                console.write(render(disks, selected, *console.size()))
+                console.write(render(disks, selected, *console.size(), phone))
                 drawn = screen
+            if (tuple(disks), selected) != told:
+                tell_phone(disks, selected)
+                told = (tuple(disks), selected)
 
             key = console.key(0.5)
             if key == "ctrl-c":
@@ -552,14 +723,13 @@ def first_screen() -> int:
             elif key == "down" and selected < len(disks) - 1:
                 selected += 1
             elif key == "enter" and disks:
-                write_answers(disks[selected])
-                return 0
+                return install(disks[selected], from_phone=False)
 
 
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "--render":
         cols, rows = (int(n) for n in argv[2].split("x"))
-        sys.stdout.write(render(list_disks(), 0, cols, rows) + "\n")
+        sys.stdout.write(render(list_disks(), 0, cols, rows, read_json(RUN / "phone.json")) + "\n")
         return 0
 
     # Whatever happens here, the person still gets an installer: a crash
@@ -576,6 +746,7 @@ def main(argv: list[str]) -> int:
         print(f"agentv-first-screen: {error!r}; Omarchy's installer takes over", flush=True)
     if status != 0:
         forget_answers()
+        stop_phone()
     return status
 
 
