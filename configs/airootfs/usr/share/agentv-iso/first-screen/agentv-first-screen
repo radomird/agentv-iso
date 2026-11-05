@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""AgenTV's first screen on the USB stick, step 1 of setup's 12.
+
+It asks one thing: which disk. Enter erases it and installs. Underneath, it
+writes the same answers Omarchy's own configurator writes
+(/root/user_configuration.json, user_credentials.json and
+user_encrypt_installation.txt), so Omarchy's install runs the way it always
+does, only without a question. Ctrl+C gives Omarchy's own installer, with
+every question.
+
+The answers are always the same, apart from the disk: the account is agentv,
+with a random password nobody knows (the phone sets a real one later), the
+box is called agentv, the keyboard is English (US), the clock is UTC and the
+disk isn't encrypted. The disk is named by its kernel name, such as
+/dev/nvme0n1.
+
+.automated_script.sh runs this in place of Omarchy's configurator (a line
+customize.sh changes when the ISO is built). It exits 0 once the answers are
+written, and 1 for Omarchy's own installer: Ctrl+C, or anything going wrong
+here, so a bug in this screen still leaves a way to install.
+
+Usage: agentv-first-screen [--render <cols>x<rows>]
+  --render  prints the screen for this box's disks at that size, and exits
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import re
+import secrets
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import termios
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+# Where the answers go: .automated_script.sh runs the install from /root.
+ANSWERS = Path(os.environ.get("AGENTV_FIRST_SCREEN_ANSWERS", "/root"))
+# What the installed box gets from this screen, laid out as it goes on the
+# box. The install copies it over (agentv_handover.py in the installer).
+HANDOVER = ANSWERS / "agentv-handover"
+LOGO = Path(os.environ.get("AGENTV_FIRST_SCREEN_LOGO", "/usr/local/share/agentv/logo.ansi"))
+OMARCHY_ISO = Path("/usr/share/omarchy-iso")
+
+ACCOUNT = "agentv"
+HOSTNAME = "agentv"
+STEPS = 12
+# Disks smaller than this aren't offered: it's the least Omarchy's own
+# free-space install will put itself on. Omarchy's installer, after Ctrl+C,
+# still lists every disk.
+MIN_DISK_BYTES = 32 * 1024**3
+# How often the list of disks is read again, so one plugged in shows up.
+RESCAN_SECONDS = 3
+
+CSI = "\x1b["
+RESET = CSI + "0m"
+# The console's 16 colours, as .automated_script.sh sets them (Tokyo Night).
+# This screen darkens two of them for its own look and puts them back after.
+PALETTE_OWN = {"0": "0e0e14", "8": "292e42"}
+PALETTE_TOKYO_NIGHT = {"0": "1a1b26", "8": "414868"}
+BLUE = CSI + "34m"  # #7aa2f7
+GREY = CSI + "37m"  # #a9b1d6
+WHITE = CSI + "97m"  # #c0caf5
+DIM = CSI + "90m"  # #292e42, while this screen is up
+RED = CSI + "91m"  # #f7768e
+SELECTED = CSI + "30;44m"  # the background colour on blue
+
+
+@dataclass(frozen=True)
+class Disk:
+    path: str  # /dev/nvme0n1
+    size: int  # bytes
+    model: str  # "samsung ssd 970 evo", or empty
+
+    @property
+    def name(self) -> str:
+        return self.path.removeprefix("/dev/")
+
+
+def run(args: list[str], **kwargs) -> str:
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=20, **kwargs)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
+# --- The disks ----------------------------------------------------------------
+
+
+def boot_disk() -> str:
+    """The USB stick's own disk, which is never offered: the configurator's
+    get_root_disk, walking from the boot partition up to its disk."""
+    device = run(["findmnt", "-no", "SOURCE", "/run/archiso/bootmnt"]).strip()
+    if not device:
+        return ""
+    device = os.path.realpath(device)
+    for _ in range(8):
+        parent = run(["lsblk", "-dno", "PKNAME", device]).strip().splitlines()
+        if not parent or not parent[-1]:
+            break
+        device = "/dev/" + parent[-1].strip()
+    return device if run(["lsblk", "-dno", "TYPE", device]).strip() == "disk" else ""
+
+
+def candidates(exclude: str) -> list[str]:
+    """The disks Omarchy's configurator offers, in its order (internal ones
+    first), from its own install_disk_candidates."""
+    helper = OMARCHY_ISO / "disk-partitioning.sh"
+    out = run(["bash", "-c", 'source "$1" && install_disk_candidates "$2"', "_", str(helper), exclude])
+    return [line.strip() for line in out.splitlines() if line.strip().startswith("/dev/")]
+
+
+def model_label(vendor: str, model: str) -> str:
+    """Vendor and model the way the configurator's get_disk_info joins them,
+    in lower case, without a bare PCI vendor id (a VM's 0x1af4)."""
+    vendor = " ".join((vendor or "").split())
+    model = " ".join((model or "").split())
+    if re.fullmatch(r"0x[0-9a-fA-F]+", vendor):
+        vendor = ""
+    if vendor and model:
+        label = model if vendor.lower() in model.lower() else f"{vendor} {model}"
+    else:
+        label = model or vendor
+    return label.lower()
+
+
+def list_disks() -> list[Disk]:
+    disks = []
+    for path in candidates(boot_disk()):
+        out = run(["lsblk", "-dbJ", "-o", "SIZE,VENDOR,MODEL", path])
+        try:
+            info = json.loads(out)["blockdevices"][0]
+            size = int(info.get("size") or 0)
+        except (ValueError, KeyError, IndexError, TypeError):
+            continue
+        if size < MIN_DISK_BYTES:
+            continue
+        disks.append(Disk(path, size, model_label(info.get("vendor") or "", info.get("model") or "")))
+    return disks
+
+
+def size_label(size: int) -> str:
+    """The size the way it's printed on the box: 500 gb, 2 tb, 1.5 tb."""
+    gb = size / 1e9
+    if gb >= 1000:
+        tb = f"{gb / 1000:.1f}".rstrip("0").rstrip(".")
+        return f"{tb} tb"
+    return f"{round(gb)} gb"
+
+
+# --- The answers Omarchy's configurator writes --------------------------------
+
+
+def iso_arch() -> str:
+    try:
+        return Path("/root/omarchy_arch").read_text().strip() or platform.machine()
+    except OSError:
+        return platform.machine()
+
+
+def kernel_choice(arch: str) -> str:
+    """The configurator's detect_kernel: the image's own kernel on aarch64,
+    linux-t2 on a T2 Mac, linux-omarchy everywhere else."""
+    if arch == "aarch64":
+        try:
+            return Path("/root/omarchy_kernel").read_text().strip()
+        except OSError:
+            return ""
+    if re.search(r"106b:180[12]", run(["lspci", "-nn"])):
+        return "linux-t2"
+    return "linux-omarchy"
+
+
+def mirror_servers(arch: str) -> list[dict]:
+    if arch == "aarch64":
+        return [{"url": "https://arm-mirror.omarchy.org/$arch/$repo"}]
+    return [
+        {"url": "https://mirror.omarchy.org/$repo/os/$arch"},
+        {"url": "https://mirror.rackspace.com/archlinux/$repo/os/$arch"},
+        {"url": "https://geo.mirror.pkgbuild.com/$repo/os/$arch"},
+    ]
+
+
+def user_configuration(disk: str, disk_size: int, arch: str, kernel: str) -> dict:
+    """The configurator's full-disk user_configuration.json, unencrypted,
+    with its defaults: English, the US keyboard, UTC, and the box's name.
+    test/agentv/unit checks it against the configurator's own."""
+    mib = 1024 * 1024
+    gib = mib * 1024
+    disk_size_in_mib = disk_size // mib * mib
+    boot_start = mib
+    boot_size = 2 * gib
+    main_start = boot_size + boot_start
+    main_size = disk_size_in_mib - main_start - mib
+
+    def place(value: int) -> dict:
+        return {"sector_size": {"unit": "B", "value": 512}, "unit": "B", "value": value}
+
+    return {
+        "app_config": None,
+        "archinstall-language": "English",
+        "auth_config": {},
+        "audio_config": {"audio": "pipewire"},
+        "bootloader_config": {"bootloader": "Limine", "uki": False, "removable": False},
+        "custom_commands": [],
+        "omarchy_install": {
+            "input_method": "none",
+            "input_xkb_layout": "",
+            "language": "en",
+            "mode": "full_disk",
+            "defer_provisioning": False,
+            "target_mount": "/mnt",
+            "boot": {
+                "esp_mount": "/boot",
+                "esp_path": "/EFI/limine",
+                "efi_binary": "limine_aa64.efi" if arch == "aarch64" else "limine_x64.efi",
+                "enable_fallback": True,
+            },
+            "storage": {"kernel": kernel},
+        },
+        "disk_config": {
+            "config_type": "default_layout",
+            "device_modifications": [
+                {
+                    "device": disk,
+                    "partitions": [
+                        {
+                            "btrfs": [],
+                            "dev_path": None,
+                            "flags": ["boot", "esp"],
+                            "fs_type": "fat32",
+                            "mount_options": [],
+                            "mountpoint": "/boot",
+                            "obj_id": "ea21d3f2-82bb-49cc-ab5d-6f81ae94e18d",
+                            "size": place(boot_size),
+                            "start": place(boot_start),
+                            "status": "create",
+                            "type": "primary",
+                        },
+                        {
+                            "btrfs": [
+                                {"mountpoint": "/", "name": "@"},
+                                {"mountpoint": "/home", "name": "@home"},
+                                {"mountpoint": "/var/log", "name": "@log"},
+                                {"mountpoint": "/var/cache/pacman/pkg", "name": "@pkg"},
+                            ],
+                            "dev_path": None,
+                            "flags": [],
+                            "fs_type": "btrfs",
+                            "mount_options": ["compress=zstd"],
+                            "mountpoint": None,
+                            "obj_id": "8c2c2b92-1070-455d-b76a-56263bab24aa",
+                            "size": place(main_size),
+                            "start": place(main_start),
+                            "status": "create",
+                            "type": "primary",
+                        },
+                    ],
+                    "wipe": True,
+                }
+            ],
+        },
+        "hostname": HOSTNAME,
+        "kernels": [kernel],
+        "network_config": {"type": "iso"},
+        "ntp": True,
+        "parallel_downloads": 8,
+        "script": None,
+        "services": [],
+        "swap": True,
+        "timezone": "UTC",
+        "locale_config": {"kb_layout": "us", "sys_enc": "UTF-8", "sys_lang": "en_US.UTF-8"},
+        "mirror_config": {
+            "custom_repositories": [],
+            "custom_servers": mirror_servers(arch),
+            "mirror_regions": {},
+            "optional_repositories": [],
+        },
+        "packages": [
+            "base-devel",
+            "git",
+            "omarchy-keyring",
+            os.environ.get("OMARCHY_SETTINGS_PACKAGE") or "omarchy-settings",
+            os.environ.get("OMARCHY_RUNTIME_PACKAGE") or "omarchy",
+        ],
+        "profile_config": {"gfx_driver": None, "greeter": None, "profile": {}},
+        "version": "3.0.9",
+    }
+
+
+def user_credentials(password_hash: str) -> dict:
+    """The configurator's write_user_files for an unencrypted install."""
+    return {
+        "root_enc_password": password_hash,
+        "users": [{"enc_password": password_hash, "groups": [], "sudo": True, "username": ACCOUNT}],
+    }
+
+
+def random_password_hash() -> str:
+    """A SHA-512 crypt hash of a password nobody sees, made the way the
+    configurator hashes a typed one. The password itself is never kept."""
+    password = secrets.token_urlsafe(32)
+    result = subprocess.run(
+        ["openssl", "passwd", "-6", "-stdin"], input=password, capture_output=True, text=True, timeout=20, check=True
+    )
+    hashed = result.stdout.strip()
+    if not hashed.startswith("$6$"):
+        raise RuntimeError("openssl passwd -6 didn't give a SHA-512 crypt hash")
+    return hashed
+
+
+def write_private(path: Path, text: str, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "w") as out:
+        out.write(text)
+    os.chmod(path, mode)
+
+
+def write_answers(disk: Disk) -> None:
+    """Everything the install reads, the way the configurator leaves it, and
+    what the installed box gets from this screen."""
+    arch = iso_arch()
+    kernel = kernel_choice(arch)
+    if not kernel:
+        raise RuntimeError("this ISO doesn't say which kernel to install")
+    config = user_configuration(disk.path, disk.size, arch, kernel)
+    credentials = user_credentials(random_password_hash())
+    write_private(ANSWERS / "user_configuration.json", json.dumps(config, indent=4) + "\n", 0o644)
+    write_private(ANSWERS / "user_credentials.json", json.dumps(credentials, indent=4) + "\n")
+    write_private(ANSWERS / "user_encrypt_installation.txt", "false\n", 0o644)
+    # The installed box learns its account's password is one nobody knows,
+    # so SSH takes keys only until the phone sets a real one.
+    write_private(
+        HANDOVER / "var/lib/agentv/account.json",
+        json.dumps({"name": ACCOUNT, "passwordKnown": False}) + "\n",
+        0o644,
+    )
+
+
+# --- Drawing -------------------------------------------------------------------
+
+
+def logo_lines() -> list[str]:
+    try:
+        return LOGO.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    except OSError:
+        return ["agentv", "powered by omarchy"]
+
+
+def visible(text: str) -> int:
+    return len(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text))
+
+
+def steps_line(step: int) -> str:
+    done = BLUE + "■" * step
+    left = DIM + "■" * (STEPS - step)
+    return f"{done}{left}{RESET}  {GREY}{step} of {STEPS} · disk{RESET}"
+
+
+def disk_row(disk: Disk, selected: bool, width: int, name_width: int) -> str:
+    size = size_label(disk.size)
+    model_width = max(0, width - 3 - name_width - len(size) - 1)
+    model = disk.model[:model_width]
+    text = f"{disk.name:<{name_width}}{model:<{model_width}}{size} "
+    if selected:
+        return f"{SELECTED} › {text}{RESET}"
+    return f"{WHITE}   {text}{RESET}"
+
+
+def hints(disks: list[Disk]) -> str:
+    parts = []
+    if disks:
+        parts.append(f"{WHITE}enter{RESET} {GREY}install{RESET}")
+    if len(disks) > 1:
+        parts.append(f"{WHITE}↑ ↓{RESET} {GREY}pick a disk{RESET}")
+    parts.append(f"{WHITE}ctrl+c{RESET} {GREY}omarchy's own installer{RESET}")
+    return "   ".join(parts)
+
+
+def render(disks: list[Disk], selected: int, cols: int, rows: int) -> str:
+    """The whole screen at this size, as what to send to the console."""
+    logo = logo_lines()
+    pad = max(2, cols * 8 // 100)
+    width = max(40, min(70, cols - pad - 2))
+    name_width = max([len(d.name) for d in disks] + [7]) + 4
+    pitch = 1
+
+    body: list[str] = []
+    if disks:
+        body.append(f"{GREY}install agentv on{RESET}")
+        body.append("")
+        fixed = len(logo) + 3 + 2 + 2 + 1 + 2 + 1
+        pitch = 3 if rows >= fixed + 3 * len(disks) + 2 else 1
+        for i, disk in enumerate(disks):
+            chosen = i == selected
+            blank = (SELECTED + " " * width + RESET) if chosen else ""
+            if pitch == 3:
+                body.append(blank)
+            body.append(disk_row(disk, chosen, width, name_width))
+            if pitch == 3:
+                body.append(blank)
+        body += ["", "", f"{RED}everything on it will be erased{RESET}"]
+    else:
+        body.append(f"{WHITE}there's no disk to install agentv on{RESET}")
+        body.append("")
+        body.append(f"{GREY}plug one in, and it shows up here{RESET}")
+    body += ["", "", hints(disks)]
+
+    lines = logo + ["", "", steps_line(1), "", ""] + body
+    top = max(1, min(rows // 10, rows - len(lines)))
+    logo_col = max(1, pad - 6)
+    out = [CSI + "?25l", CSI + "H", CSI + "2J"]
+    for i, line in enumerate(lines):
+        row = top + i
+        if row > rows:
+            break
+        col = logo_col if i < len(logo) else pad
+        out.append(f"{CSI}{row};{col}H{line}")
+    out.append(RESET)
+    return "".join(out)
+
+
+# --- The console ---------------------------------------------------------------
+
+
+class Console:
+    """The tty this screen draws on and reads keys from, raw while it's up,
+    and put back as it was after."""
+
+    def __init__(self, path: str = "/dev/tty"):
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        self.saved = termios.tcgetattr(self.fd)
+        self.vt = bool(re.fullmatch(r"/dev/tty[0-9]+", os.ttyname(self.fd)))
+        self.pending = b""
+
+    def __enter__(self) -> "Console":
+        mode = termios.tcgetattr(self.fd)
+        mode[0] &= ~(termios.IXON | termios.ICRNL)
+        # No ISIG: Ctrl+C arrives as a key, which means Omarchy's installer.
+        mode[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG | termios.IEXTEN)
+        mode[6][termios.VMIN] = 0
+        mode[6][termios.VTIME] = 0
+        termios.tcsetattr(self.fd, termios.TCSANOW, mode)
+        self.palette(PALETTE_OWN)
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.palette(PALETTE_TOKYO_NIGHT)
+        self.write(RESET + CSI + "H" + CSI + "2J" + CSI + "?25h")
+        termios.tcsetattr(self.fd, termios.TCSANOW, self.saved)
+        os.close(self.fd)
+
+    def write(self, text: str) -> None:
+        data = text.encode("utf-8")
+        while data:
+            data = data[os.write(self.fd, data) :]
+
+    def palette(self, colours: dict[str, str]) -> None:
+        # Linux's own escape for a palette entry; only a VT has it.
+        if self.vt:
+            self.write("".join(f"\x1b]P{index.upper()}{rgb}" for index, rgb in colours.items()))
+
+    def size(self) -> tuple[int, int]:
+        try:
+            size = os.get_terminal_size(self.fd)
+        except OSError:
+            return 80, 25
+        # A console that doesn't know its size yet says 0 x 0.
+        return (size.columns or 80), (size.lines or 25)
+
+    def key(self, timeout: float) -> str | None:
+        """The next key: up, down, enter, ctrl-c, or None after the timeout."""
+        if not self.pending:
+            ready, _, _ = select.select([self.fd], [], [], timeout)
+            if not ready:
+                return None
+            self.pending += os.read(self.fd, 64)
+        for sequence, name in (
+            (b"\x1b[A", "up"),
+            (b"\x1bOA", "up"),
+            (b"\x1b[B", "down"),
+            (b"\x1bOB", "down"),
+            (b"\r", "enter"),
+            (b"\n", "enter"),
+            (b"\x03", "ctrl-c"),
+            (b"k", "up"),
+            (b"j", "down"),
+        ):
+            if self.pending.startswith(sequence):
+                self.pending = self.pending[len(sequence) :]
+                return name
+        # Anything else, and the rest of an escape sequence: dropped.
+        if self.pending.startswith(b"\x1b"):
+            match = re.match(rb"\x1b(\[[0-9;?]*[ -/]*[@-~]|O.|.)?", self.pending)
+            self.pending = self.pending[match.end() if match else 1 :]
+        else:
+            self.pending = self.pending[1:]
+        return "other"
+
+
+def console_font(tty: str) -> None:
+    """Omarchy's installer font, Terminus with the half blocks the logo
+    needs, set the way the configurator sets it before its first screen."""
+    run(["bash", "-c", 'source "$1" && i18n_console_font "$2"', "_", str(OMARCHY_ISO / "i18n.sh"), tty])
+
+
+def forget_answers() -> None:
+    """Nothing of this screen's is left for Omarchy's installer to find."""
+    for name in ("user_configuration.json", "user_credentials.json", "user_encrypt_installation.txt"):
+        (ANSWERS / name).unlink(missing_ok=True)
+    shutil.rmtree(HANDOVER, ignore_errors=True)
+
+
+def first_screen() -> int:
+    forget_answers()
+    tty = os.ttyname(sys.stdin.fileno()) if sys.stdin.isatty() else "/dev/tty"
+    console_font(tty)
+    disks = list_disks()
+    selected = 0
+    scanned = time.monotonic()
+    drawn = None
+
+    with Console("/dev/tty") as console:
+        while True:
+            if time.monotonic() - scanned >= RESCAN_SECONDS:
+                chosen = disks[selected].path if disks else None
+                disks = list_disks()
+                paths = [d.path for d in disks]
+                selected = paths.index(chosen) if chosen in paths else 0
+                scanned = time.monotonic()
+
+            screen = (tuple(disks), selected, console.size())
+            if screen != drawn:
+                console.write(render(disks, selected, *console.size()))
+                drawn = screen
+
+            key = console.key(0.5)
+            if key == "ctrl-c":
+                return 1
+            if key == "up" and selected > 0:
+                selected -= 1
+            elif key == "down" and selected < len(disks) - 1:
+                selected += 1
+            elif key == "enter" and disks:
+                write_answers(disks[selected])
+                return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 3 and argv[1] == "--render":
+        cols, rows = (int(n) for n in argv[2].split("x"))
+        sys.stdout.write(render(list_disks(), 0, cols, rows) + "\n")
+        return 0
+
+    # Whatever happens here, the person still gets an installer: a crash
+    # falls back to Omarchy's, with what went wrong in the install log.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+    signal.signal(signal.SIGHUP, lambda *_: sys.exit(1))
+    status = 1
+    try:
+        status = first_screen()
+    except KeyboardInterrupt:
+        pass
+    except Exception as error:  # noqa: BLE001 (any failure means Omarchy's installer)
+        # On stdout, which .automated_script.sh keeps in the install log.
+        print(f"agentv-first-screen: {error!r}; Omarchy's installer takes over", flush=True)
+    if status != 0:
+        forget_answers()
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

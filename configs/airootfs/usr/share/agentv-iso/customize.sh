@@ -210,4 +210,44 @@ patch "$dashboard" "the finish screen's effect" \
 patch /usr/share/omarchy-iso/orchestrator/phases_impl.py "the installed box's keyrings" \
   's/^    keyrings = \["archlinux", "omarchy"\]$/    keyrings = ["archlinux", "omarchy", "agentv"]/m'
 
+# AgenTV's first screen: step 1 of setup's 12. It asks only which disk, and
+# Enter installs. It writes the answers Omarchy's configurator would, so the
+# install that follows is Omarchy's own, with no prompts, and restarts by
+# itself. Ctrl+C on it gives Omarchy's configurator, every question included.
+# An autoinstall drive still comes first, and skips both.
+install -D -m 755 "$here/first-screen/agentv-first-screen" /usr/local/bin/agentv-first-screen
+automated=/root/.automated_script.sh
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$automated" "where the configurator starts" \
+  's/^else\n  \.\/configurator\nfi$/elif \/usr\/local\/bin\/agentv-first-screen; then
+  # AgenTV'"'"'s first screen wrote the answers, so nobody is asked anything
+  # more (agentv-iso'"'"'s customize.sh).
+  echo "AgenTV'"'"'s first screen wrote the answers; installing without questions."
+  export OMARCHY_UI_INTERACTIVE=no AGENTV_STEP="2 of 12 · install"
+else
+  .\/configurator
+fi/m'
+if (( $(grep -c '^elif /usr/local/bin/agentv-first-screen; then$' "$automated") != 1 )); then
+  echo "agentv-iso: AgenTV's first screen isn't in $automated exactly once" >&2
+  exit 1
+fi
+
+# What the first screen hands the installed box (the account's marker) goes
+# on it in a phase of its own, right after SSH access.
+orchestrator=/usr/share/omarchy-iso/orchestrator
+install -D -m 644 "$here/first-screen/agentv_handover.py" "$orchestrator/agentv_handover.py"
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$orchestrator/main.py" "the install's phases" \
+  's/^(    return \[\n        \("Preparing live environment", prepare_live\),\n)/    from .agentv_handover import agentv_handover\n\n$1/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$orchestrator/main.py" "the SSH access phase" \
+  's/^(        \("Configuring SSH access", +configure_ssh_access\),\n)/$1        ("Handing over to AgenTV",     agentv_handover),\n/m'
+
+# While it installs, the dashboard says which step of setup it is, under the
+# percentage, where the medium's check shows while that runs.
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the line under the percentage" \
+  's/^(    center "\$\{DIM\}verifying the install medium: \$\{VERIFY_PCT\}%\$\{RESET\}" "\$PROGRESS_TEXT_WIDTH"\n)(  else\n    blank_line\n  fi)$/$1  elif [[ -n \$\{AGENTV_STEP:-\} ]]; then\n    center "\$\{DIM\}\$\{AGENTV_STEP\}\$\{RESET\}" "\$PROGRESS_TEXT_WIDTH"\n$2/m'
+
 echo "agentv-iso: AgenTV's logo, tagline and words in the installer, no encryption by default, and AgenTV's key on the box"
+echo "agentv-iso: AgenTV's first screen asks only which disk, and Ctrl+C on it gives Omarchy's installer"
