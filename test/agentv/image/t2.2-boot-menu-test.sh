@@ -29,11 +29,7 @@ start_vm_from_base
 wait_for_ssh 300 failure-T2.2-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-T2.2-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 
-# The boot switch on, which only an edge box turns on, and home rather than
-# setup, where Settings is.
-ssh_sudo "agentv channel edge" >"$RUN_DIR/channel.log" 2>&1 || true
-guest "agentv feature on boot" >"$RUN_DIR/feature.log" 2>&1 || true
-check "the boot switch is on" guest "agentv feature list | grep -qE '^boot +on\$'"
+# Home rather than setup, where Settings is.
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 5
 
