@@ -48,8 +48,11 @@ git tag v1.0.0
 # AgenTV's additions.
 mkdir -p .github test/agentv/policy
 cp "$ROOT/bin/agentv-check" bin/
-cp "$ROOT"/test/agentv/policy/service-* "$ROOT"/test/agentv/policy/upstream-exceptions \
-  "$ROOT"/test/agentv/policy/owner-allowed test/agentv/policy/
+# The lists, but not agentv-apps' service-folders: the cases below write
+# their own.
+cp "$ROOT"/test/agentv/policy/service-hosts "$ROOT"/test/agentv/policy/service-names \
+  "$ROOT"/test/agentv/policy/upstream-exceptions "$ROOT"/test/agentv/policy/owner-allowed \
+  test/agentv/policy/
 printf 'v1.0.0\n' >.github/omarchy-base
 printf 'example/upstream\n' >.github/omarchy-upstream
 printf 'AgenTV. Powered by Omarchy.\n' >.github/README.md
@@ -123,6 +126,71 @@ printf 'Spotify is only ever agent-built, on the box.\n' >notes.md
 output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a service name in prose is allowed" "$output"
 pass "a service name in prose is allowed"
 reset_fork
+
+printf 'const home = "https://www.youtube.com/";\n' >app.ts
+expect_fail "YouTube's host in code fails" "no service automation"
+
+printf 'export const name = "HBO Max";\n' >app.ts
+expect_fail "HBO Max's name in code fails" "no service automation"
+
+printf 'const home = "https://www.skyshowtime.com/";\n' >app.ts
+expect_fail "SkyShowtime's host in code fails" "no service automation"
+
+# --- A service's own folder, in agentv-apps only ----------------------------
+
+# Every repo but agentv-apps: no service-folders, so an app's folder is
+# refused like any other.
+mkdir -p apps/netflix
+printf 'const home = "https://www.netflix.com/";\n' >apps/netflix/app.ts
+expect_fail "without service-folders, a service's own folder is refused too" "no service automation"
+
+# agentv-apps: each service's lines in its own folder, and nowhere else.
+own_folders() {
+  printf 'netflix apps/netflix/\nyoutubekids apps/youtubekids\nhbomax apps/hbomax/\n' >test/agentv/policy/service-folders
+  mkdir -p apps/netflix apps/youtubekids apps/hbomax
+}
+
+own_folders
+printf 'export const name = "Netflix";\nconst home = "https://www.netflix.com/";\nconst art = "https://occ.nflxext.com/";\n' >apps/netflix/app.ts
+printf 'Netflix opens www.netflix.com.\n' >apps/netflix/README.md
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a service's name and hosts are allowed in its own folder" "$output"
+pass "a service's name and hosts are allowed in its own folder"
+reset_fork
+
+own_folders
+printf 'export const name = "YouTube Kids";\nconst home = "https://www.youtubekids.com/";\nconst art = "https://i.ytimg.com/";\n' >apps/youtubekids/app.ts
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a heading can give a line to two services" "$output"
+pass "a heading can give a line to two services, and a folder may leave off its slash"
+reset_fork
+
+own_folders
+printf 'const other = "https://www.netflix.com/";\n' >apps/hbomax/app.ts
+expect_fail "a service's host in another service's folder fails" "no service automation"
+
+own_folders
+printf 'export const name = "Netflix";\n' >apps/youtubekids/app.ts
+expect_fail "a service's name in another service's folder fails" "no service automation"
+
+own_folders
+printf 'const home = "https://www.youtubekids.com/";\n' >apps/netflix/app.ts
+expect_fail "a line for one service isn't allowed in a folder for another" "no service automation"
+
+own_folders
+printf 'const home = "https://www.netflix.com/";\n' >app.ts
+expect_fail "with service-folders, a service's host outside its folder still fails" "no service automation"
+
+own_folders
+mkdir -p apps/netflix-old
+printf 'const home = "https://www.netflix.com/";\n' >apps/netflix-old/app.ts
+expect_fail "a folder that only starts like a service's isn't its folder" "no service automation"
+
+own_folders
+printf 'const music = "https://open.spotify.com/";\n' >apps/netflix/app.ts
+expect_fail "a line under no heading is refused in every folder" "no service automation"
+
+own_folders
+printf 'const home = "https://www.skyshowtime.com/";\n' >apps/netflix/app.ts
+expect_fail "a service with no folder is refused in every folder" "no service automation"
 
 printf 'const url = "https://github.com/example-owner/agentv-index";\n' >app.ts
 expect_fail "the GitHub owner in code fails" "the GitHub owner"

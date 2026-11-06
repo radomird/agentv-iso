@@ -1,9 +1,30 @@
 # The same services by name. These count in code and config only, since the
-# docs have to be able to say what the rule is about.
+# docs have to be able to say what the rule is about. The headings work as in
+# service-hosts.
 
+spotify
+
+#@ disneyplus
 disney
 disneyplus
-netflix
+
+#@ primevideo
 prime ?video
 primevideo
-spotify
+
+#@ netflix
+netflix
+
+#@ hbomax
+hbo ?max
+hbomax
+
+#@ youtube youtubekids
+youtube
+
+#@ youtubekids
+youtube ?kids
+youtubekids
+
+#@ skyshowtime
+skyshowtime
