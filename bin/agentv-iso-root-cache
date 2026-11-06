@@ -1,0 +1,153 @@
+#!/bin/bash
+# agentv:summary=Keep the root image's slow step between builds, for one build
+# agentv:args=[--fresh] | --restore
+# The installer writes a prebuilt root image, and omarchy-iso's build makes
+# it by pacstrapping about 900 packages into btrfs with zstd at level 15
+# (builder/build-root-image.sh). That one step takes about 11 of a build's 18
+# minutes, and nearly all of it is Omarchy's packages, which change far less
+# often than AgenTV's own.
+#
+# So, for one build only, in the working tree, this changes that step:
+#   1. pacstrap everything but AgenTV's own packages (the ones in
+#      configs/airootfs/usr/share/agentv-iso/packages), unless release/
+#      root-cache/ holds that from an earlier build with the same key: the
+#      same packages at the same versions from the same mirror, built by the
+#      same scripts with the same tools. Then it comes back with btrfs
+#      receive, which writes the compressed data as it is, in about a minute.
+#   2. pacstrap the whole list again with --needed, which adds AgenTV's
+#      packages and anything only they need, the way the one pacstrap did.
+#   3. upstream's script carries on as before: hooks, the boot image, shrink
+#      and pack.
+# A build that made step 1 leaves it in release/root-cache/ (base.btrfs and
+# key), for a workflow to keep in its cache. --fresh always makes it, for a
+# build whose ISO people download.
+#
+# test/agentv/image/ci runs it before omarchy-iso-make when it's asked to
+# (AGENTV_ROOT_CACHE), and --restore puts upstream's file back. It stops when
+# the pacstrap line it changes isn't there, so an upstream change shows up as
+# a red build.
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+script=builder/build-root-image.sh
+helper=builder/.agentv-root-cache.sh
+# The line, as upstream has it.
+# shellcheck disable=SC2016 # it's matched as text
+line='pacstrap -C "$pacman_conf" -c -G -M "$root" "${packages[@]}"'
+
+if [[ ${1:-} == "--restore" ]]; then
+  git checkout -- "$script"
+  rm -f "$helper"
+  exit 0
+fi
+
+fresh=""
+[[ ${1:-} == "--fresh" ]] && fresh=1
+
+if ! git diff --quiet -- "$script" || [[ -e $helper ]]; then
+  echo "agentv-iso-root-cache: $script is changed already; run it with --restore first" >&2
+  exit 1
+fi
+if (( $(grep -cxF "$line" "$script") != 1 )); then
+  echo "agentv-iso-root-cache: $script no longer has its pacstrap line as one line; check what upstream changed" >&2
+  exit 1
+fi
+
+# The build's container sees builder/ as /builder, configs/ as /configs and
+# release/ as /out.
+{
+  echo '# shellcheck shell=bash'
+  echo '# Written by bin/agentv-iso-root-cache for one build. Sourced by build-root-image.sh.'
+  echo "agentv_root_fresh=$fresh"
+  cat <<'HELPER'
+agentv_root_cache=/out/root-cache
+
+# AgenTV's own packages, by name, from the files the build puts in its mirror.
+agentv_root_ours() {
+  local file
+  for file in /configs/airootfs/usr/share/agentv-iso/packages/*.pkg.tar.zst; do
+    [[ -f $file ]] && bsdtar -xOf "$file" .PKGINFO | sed -n 's/^pkgname = //p'
+  done | sort -u
+}
+
+# What goes into step 1, as one line of text: the packages asked for, every
+# package each repository in the config has with its version and checksum
+# (AgenTV's own left out), the scripts and the config that build it, and the
+# tools they build it with.
+agentv_root_key() {
+  local conf=$1 ours=$2 repo="" server db
+  shift 2
+  {
+    echo "packages:"
+    printf '%s\n' "$@" | sort -u
+    while IFS= read -r config_line; do
+      if [[ $config_line =~ ^\[([^]]+)\]$ ]]; then
+        repo=${BASH_REMATCH[1]}
+      elif [[ -n $repo && $repo != "options" && $config_line =~ ^Server[[:space:]]*=[[:space:]]*file://(.*)$ ]]; then
+        server=${BASH_REMATCH[1]%/}
+        db="$server/$repo.db"
+        echo "repository $repo:"
+        bsdtar -xOf "$db" --include='*/desc' |
+          awk '/^%NAME%$/ { getline n } /^%VERSION%$/ { getline v } /^%SHA256SUM%$/ { getline s; print n, v, s }' |
+          awk 'NR == FNR { skip[$1] = 1; next } !($1 in skip)' <(printf '%s\n' "$ours") - |
+          sort
+      fi
+    done <"$conf"
+    echo "scripts:"
+    sha256sum /builder/build-root-image.sh /builder/build-iso.sh "$conf" | awk '{ print $1 }'
+    # This helper too, but not whether this build is a fresh one.
+    grep -v '^agentv_root_fresh=' /builder/.agentv-root-cache.sh | sha256sum | awk '{ print $1 }'
+    echo "tools:"
+    pacman -Q pacman btrfs-progs arch-install-scripts 2>/dev/null || true
+  } | sha256sum | cut -c1-24
+}
+
+# Step 1 and 2 in place of upstream's one pacstrap. $mnt is the image's btrfs
+# and $2 its one subvolume, which upstream's script has just created.
+agentv_pacstrap() {
+  local conf=$1 root=$2 mnt=$3 ours key name base=() start
+  shift 3
+  ours=$(agentv_root_ours)
+  for name in "$@"; do
+    grep -qxF -- "$name" <<<"$ours" || base+=("$name")
+  done
+  key=$(agentv_root_key "$conf" "$ours" "${base[@]}")
+  start=$(date +%s)
+  if [[ -z $agentv_root_fresh && -f $agentv_root_cache/base.btrfs && $(cat "$agentv_root_cache/key" 2>/dev/null) == "$key" ]]; then
+    echo "[agentv] Omarchy's part of the root image comes from an earlier build ($key)"
+    btrfs subvolume delete "$root" >/dev/null
+    btrfs receive -f "$agentv_root_cache/base.btrfs" "$mnt" >/dev/null
+    # Writable again, without the received id, under the name upstream gave it.
+    btrfs property set -f -ts "$mnt/agentv-base" ro false
+    mv "$mnt/agentv-base" "$root"
+    echo "hit" >"$agentv_root_cache/how"
+  else
+    echo "[agentv] Building Omarchy's part of the root image ($key): ${#base[@]} packages without AgenTV's own"
+    pacstrap -C "$conf" -c -G -M "$root" "${base[@]}"
+    rm -rf "$agentv_root_cache"
+    mkdir -p "$agentv_root_cache"
+    btrfs subvolume snapshot -r "$root" "$mnt/agentv-base" >/dev/null
+    btrfs send --compressed-data -q -f "$agentv_root_cache/base.btrfs" "$mnt/agentv-base"
+    btrfs subvolume delete "$mnt/agentv-base" >/dev/null
+    btrfs subvolume sync "$mnt" >/dev/null
+    echo "$key" >"$agentv_root_cache/key"
+    echo "built" >"$agentv_root_cache/how"
+    du -h "$agentv_root_cache/base.btrfs"
+  fi
+  echo "[agentv] Omarchy's part took $(( $(date +%s) - start )) s; now AgenTV's packages"
+  pacstrap -C "$conf" -c -G -M "$root" --needed "$@"
+}
+HELPER
+} >"$helper"
+
+# The one line, swapped for the helper. sed's delimiter and the line's own
+# characters don't meet: there's no | in it.
+# shellcheck disable=SC2016 # the line goes into the script as text
+replacement='source /builder/.agentv-root-cache.sh \&\& agentv_pacstrap "$pacman_conf" "$root" "$mnt" "${packages[@]}"'
+escaped=$(sed 's/[][\.*^$/]/\\&/g' <<<"$line")
+sed -i "s|^$escaped\$|$replacement|" "$script"
+grep -q 'agentv_pacstrap' "$script" || { echo "agentv-iso-root-cache: the pacstrap line didn't change" >&2; git checkout -- "$script"; rm -f "$helper"; exit 1; }
+echo "agentv-iso-root-cache: the root image's Omarchy part is kept in release/root-cache${fresh:+, made fresh}"

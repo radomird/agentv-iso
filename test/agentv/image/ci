@@ -23,11 +23,24 @@
 # Runs on GitHub's ubuntu-26.04 runner, from anywhere. Results land in
 # test-runs/ at the root of this checkout.
 #
+# With AGENTV_ROOT_CACHE=1, the build keeps the slow part of the root image
+# in release/root-cache/, and takes it from there when nothing in it changed
+# (bin/agentv-iso-root-cache). With AGENTV_ROOT_CACHE_FRESH=1 too, it makes
+# it from scratch, for an ISO people download, and still leaves it there.
+#
 # With AGENTV_TEST_KEEP_DISK=<folder under /w>, a run where every check passed
 # also leaves the installed base image there, compressed, with what boots it,
 # for --from-disk (the nightly run keeps it as an artifact, Q100).
 #
-# Usage: test/agentv/image/ci [--again <check>...] [--from-disk <folder>]
+# Usage: test/agentv/image/ci [--from-disk <folder> | --from-build <folder>]
+#                             [--hand-on <folder>] [--no-checks | <check>...]
+#        test/agentv/image/ci --again <check>...
+#   <check>      runs only these checks, named after their file without
+#                -test.sh (s5.6-setup for s5.6-setup-test.sh). With none,
+#                every check runs. A run that names its checks never keeps
+#                the disk, since it didn't run every check.
+#   --no-checks  runs none: for a job that only builds the box and hands it
+#                on.
 #   --again      skips the build and the install, and runs only the named
 #                checks (test/agentv/image/<check>-test.sh) against the same
 #                base image, for a step that needs something the first pass
@@ -35,48 +48,85 @@
 #   --from-disk  skips the build and the install too, and starts from a base
 #                image a night's run kept: test/agentv/image/up-to-date brings
 #                it up to AgenTV's packages in the ISO's package folder, then
-#                every check runs, apart from those that need the ISO itself.
+#                the checks run, apart from those that need the ISO itself.
+#   --from-build skips the build and the install too, and starts from the
+#                base image another job of the same run handed on, as it is.
+#                The checks that need the ISO itself stand down here too:
+#                they run in the job that has it.
+#   --hand-on    once the base image is ready, before any check, leaves it in
+#                that folder with what boots it, for the run's other jobs
+#                (--from-build). It's the same folder --from-disk reads.
 
 set -euo pipefail
 
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+
 again=()
+checks=()
 disk=""
+build=""
+handon=""
+none=""
 if [[ ${1:-} == "--again" ]]; then
   shift
   again=("$@")
   (( ${#again[@]} > 0 )) || { echo "--again needs the checks to run" >&2; exit 2; }
-elif [[ ${1:-} == "--from-disk" ]]; then
-  disk=$(realpath "${2:?--from-disk needs the folder a nightly run kept}")
+else
+  while (( $# > 0 )); do
+    case $1 in
+      --from-disk) disk=$(realpath "${2:?--from-disk needs the folder a nightly run kept}"); shift 2 ;;
+      --from-build) build=$(realpath "${2:?--from-build needs the folder the build job handed on}"); shift 2 ;;
+      --hand-on) handon=$(realpath -m "${2:?--hand-on needs a folder to leave the base image in}"); shift 2 ;;
+      --no-checks) none=1; shift ;;
+      -*) echo "Unknown option: $1" >&2; exit 2 ;;
+      *) checks+=("$1"); shift ;;
+    esac
+  done
+  [[ -z $disk || -z $build ]] || { echo "--from-disk and --from-build each start from a different box: pick one" >&2; exit 2; }
+  [[ -z $none ]] || (( ${#checks[@]} == 0 )) || { echo "--no-checks runs none, so it takes no check names" >&2; exit 2; }
+  [[ -z $handon || $handon == "$ROOT"/* ]] || { echo "--hand-on needs a folder in this checkout" >&2; exit 2; }
 fi
 
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+# A name that isn't a check stops the run here, before the build rather
+# than after it.
+for name in ${again[@]+"${again[@]}"} ${checks[@]+"${checks[@]}"}; do
+  if [[ ! $name =~ ^[A-Za-z0-9._-]+$ || ! -f $ROOT/test/agentv/image/$name-test.sh ]]; then
+    echo "There's no image check called '$name'. Name a file in test/agentv/image/ without -test.sh, like s5.6-setup." >&2
+    exit 2
+  fi
+done
+
 cd "$ROOT"
 
 mkdir -p test-runs
 branded=0
 depended=0
+cached=0
 # The container runs as root; hand what it wrote back to this user, also when
 # something fails, so later steps can read and upload it. And put omarchy-iso's
 # own files back the way upstream has them (ADR-027).
 cleanup() {
-  sudo chown -R "$(id -u):$(id -g)" test-runs release 2>/dev/null || true
+  sudo chown -R "$(id -u):$(id -g)" test-runs release ${handon:+"$handon"} 2>/dev/null || true
   if (( branded )); then bin/agentv-iso-brand --restore || true; fi
   if (( depended )); then bin/agentv-iso-depends --restore || true; fi
+  if (( cached )); then bin/agentv-iso-root-cache --restore || true; fi
   return 0
 }
 trap cleanup EXIT
 
-if [[ -n $disk ]]; then
-  # The night's base image, where upstream's harness looks for it: in a
-  # folder named after the night's ISO, which this run names but doesn't
-  # have, so the checks that need the ISO itself stand down.
-  name=$(cat "$disk/iso-name")
-  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "the night's disk names an odd ISO: $name" >&2; exit 1; }
+if [[ -n $disk || -n $build ]]; then
+  # The night's base image, or the one this run's build job handed on, where
+  # upstream's harness looks for it: in a folder named after the ISO, which
+  # this job names but doesn't have, so the checks that need the ISO itself
+  # stand down.
+  from=${disk:-$build}
+  name=$(cat "$from/iso-name")
+  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "the disk names an odd ISO: $name" >&2; exit 1; }
   mkdir -p release "test-runs/$name-integration"
   rm -f release/*.iso
   : >"release/$name.iso"
   for file in base.qcow2 OVMF_VARS.4m.fd id_ed25519 id_ed25519.pub cidata.img; do
-    mv "$disk/$file" "test-runs/$name-integration/$file"
+    mv "$from/$file" "test-runs/$name-integration/$file"
   done
   chmod 600 "test-runs/$name-integration/id_ed25519"
 elif (( ${#again[@]} == 0 )); then
@@ -91,6 +141,10 @@ elif (( ${#again[@]} == 0 )); then
   branded=1
   bin/agentv-iso-depends
   depended=1
+  if [[ -n ${AGENTV_ROOT_CACHE:-} ]]; then
+    bin/agentv-iso-root-cache ${AGENTV_ROOT_CACHE_FRESH:+--fresh}
+    cached=1
+  fi
 
   # Omarchy's stable channel, or rc's packages onto stable until stable
   # serves the release this ISO follows (bin/agentv-iso-channel).
@@ -109,7 +163,8 @@ done < <(env | grep '^AGENTV_TEST_' || true)
 
 sudo chmod 0666 /dev/kvm
 docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
-  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" -e FROM_DISK="${disk:+1}" ${env_args[@]+"${env_args[@]}"} \
+  -e OMARCHY_INTEGRATION_DISK_CACHE=none -e AGAIN="${again[*]}" -e CHECKS="${checks[*]}" -e NO_CHECKS="$none" \
+  -e FROM_DISK="${disk:+1}" -e FROM_BUILD="${build:+1}" -e HAND_ON="${handon:+/w/${handon#"$ROOT"/}}" ${env_args[@]+"${env_args[@]}"} \
   ghcr.io/archlinux/archlinux:latest bash -euo pipefail -c '
     # pacman 7 fails every sync on a kernel without Landlock; upstream does the same.
     if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
@@ -133,21 +188,38 @@ docker run --rm --device /dev/kvm -v "$ROOT:/w" -w /w \
       export AGENTV_TEST_OWN_REPO_PORT=8077
       (cd "$AGENTV_TEST_OWN_REPO" && exec python3 -m http.server --bind 127.0.0.1 "$AGENTV_TEST_OWN_REPO_PORT") >/dev/null 2>&1 &
     fi
+    base="test-runs/$(basename "$iso" .iso)-integration"
     if [ -n "$FROM_DISK" ]; then
       ./test/agentv/image/up-to-date "$iso"
+      export AGENTV_TEST_NO_ISO=1
+    elif [ -n "$FROM_BUILD" ]; then
+      # Brought up to date and pointed at the run'"'"'s own packages already, by
+      # the job that handed it on.
       export AGENTV_TEST_NO_ISO=1
     elif [ -z "$AGAIN" ]; then
       ./test/integration "$iso" boot --no-preview --memory 8192 --timeout 1800
     fi
-    if [ -n "${AGENTV_TEST_OWN_REPO:-}" ] && [ -z "$AGAIN" ]; then
+    if [ -n "${AGENTV_TEST_OWN_REPO:-}" ] && [ -z "$AGAIN" ] && [ -z "$FROM_BUILD" ]; then
       ./test/agentv/image/own-repo "$iso"
     fi
-    # shellcheck disable=SC2086 # a list of check names
-    ./test/agentv/image/run "$iso" $AGAIN
-    # Every check passed: the base image, compressed, and what boots it. Not
-    # one pointed at a pull request'"'"'s own packages, which won'"'"'t be there later.
-    if [ -n "${AGENTV_TEST_KEEP_DISK:-}" ] && [ -z "$AGAIN" ] && [ -z "$FROM_DISK" ] && [ -z "${AGENTV_TEST_OWN_REPO:-}" ]; then
-      base="test-runs/$(basename "$iso" .iso)-integration"
+    # The base image, ready for the checks, for the run'"'"'s other jobs. A hard
+    # link, since nothing writes to it from here on: every check boots an
+    # overlay of it.
+    if [ -n "$HAND_ON" ]; then
+      mkdir -p "$HAND_ON"
+      ln -f "$base/base.qcow2" "$HAND_ON/base.qcow2" 2>/dev/null || cp "$base/base.qcow2" "$HAND_ON/base.qcow2"
+      cp "$base/OVMF_VARS.4m.fd" "$base/id_ed25519" "$base/id_ed25519.pub" "$base/cidata.img" "$HAND_ON/"
+      basename "$iso" .iso >"$HAND_ON/iso-name"
+      du -sh --apparent-size "$HAND_ON"
+    fi
+    if [ -z "$NO_CHECKS" ]; then
+      # shellcheck disable=SC2086 # lists of check names, at most one of them set
+      ./test/agentv/image/run "$iso" $AGAIN $CHECKS
+    fi
+    # Every check ran and passed: the base image, compressed, and what boots
+    # it. Not one pointed at a pull request'"'"'s own packages, which won'"'"'t be
+    # there later.
+    if [ -n "${AGENTV_TEST_KEEP_DISK:-}" ] && [ -z "$AGAIN" ] && [ -z "$CHECKS" ] && [ -z "$NO_CHECKS" ] && [ -z "$FROM_DISK" ] && [ -z "$FROM_BUILD" ] && [ -z "${AGENTV_TEST_OWN_REPO:-}" ]; then
       mkdir -p "$AGENTV_TEST_KEEP_DISK"
       qemu-img convert -c -O qcow2 "$base/base.qcow2" "$AGENTV_TEST_KEEP_DISK/base.qcow2"
       cp "$base/OVMF_VARS.4m.fd" "$base/id_ed25519" "$base/id_ed25519.pub" "$base/cidata.img" "$AGENTV_TEST_KEEP_DISK/"
