@@ -1,4 +1,4 @@
-# Every acceptance id in PHASE-1-PLAN.md that this repo's CI reports on, with
+# Every acceptance id in PHASE-1-PLAN.md and PHASE-2-PLAN.md that this repo's CI reports on, with
 # where it's checked: a workflow's name, or "manual" for a check on the NUC.
 # Grows stage by stage (ADR-019). test/agentv/report reads this.
 
@@ -22,3 +22,5 @@ T1.1  iso       the USB stick boots to AgenTV's first screen, and one press of E
 T1.2  iso       Ctrl+C on the first screen gives Omarchy's own installer, and an install from it lands in TV setup
 T1.3  manual    a fresh install on the NUC from the phone, with no keyboard after the boot key
 T1.4  iso       a stand-in phone on the live system's hotspot picks the disk with the token, is refused without it, and rejoins the installed box's network
+T2.1  iso       from power on to home, no boot menu and no text on screen, the splash until home; a key in the first second shows the menu
+T2.2  iso       restart to the boot menu comes back on the menu, and its first entry boots from it
