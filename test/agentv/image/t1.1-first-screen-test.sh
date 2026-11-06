@@ -24,7 +24,25 @@ wait_for_live_root_ssh 300 || { stop_vm; finish; }
 
 check "T1.1 the USB stick boots to AgenTV's first screen, step 1 of 12 (OCR)" wait_for_screen "of 12" 300
 capture_console "success-T1.1-first-screen"
-ocr_screen >"$RUN_DIR/first-screen.txt"
+
+# first_screen_read: the first screen, read three ways. ocr_screen's black
+# and white can lose the pink erase line, or mangle it ("on if iLL be
+# erased"). The plain greys read it, as a block and as scattered text, but
+# they can misread "agentv" as "agenty", which ocr_screen reads right.
+first_screen_read() {
+  local shot="$RUN_DIR/.first-screen.ppm" grey="$RUN_DIR/.first-screen.png"
+
+  ocr_screen
+  echo
+  rm -f "$shot"
+  screendump "$shot"
+  if [[ -s $shot ]] && magick "$shot" -colorspace gray -negate -resize 150% "$grey" 2>/dev/null; then
+    tesseract "$grey" - --psm 6 2>/dev/null
+    tesseract "$grey" - --psm 11 2>/dev/null
+  fi
+}
+
+first_screen_read >"$RUN_DIR/first-screen.txt"
 cat "$RUN_DIR/first-screen.txt"
 
 # first_screen_says <pattern>: what OCR read finds it (grep -E, any case).
@@ -36,7 +54,7 @@ first_screen_says() {
   until grep -qiE "$1" "$RUN_DIR/first-screen.txt"; do
     (( tries++ < 3 )) || return 1
     sleep 2
-    { echo; ocr_screen; } >>"$RUN_DIR/first-screen.txt"
+    { echo; first_screen_read; } >>"$RUN_DIR/first-screen.txt"
   done
 }
 
