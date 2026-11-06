@@ -18,7 +18,17 @@ wait_for_ssh 300 failure-agentv-ssh-timeout || exit 1
 
 check "Omarchy's own package is installed" ssh_guest "pacman -Q omarchy"
 check "agentv and agentv-keyring are installed" ssh_guest "pacman -Q agentv agentv-keyring"
-check "pacman has AgenTV's key" ssh_guest "pacman-key --list-keys $fingerprint"
+# Right after boot, root's pacman (the update check's) can have the keyring
+# open, as a root gpg-agent did in one image run, and a read as the box's
+# own account fails while it does. So it's tried for up to 30 s.
+has_key() {
+  local started=$SECONDS
+  until ssh_guest "pacman-key --list-keys $fingerprint" >/dev/null 2>&1; do
+    (( SECONDS - started < 30 )) || return 1
+    sleep 2
+  done
+}
+check "pacman has AgenTV's key" has_key
 # Trusted, not only there: the installer fills the box's keyring itself,
 # from a list that has to name AgenTV's keyring (customize.sh), and a key
 # that isn't signed by the box's own master key fails every update.

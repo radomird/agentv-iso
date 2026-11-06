@@ -64,10 +64,9 @@ export default {
   },
 };
 APP
-ssh_sudo "install -d -m 755 /var/lib/agentv/apps/$id && install -m 644 /tmp/agentv-sign-in-check/app/manifest.json /tmp/agentv-sign-in-check/app/app.ts /var/lib/agentv/apps/$id/ &&
-  record=/var/lib/agentv/apps/installed.json && { [ -f \$record ] || echo '{}' >\$record; } &&
-  jq --arg id $id '. + {(\$id): {id: \$id, name: \"Sign-in check\", version: \"1.0.0\", tier: \"local\", installedAt: (now | todate)}}' \$record >\$record.new &&
-  chmod 644 \$record.new && mv \$record.new \$record"
+# Installed the way an app built on this box is (ADR-039).
+guest "agentv app install --local /tmp/agentv-sign-in-check/app --yes" >"$RUN_DIR/install.log" 2>&1 || true
+check "the stand-in installs with agentv app install --local" grep -q "^Installed Sign-in check 1.0.0" "$RUN_DIR/install.log"
 
 signin_bar() {
   guest_hyprctl "-j layers" 2>/dev/null | jq -e '[.. | objects | select(.namespace? == "agentv-signin")] | length > 0' >/dev/null
@@ -166,6 +165,6 @@ check "the screen daemon says the sign-in is over because it signed in" grep -q 
 check "nothing the keyboard typed is in the TV session's log" bash -c "! grep -q 'check-[0-9]' '$RUN_DIR/tv-session.log'"
 
 guest "agentv screen quit $id" >/dev/null 2>&1 || true
-ssh_sudo "rm -rf /var/lib/agentv/apps/$id && jq --arg id $id 'del(.[\$id])' /var/lib/agentv/apps/installed.json >/tmp/installed.json && install -m 644 /tmp/installed.json /var/lib/agentv/apps/installed.json" || true
+guest "agentv app remove $id" >/dev/null 2>&1 || true
 stop_vm
 finish
