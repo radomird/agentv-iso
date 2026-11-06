@@ -48,19 +48,20 @@ start_vm_from_base
 wait_for_ssh 300 failure-T2.1-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-T2.1-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 
-# The switch for booting straight to the TV, on, while its default is off.
-# Only an edge box turns a switch on.
-ssh_sudo "agentv channel edge" >"$RUN_DIR/channel.log" 2>&1 || true
-guest "agentv feature on boot" >"$RUN_DIR/feature.log" 2>&1 || true
-log "agentv feature on boot: $(tr '\n' ' ' <"$RUN_DIR/feature.log")"
-check "the boot switch is on" guest "agentv feature list | grep -qE '^boot +on\$'"
-
 # The boot loader as Omarchy 4.5 sets it: one quiet second (ADR-060).
 ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf.txt" 2>&1 || true
 ssh_guest "pacman -Q limine" >"$RUN_DIR/limine-version.txt" 2>&1 || true
 log "$(cat "$RUN_DIR/limine-version.txt"), $(grep -E '^(timeout|quiet):' "$RUN_DIR/limine.conf.txt" | paste -sd ' ')"
 check "T2.1 the boot loader waits one quiet second (timeout: 1, quiet: yes)" \
   bash -c "grep -qx 'timeout: 1' '$RUN_DIR/limine.conf.txt' && grep -qx 'quiet: yes' '$RUN_DIR/limine.conf.txt'"
+
+# How the kernel's console is set up, for what comes on screen between
+# Plymouth's last frame and the TV session's first: whether the framebuffer
+# console takes over only once something is written to it, which consoles
+# are bound, and the virtual terminal in front.
+ssh_sudo "zgrep -h FRAMEBUFFER_CONSOLE /proc/config.gz; grep -H . /sys/class/vtconsole/vtcon*/name /sys/class/vtconsole/vtcon*/bind; cat /sys/class/tty/tty0/active" \
+  >"$RUN_DIR/console.txt" 2>&1 || true
+log "The console: $(tr '\n' ' ' <"$RUN_DIR/console.txt")"
 
 # The splash's own background colour, as omarchy plymouth set wrote it.
 background=$(ssh_guest "sed -n 's/^Window.SetBackgroundTopColor(\(.*\));/\1/p' /usr/share/plymouth/themes/omarchy/omarchy.script" 2>/dev/null |
@@ -118,6 +119,9 @@ record() {
   ssh_sudo "{ journalctl -b --no-pager -o short-monotonic -t agentv-boot-splash; journalctl -b --no-pager -o short-monotonic -u plymouth-start -u plymouth-quit -u plymouth-quit-wait -u agentv-boot-splash-release -u sddm; } | sort -u" \
     >"$RUN_DIR/splash-$name.log" 2>&1 || true
   guest "journalctl --user -b --no-pager -o short-monotonic -u agentv-screen" >"$RUN_DIR/screen-$name.log" 2>&1 || true
+  # And everything the boot said, the kernel and the TV session's own
+  # included, to line up with the recording when a frame goes wrong.
+  ssh_sudo "journalctl -b --no-pager -o short-monotonic" >"$RUN_DIR/journal-$name.txt" 2>&1 || true
   grep -hE "agentv-boot-splash|plymouth|Plymouth|Display Manager|in front: home|splash goes" "$RUN_DIR/splash-$name.log" "$RUN_DIR/screen-$name.log" | cut -c1-200 || true
 }
 

@@ -16,5 +16,11 @@ S1.4  agentv-plugin the Back to TV plugin passes omarchy plugin validate (the re
 S1.5  manual    the TV session check: 60 fps, an app and home again, a toast over a film, Steam in its gamescope (agentv selftest S1.5)
 S1.6  iso       no window takes the screen unless the daemon puts it in front: a new window, a home screen crash, an update
 S1.7  iso       signing in to a test page in the services' Chromium shows no browser prompt: no Save password, translate, notification or autofill bubble
+
+# Phase 2's checks (PHASE-2-PLAN.md), with their own ids.
+T1.1  iso       the USB stick boots to AgenTV's first screen, and one press of Enter installs and lands in TV setup, with no Omarchy question on screen
+T1.2  iso       Ctrl+C on the first screen gives Omarchy's own installer, and an install from it lands in TV setup
+T1.3  manual    a fresh install on the NUC from the phone, with no keyboard after the boot key
+T1.4  iso       a stand-in phone on the live system's hotspot picks the disk with the token, is refused without it, and rejoins the installed box's network
 T2.1  iso       from power on to home, no boot menu and no text on screen, the splash until home; a key in the first second shows the menu
 T2.2  iso       restart to the boot menu comes back on the menu, and its first entry boots from it

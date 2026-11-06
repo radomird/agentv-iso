@@ -210,4 +210,85 @@ patch "$dashboard" "the finish screen's effect" \
 patch /usr/share/omarchy-iso/orchestrator/phases_impl.py "the installed box's keyrings" \
   's/^    keyrings = \["archlinux", "omarchy"\]$/    keyrings = ["archlinux", "omarchy", "agentv"]/m'
 
+# AgenTV's first screen: step 1 of setup's 12. It asks only which disk, and
+# Enter installs. It writes the answers Omarchy's configurator would, so the
+# install that follows is Omarchy's own, with no prompts, and restarts by
+# itself. Ctrl+C on it gives Omarchy's configurator, every question included.
+# An autoinstall drive still comes first, and skips both.
+install -D -m 755 "$here/first-screen/agentv-first-screen" /usr/local/bin/agentv-first-screen
+# The phone's way: the live system's own Wi-Fi network and the page on it,
+# and the QR code the TV shows for it.
+for file in agentv_phone.py agentv_qr.py phone.html; do
+  install -D -m 644 "$here/first-screen/$file" "/usr/local/lib/agentv-first-screen/$file"
+done
+
+# The live system's Wi-Fi network needs its radio's firmware. omarchy-iso's
+# own build step removes every radio's firmware from the live system right
+# after this one, since its installer never goes online. The kernel looks in
+# firmware/updates first, and that removal leaves it alone, so the Wi-Fi
+# cards' firmware goes there: Intel's, Atheros', MediaTek's and Realtek's.
+# The installed box gets its firmware from the root image either way.
+fw=/usr/lib/firmware
+wifi_firmware=(intel/iwlwifi iwlwifi-* ath9k_htc ath10k ath11k ath12k mediatek/WIFI_* mediatek/mt79* rtw88 rtw89 rtlwifi)
+(
+  cd "$fw"
+  shopt -s nullglob
+  found=()
+  # shellcheck disable=SC2068 # the globs are meant to expand here
+  for path in ${wifi_firmware[@]}; do
+    [[ -e $path || -L $path ]] && found+=("$path")
+  done
+  if ! compgen -G "iwlwifi-*" >/dev/null && [[ ! -d intel/iwlwifi ]]; then
+    echo "agentv-iso: no Intel Wi-Fi firmware in $fw; has linux-firmware moved it?" >&2
+    exit 1
+  fi
+  mkdir -p updates
+  cp -a --parents "${found[@]}" updates/
+  # A link that leads outside what was copied would lead nowhere once the
+  # originals are gone, so it gets what it points at.
+  updates=$(realpath updates)
+  while IFS= read -r link; do
+    target=$(realpath -m "$link")
+    if [[ $target != "$updates"/* ]]; then
+      rm -f "$link"
+      cp -rL "$target" "$link"
+    fi
+  done < <(find updates -type l)
+  echo "agentv-iso: kept $(du -sm updates | cut -f1) MB of Wi-Fi firmware for the live system's hotspot"
+)
+
+automated=/root/.automated_script.sh
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$automated" "where the configurator starts" \
+  's/^else\n  \.\/configurator\nfi$/elif \/usr\/local\/bin\/agentv-first-screen; then
+  # AgenTV'"'"'s first screen wrote the answers, so nobody is asked anything
+  # more (agentv-iso'"'"'s customize.sh).
+  echo "AgenTV'"'"'s first screen wrote the answers; installing without questions."
+  export OMARCHY_UI_INTERACTIVE=no AGENTV_STEP="2 of 12 · install"
+else
+  .\/configurator
+fi/m'
+if (( $(grep -c '^elif /usr/local/bin/agentv-first-screen; then$' "$automated") != 1 )); then
+  echo "agentv-iso: AgenTV's first screen isn't in $automated exactly once" >&2
+  exit 1
+fi
+
+# What the first screen hands the installed box (the account's marker) goes
+# on it in a phase of its own, right after SSH access.
+orchestrator=/usr/share/omarchy-iso/orchestrator
+install -D -m 644 "$here/first-screen/agentv_handover.py" "$orchestrator/agentv_handover.py"
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$orchestrator/main.py" "the install's phases" \
+  's/^(    return \[\n        \("Preparing live environment", prepare_live\),\n)/    from .agentv_handover import agentv_handover\n\n$1/m'
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$orchestrator/main.py" "the SSH access phase" \
+  's/^(        \("Configuring SSH access", +configure_ssh_access\),\n)/$1        ("Handing over to AgenTV",     agentv_handover),\n/m'
+
+# While it installs, the dashboard says which step of setup it is, under the
+# percentage, where the medium's check shows while that runs.
+# shellcheck disable=SC2016 # the single quotes hold perl
+patch "$dashboard" "the line under the percentage" \
+  's/^(    center "\$\{DIM\}verifying the install medium: \$\{VERIFY_PCT\}%\$\{RESET\}" "\$PROGRESS_TEXT_WIDTH"\n)(  else\n    blank_line\n  fi)$/$1  elif [[ -n \$\{AGENTV_STEP:-\} ]]; then\n    center "\$\{DIM\}\$\{AGENTV_STEP\}\$\{RESET\}" "\$PROGRESS_TEXT_WIDTH"\n$2/m'
+
 echo "agentv-iso: AgenTV's logo, tagline and words in the installer, no encryption by default, and AgenTV's key on the box"
+echo "agentv-iso: AgenTV's first screen asks only which disk, and Ctrl+C on it gives Omarchy's installer"
