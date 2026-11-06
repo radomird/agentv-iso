@@ -7,9 +7,10 @@ name: ISO
 # install test (an unattended install in QEMU with KVM and a boot of the
 # installed system), then AgenTV's image checks in test/agentv/image/.
 #
-# It runs on pull requests that touch the build, on release tags and by hand.
-# A merge to agentv doesn't rebuild it: the nightly run in agentv-os builds
-# the edge ISO every night, from this branch.
+# It runs on pull requests that touch the build, once they're ready for
+# review (the gate job below says when), on release tags and by hand. A
+# merge to agentv doesn't rebuild it: the nightly run in agentv-os builds the
+# edge ISO every night, from this branch.
 #
 # The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
 # 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
@@ -20,6 +21,10 @@ on:
   push:
     tags: ["v*"]
   pull_request:
+    # ready_for_review: a draft gets no ISO run, so marking it ready is what
+    # starts its one full run. labeled: the "image" label asks for one by
+    # hand, on a draft too.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "bin/**"
       - "builder/**"
@@ -64,17 +69,100 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: iso-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  # Whether a pull request gets an ISO run of its own (ADR-074). Not while
+  # it's a draft: marking it ready starts the run, and each push after that
+  # runs it again. The "image" label asks for one by hand, on a draft too,
+  # and adding it again runs it again. GitHub can't start this workflow for
+  # one label and not another, so any other label starts it too, but it
+  # runs nothing.
+  #
+  # Not when agentv-os has an open pull request from a branch of the same
+  # name either: agentv-os's VM test builds the ISO from this branch, with
+  # that change's packages, so the two are tested together, once, there.
+  # That pull request's Check run leaves a notice with the agentv-iso commit
+  # it builds, so this job can say whether it builds this one.
+  #
+  # And not for a sync pull request: omarchy-sync.yml builds its ISO by
+  # calling this workflow itself, and building it a second time would only
+  # double the wait before it merges. Tags, runs by hand and workflows that
+  # call this one don't ask: this job only runs for pull requests.
+  gate:
+    name: "Does this need an ISO run?"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - name: Decide, and say why
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'image') }}
+        run: |
+          say() { echo "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          run=false
+          if [[ $HEAD_REF == omarchy-sync/* ]]; then
+            say "No ISO run here: it's an Omarchy sync, and omarchy-sync.yml builds its ISO."
+          elif [[ $ACTION == "labeled" && $LABEL != "image" ]]; then
+            say "No ISO run for the \`$LABEL\` label. Only the image label starts one."
+          elif [[ $LABELED == "true" ]]; then
+            run=true
+            say "The ISO runs: it has the image label."
+          elif [[ $DRAFT == "true" ]]; then
+            say "No ISO run yet: it's a draft. Marking it ready starts one, unless agentv-os has an open pull request from \`$HEAD_REF\` too. The image label runs it on a draft."
+          else
+            if ! pr=$(gh api -X GET "repos/$OWNER/agentv-os/pulls" -f state=open -f head="$OWNER:$HEAD_REF" \
+              --jq '.[0] // empty | "\(.number) \(.draft) \(.head.sha)"'); then
+              echo "::error::Couldn't ask agentv-os for an open pull request from $HEAD_REF. Rerun this job."
+              exit 1
+            fi
+            if [[ -z $pr ]]; then
+              run=true
+              say "The ISO runs: it's ready for review, and agentv-os has no open pull request from \`$HEAD_REF\`."
+            else
+              read -r number os_draft os_sha <<<"$pr"
+              url="https://github.com/$OWNER/agentv-os/pull/$number"
+              say "No ISO run here: agentv-os [#$number]($url) comes from a branch of the same name, and its VM test builds the ISO from this branch, with that change's packages. So the two are tested together, once, there."
+              say ""
+              if [[ $os_draft == "true" ]]; then
+                say "agentv-os #$number is a draft, so its VM test runs when it's marked ready."
+              else
+                notes=""
+                check=$(gh api -X GET "repos/$OWNER/agentv-os/commits/$os_sha/check-runs" -f check_name="Does this need a VM test?" \
+                  --jq '.check_runs | sort_by(.started_at) | last | .id // empty') || check=""
+                if [[ -n $check ]]; then
+                  notes=$(gh api "repos/$OWNER/agentv-os/check-runs/$check/annotations" --jq '.[].message') || notes=""
+                fi
+                if grep -q "$HEAD_SHA" <<<"$notes"; then
+                  say "Its latest Check run builds this commit, \`${HEAD_SHA::7}\`: [its checks]($url/checks)."
+                else
+                  say "Its latest Check run, on agentv-os \`${os_sha::7}\`, doesn't build this commit, \`${HEAD_SHA::7}\`. A push to agentv-os's branch starts one that does. Without one, rerun agentv-os #$number's Check run from [its checks]($url/checks), once it isn't running."
+                  echo "::warning::agentv-os #$number's VM test doesn't build this commit yet. Push its branch, or rerun its Check run."
+                fi
+              fi
+            fi
+          fi
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
   iso:
     name: "Build the ISO, install it, boot it, check it"
-    # A sync pull request's ISO is built by omarchy-sync.yml, which calls this
-    # workflow itself; building it a second time for the pull request would
-    # only double the wait before it merges.
-    if: ${{ !startsWith(github.head_ref, 'omarchy-sync/') }}
+    needs: gate
+    # A pull request runs it when the gate says so. Tags, runs by hand and
+    # workflows that call this one always do.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.gate.outputs.run == 'true') }}
+    # Here, not on the workflow: a run whose gate says no, like another
+    # label, would otherwise cancel the run already going.
+    concurrency:
+      group: iso-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-26.04
     timeout-minutes: 150
     env:

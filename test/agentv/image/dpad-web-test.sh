@@ -4,8 +4,10 @@
 # (ADR-008). A stand-in page with no arrow keys of its own and no focus
 # outline opens in the services' Chromium. A paired phone's arrows move the
 # focus along its row of tiles, with AgenTV's ring around it, OK presses one,
-# OK on a link opens it, and Back goes back. The page's title says what has
-# focus, and Hyprland reads it from its window.
+# OK on a link opens it, and Back goes back. Then a stand-in streaming
+# service's player, in the window and full screen: Back leaves it, and goes
+# on back from the title's page rather than into it again. The page's title
+# says what has focus, and Hyprland reads it from its window.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -91,6 +93,38 @@ check "OK on a link opens it (title: $(title))" wait_title "^next$" 10
 press back
 check "Back goes back a page (title: $(title))" wait_title "^(Stand-in|focus |picked )" 10
 check "and the app is still in front" test "$(front '.front.role // ""')" = "web"
+
+# A title's player, the way a streaming service's works: Play puts it on the
+# page's own history, and it covers the screen and takes Escape for itself.
+# Back leaves it, then goes on back from the title's page. Then the same with
+# the player full screen, where Chromium keeps the Escape that leaves full
+# screen and the screen daemon's word on the tap leaves the player.
+ssh_guest "cat >/tmp/agentv-dpad/player.html" <"$(dirname -- "${BASH_SOURCE[0]}")/pages/player.html"
+ssh_guest "cat >/tmp/agentv-dpad/clip.webm" <"$(dirname -- "${BASH_SOURCE[0]}")/pages/clip.webm"
+# A page opened after the first is a browser window of its own, which Hyprland
+# names with the page's title and the browser's.
+named="( - Chromium)?$"
+for mode in window full; do
+  query=""
+  playing="Playing"
+  where="in the window"
+  if [[ $mode == "full" ]]; then
+    query="?full"
+    playing="Playing full screen"
+    where="full screen"
+  fi
+  guest "agentv screen open http://127.0.0.1:8766/player.html$query" >>"$RUN_DIR/screen.log" 2>&1 || true
+  check "the player's stand-in opens on its home, to play $where (title: $(title))" wait_title "^Home$named" 60
+  press enter
+  check "OK opens the title's page (title: $(title))" wait_title "^Title$named" 10
+  press enter
+  check "OK on Play plays it $where (title: $(title))" wait_title "^$playing$named" 10
+  capture_console "success-dpad-web-player-$mode"
+  press back
+  check "Back leaves the player $where for the title's page (title: $(title))" wait_title "^Title$named" 10
+  press back
+  check "and Back goes on back from there, not into the player (title: $(title))" wait_title "^Home$named" 10
+done
 
 guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen-daemon.log" 2>&1 || true
 check "the screen daemon gave the page the d-pad's ring and Back" bash -c "! grep -q \"the d-pad's ring and Back aren't\" '$RUN_DIR/screen-daemon.log'"
