@@ -101,24 +101,29 @@ check "and the app is still in front" test "$(front '.front.role // ""')" = "web
 # screen and the screen daemon's word on the tap leaves the player.
 ssh_guest "cat >/tmp/agentv-dpad/player.html" <"$(dirname -- "${BASH_SOURCE[0]}")/pages/player.html"
 ssh_guest "cat >/tmp/agentv-dpad/clip.webm" <"$(dirname -- "${BASH_SOURCE[0]}")/pages/clip.webm"
+# A page opened after the first is a browser window of its own, which Hyprland
+# names with the page's title and the browser's.
+named="( - Chromium)?$"
 for mode in window full; do
   query=""
   playing="Playing"
+  where="in the window"
   if [[ $mode == "full" ]]; then
     query="?full"
     playing="Playing full screen"
+    where="full screen"
   fi
   guest "agentv screen open http://127.0.0.1:8766/player.html$query" >>"$RUN_DIR/screen.log" 2>&1 || true
-  check "the $mode player's stand-in opens on its home (title: $(title))" wait_title "^Home$" 60
+  check "the player's stand-in opens on its home, to play $where (title: $(title))" wait_title "^Home$named" 60
   press enter
-  check "OK opens the title's page (title: $(title))" wait_title "^Title$" 10
+  check "OK opens the title's page (title: $(title))" wait_title "^Title$named" 10
   press enter
-  check "OK on Play plays it in the $mode (title: $(title))" wait_title "^$playing$" 10
+  check "OK on Play plays it $where (title: $(title))" wait_title "^$playing$named" 10
   capture_console "success-dpad-web-player-$mode"
   press back
-  check "Back leaves the $mode player for the title's page (title: $(title))" wait_title "^Title$" 10
+  check "Back leaves the player $where for the title's page (title: $(title))" wait_title "^Title$named" 10
   press back
-  check "and Back goes on back from there, not into the player (title: $(title))" wait_title "^Home$" 10
+  check "and Back goes on back from there, not into the player (title: $(title))" wait_title "^Home$named" 10
 done
 
 guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen-daemon.log" 2>&1 || true
