@@ -112,6 +112,7 @@ record() {
     test "$(verdict '.verdict.gaps | length')" = 0
   check "home is on the recording, $what" test "$(verdict .verdict.home)" = true
   log "The splash's background alone, before the TV session's splash drew: $(verdict .verdict.background_seconds) s"
+  log "Black as the TV session took the screen, before Hyprland's first frame: $(verdict .verdict.session_black_seconds) s"
   # What the boot and the screen daemon said about the splash, with when,
   # in seconds since the kernel started.
   # journalctl takes a tag and a unit together as both, so they're asked
@@ -123,6 +124,13 @@ record() {
   # included, to line up with the recording when a frame goes wrong.
   ssh_sudo "journalctl -b --no-pager -o short-monotonic" >"$RUN_DIR/journal-$name.txt" 2>&1 || true
   grep -hE "agentv-boot-splash|plymouth|Plymouth|Display Manager|in front: home|splash goes" "$RUN_DIR/splash-$name.log" "$RUN_DIR/screen-$name.log" | cut -c1-200 || true
+  # Plymouth lets go of the screen only once home has drawn. Any sooner, and
+  # the screen goes black until the TV session's first frame.
+  local drawn released
+  drawn=$(grep -m 1 "home is drawn" "$RUN_DIR/splash-$name.log" | sed -E 's/^\[ *([0-9.]+)\].*/\1/')
+  released=$(grep -m 1 "so plymouth quits" "$RUN_DIR/splash-$name.log" | sed -E 's/^\[ *([0-9.]+)\].*/\1/')
+  check "T2.1 Plymouth quits only once home has drawn, $what (home at ${drawn:-?} s, Plymouth at ${released:-?} s)" \
+    awk -v drawn="$drawn" -v released="$released" 'BEGIN { exit !(drawn != "" && released != "" && released + 0 >= drawn + 0) }'
 }
 
 record recorded "an ordinary boot"
