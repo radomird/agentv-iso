@@ -6,8 +6,8 @@
 # The slow ones first, so two lanes end near the same time: each restarts
 # the box, waits out the idle minutes, or updates it.
 # The ones that install from the USB stick's first screen, and wait for it,
-# come first of all.
-SLOW=(t1.1-first-screen t1.2-omarchy-installer t1.4-phone s4.5-pin idle s1.1-tv-session update-tv s3.6-music s4-hotspot home selftest)
+# come first of all. The boot checks switch the box on and off several times.
+SLOW=(t1.1-first-screen t1.2-omarchy-installer t1.4-phone t2.1-boot s4.5-pin idle s1.1-tv-session t2.2-boot-menu update-tv s3.6-music s4-hotspot home selftest)
 # The checks that look at the ISO itself, which a run from the night's disk
 # (AGENTV_TEST_NO_ISO, ci --from-disk) doesn't have.
 NEEDS_ISO=(s0.4-branding t1.1-first-screen t1.2-omarchy-installer t1.4-phone)
