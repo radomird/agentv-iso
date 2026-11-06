@@ -9,10 +9,12 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
-# The installer: boot the ISO itself, answer nothing, and read the greeter,
-# which draws /usr/share/omarchy/logo.txt with its "powered by omarchy" row.
-# (The install dashboard shows Omarchy's mark while it works and the logo
-# only on its finish screen, which an unattended install reboots past.)
+# The installer: boot the ISO itself, answer nothing, and read its first
+# screen, AgenTV's own, which draws the logo with its "powered by omarchy"
+# row. Then Ctrl+C for Omarchy's own installer, whose greeter draws
+# /usr/share/omarchy/logo.txt with AgenTV's tagline under it. (The install
+# dashboard shows Omarchy's mark while it works and the logo only on its
+# finish screen, which an unattended install reboots past.)
 installer_shows_logo() {
   qemu-img create -f qcow2 "$RUN_DIR/greeter.qcow2" 8G >/dev/null
   cp "$OVMF_VARS_TEMPLATE" "$RUN_DIR/OVMF_VARS.greeter.fd"
@@ -26,8 +28,12 @@ installer_shows_logo() {
   # words after it, which only that row has.
   if wait_for_screen "by omarchy" 300; then
     capture_console "success-S0.4-installer"
-    ocr_screen >"$RUN_DIR/greeter.txt"
     found=0
+    press ctrl-c
+    if wait_for_screen "agentic TV" 60; then
+      capture_console "success-S0.4-greeter"
+      ocr_screen >"$RUN_DIR/greeter.txt"
+    fi
   fi
   stop_vm
   return $found

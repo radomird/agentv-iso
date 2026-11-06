@@ -42,6 +42,10 @@ on:
         description: "Branch or commit to build (empty: the one this runs on)"
         type: string
         default: ""
+      checks:
+        description: "Only these image checks, by name, like s5.6-setup update-tv (empty: every check)"
+        type: string
+        default: ""
   workflow_call:
     inputs:
       channel:
@@ -51,6 +55,9 @@ on:
         type: boolean
         default: false
       ref:
+        type: string
+        default: ""
+      checks:
         type: string
         default: ""
 
@@ -73,7 +80,8 @@ jobs:
     env:
       # A release tag carries stable packages; everything else edge.
       CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && 'stable') || 'edge' }}
-      KEEP_ISO: ${{ inputs.keep-iso || startsWith(github.ref, 'refs/tags/v') }}
+      # Only an ISO that went through every check is kept.
+      KEEP_ISO: ${{ inputs.checks == '' && (inputs.keep-iso || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,7 +117,14 @@ jobs:
           AGENTV_OWNER: ${{ github.repository_owner }}
           # Two VMs at a time (test/agentv/image/run).
           AGENTV_TEST_LANES: 2
-        run: set -o pipefail; test/agentv/image/ci 2>&1 | tee image.log
+          ONLY: ${{ inputs.checks }}
+        run: |
+          set -o pipefail
+          read -ra checks <<<"$ONLY"
+          if (( ${#checks[@]} > 0 )); then
+            echo "Only these checks run: ${checks[*]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          test/agentv/image/ci "${checks[@]}" 2>&1 | tee image.log
 
       - name: Report
         if: always()
@@ -131,6 +146,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
           test/agentv/report iso "S0.1=$(result S0.1)" "S0.4=$(result S0.4)" \
             "S1.1=$(result S1.1)" "S1.3=$(result S1.3)" "S1.6=$(result S1.6)" "S1.7=$(result S1.7)" \
+            "T1.1=$(result T1.1)" "T1.2=$(result T1.2)" "T1.4=$(result T1.4)" \
             "T2.1=$(result T2.1)" "T2.2=$(result T2.2)" >>"$GITHUB_STEP_SUMMARY"
 
       - name: Keep the screenshots and logs

@@ -1,0 +1,65 @@
+# How long each image check takes, in seconds, on half a runner (two CPUs
+# and 6 GB, one of two lanes), or on the whole runner for the ones that run
+# alone. test/agentv/image/shards reads it to share the checks out evenly
+# across a run's jobs. A check that isn't here counts as 60 s, so a new one
+# only needs a line once it's slower than that.
+#
+# From run 41872037658 of agentv-os, on 2026-11-04. run prints a line like
+# "==> idle took 326 s" after each check, so to refresh it from a run's log:
+#   grep -h '^==> .* took [0-9]* s$' image.log | awk '{ print $2, $4 }' | sort
+add-app 85
+agentv-installed 21
+dpad-web 51
+edge-switch 43
+home 79
+home-back 57
+idle 326
+omarchy-hidden 89
+omarchy-update 5
+phone 90
+phone-sign-in 5
+s0.1-welcome 38
+s0.4-branding 62
+s0.5-update 65
+s0.7-tested 5
+s1.1-tv-session 248
+s1.3-switch 63
+s1.6-front 69
+s1.7-no-prompts 46
+s2.18-restart 58
+s2.18-shutdown 44
+s2.19-volume 47
+s3.3-ledger 31
+s3.5-steam 42
+s3.6-music 70
+s3.8-weather 46
+s4-hotspot 137
+s4.5-pin 171
+s4.6-grok-muse 30
+s4.6-key 28
+s5.10-share 67
+s5.2-theme 46
+s5.3-background 38
+s5.4-soundtrack 55
+s5.5-terms 85
+s5.6-setup 122
+s5.7-themes 56
+s5.8-theme-backgrounds 64
+s5.9-screensaver 125
+s6.3-builder-sandbox 36
+s6.4-made-theme 39
+s6.5-plan-sign-in 33
+s6.6-page-app 30
+s7-router 45
+s8-country 47
+s8-voice 39
+s8-whats-new 46
+selftest 80
+setup-apps 38
+sign-in-screen 42
+splash-update 38
+t1.1-first-screen 300
+t1.2-omarchy-installer 360
+t1.4-phone 480
+tested-packages 5
+update-tv 158
