@@ -26,14 +26,28 @@ check "T1.1 the USB stick boots to AgenTV's first screen, step 1 of 12 (OCR)" wa
 capture_console "success-T1.1-first-screen"
 ocr_screen >"$RUN_DIR/first-screen.txt"
 cat "$RUN_DIR/first-screen.txt"
-check "it asks which disk to install on" grep -qi "install agentv on" "$RUN_DIR/first-screen.txt"
-# OCR reads this font's w as u, or uw, at times ("uill", "oun", "ouwn"),
-# its y as g ("evergthing"), the end of "erased" as r ("eraser"), and the
-# apostrophe as two ("omarchy’'s"), and the QR code beside these lines adds
-# stray letters ("bhe erased", "ui w0"). So each is matched by the words OCR
-# reads steadily, at the start of its line or close to its end.
-check "and says everything on it will be erased" grep -qiE "ever.thing on it|on it .{0,12}eras" "$RUN_DIR/first-screen.txt"
-check "and that Ctrl+C gives Omarchy's own installer" grep -qiE "ctrl.c omarchy.{1,6}s .*installer" "$RUN_DIR/first-screen.txt"
+
+# first_screen_says <pattern>: what OCR read finds it (grep -E, any case).
+# The screen stays put, so OCR reads it again, up to three more times, and
+# each reading goes in first-screen.txt, where the check below for
+# Omarchy's questions reads them all too.
+first_screen_says() {
+  local tries=0
+  until grep -qiE "$1" "$RUN_DIR/first-screen.txt"; do
+    (( tries++ < 3 )) || return 1
+    sleep 2
+    { echo; ocr_screen; } >>"$RUN_DIR/first-screen.txt"
+  done
+}
+
+check "it asks which disk to install on" first_screen_says "install agentv on"
+# OCR misreads this font next to the QR code beside these lines: "uill",
+# "oun", "ouwn", "bhe erased", "evergthing", "ui w0 eraser", and the
+# apostrophe as two ("omarchy’'s"). So each line is matched by the words it
+# reads steadily, at the start of the line or close to its end, and read
+# again if it misses.
+check "and says everything on it will be erased" first_screen_says "ever.thing on it|on it .{0,12}eras"
+check "and that Ctrl+C gives Omarchy's own installer" first_screen_says "ctrl.c omarchy.{1,6}s .*installer"
 # shellcheck disable=SC2016 # the single quotes hold the inner bash's own
 check "T1.1 no question of Omarchy's on it (OCR)" \
   bash -c '! grep -qiE "$1|password|language|email" "$2"' _ "$OMARCHY_QUESTIONS" "$RUN_DIR/first-screen.txt"
