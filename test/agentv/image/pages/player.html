@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font: 24px sans-serif; }
+  main { padding: 48px; }
+  main[hidden] { display: none; }
+  #title .more { height: 1600px; }
+  button { font: inherit; background: #2a2a3a; color: #eee; border: 0; border-radius: 6px; padding: 12px 20px; }
+  #player { position: fixed; inset: 0; background: #000; display: none; }
+  #player.on { display: block; }
+  #player video { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<!-- A stand-in for a streaming service, as one page app: its home, a
+     title's page and the title's player, each put on the page's own
+     history. The player covers the screen and takes Escape for itself, then
+     does nothing with it. At ?full it also goes full screen. The title says
+     which shows, for the image check to read from Hyprland. -->
+<main id="home">
+  <h1>Home</h1>
+  <button id="open" type="button" autofocus>Paper Boats</button>
+</main>
+<main id="title" hidden>
+  <h1>Paper Boats</h1>
+  <button id="play" type="button">Play</button>
+  <div class="more"></div>
+</main>
+<div id="player"><video src="clip.webm" loop muted playsinline></video></div>
+<script>
+  const full = location.search.includes("full");
+  const player = document.getElementById("player");
+  const video = player.querySelector("video");
+  const view = () => new URLSearchParams(location.search).get("view") ?? "home";
+  const go = (to) => {
+    history.pushState(null, "", `?view=${to}${full ? "&full" : ""}`);
+    show();
+  };
+  const show = () => {
+    const now = view();
+    document.getElementById("home").hidden = now !== "home";
+    document.getElementById("title").hidden = now !== "title";
+    player.classList.toggle("on", now === "play");
+    if (now === "play") video.play().catch(() => {});
+    else {
+      video.pause();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
+    if (now === "home") document.getElementById("open").focus();
+    if (now === "title") document.getElementById("play").focus();
+    named();
+  };
+  const named = () => {
+    const now = view();
+    document.title = now === "play" ? (document.fullscreenElement ? "Playing full screen" : "Playing") : now === "title" ? "Title" : "Home";
+  };
+  document.addEventListener("fullscreenchange", named);
+  addEventListener("popstate", show);
+  document.getElementById("open").addEventListener("click", () => go("title"));
+  document.getElementById("play").addEventListener("click", () => {
+    go("play");
+    if (full) player.requestFullscreen().catch(() => {});
+  });
+  addEventListener("keydown", (event) => {
+    if (view() === "play" && (event.key === "Escape" || event.key === " ")) event.preventDefault();
+  });
+  show();
+</script>
+</body>
+</html>

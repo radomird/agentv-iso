@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# AgenTV's own unit tests in this repo (ADR-019, layer 2): the first screen
+# on the USB stick and what it hands the installed box. Python's own
+# unittest, nothing to install. Seconds, no VM.
+#
+# Usage: test/agentv/unit/run [-v]
+
+set -euo pipefail
+
+DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+exec python3 -m unittest discover -t "$DIR" -s "$DIR" "$@"
