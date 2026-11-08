@@ -6,7 +6,8 @@
 # account on the base image, as the first screen leaves it: agentv, with a
 # locked password, the first screen's note and first boot's keys-only
 # drop-in. Then the TV's own route, with setup's own switch on, sets a
-# password made up here, through root's socket. The check reads it back
+# password made up here, through root's socket, as the first switch to the
+# desktop does, and refuses a second one. The check reads it back
 # against /etc/shadow, sees SSH taking passwords again, and looks for the
 # password in the journal. The test VM keeps SSH to keys only with a
 # setting of its own (00-omarchy-vm.conf) that comes before every other, so
@@ -59,6 +60,13 @@ same_password() {
 }
 check "T7.4 the account's password is the one typed" same_password
 check "the account note says a password is known" ssh_guest "jq -e '.passwordKnown == true' /var/lib/agentv/account.json"
+
+# Only the first password comes from the TV. After that it changes on the
+# desktop, where passwd asks for the one before.
+jq -Rc '{password: .}' <<<"$password again" |
+  ssh_guest "curl -sS --max-time 60 -X PUT -H 'Content-Type: application/json' --data-binary @- $TV/api/desktop/password" >"$RUN_DIR/again.json" 2>&1 || true
+check "T7.4 the TV sets no second password" jq -e '.ok == false and (.error | test("update › password › user"))' "$RUN_DIR/again.json"
+check "and the first one still holds" same_password
 check "and SSH's keys-only drop-in is gone" ssh_guest "! test -e /etc/ssh/sshd_config.d/05-agentv-no-password.conf"
 
 ssh_sudo "journalctl -b --no-pager" >"$RUN_DIR/journal.log" 2>&1 || true
