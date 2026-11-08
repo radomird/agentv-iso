@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sizes</title>
+<style>
+  body { margin: 48px; background: #fff; color: #111; font: 16px/1.5 sans-serif; }
+  h1 { font-size: 32px; }
+</style>
+</head>
+<body>
+<!-- A page made for a desktop, as a streaming service's is: body text at the
+     browser's 16 px. Its title says how wide the page is, in the page's own
+     pixels, and how tall its body text is in the TV's, for the image check
+     to read from Hyprland. -->
+<h1>A page made for a desktop</h1>
+<p id="body">Its body text is 16 px, the way most sites draw it. The TV's scale makes it bigger.</p>
+<script>
+  const body = document.getElementById("body");
+  function say() {
+    const px = parseFloat(getComputedStyle(body).fontSize) * devicePixelRatio;
+    document.title = `sizes ${innerWidth} ${Math.round(px * 10) / 10} ${devicePixelRatio}`;
+  }
+  say();
+  addEventListener("resize", say);
+  setInterval(say, 250);
+</script>
+</body>
+</html>
