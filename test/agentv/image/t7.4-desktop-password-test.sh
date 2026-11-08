@@ -38,7 +38,7 @@ check "first boot keeps SSH to keys only while nobody knows the password" ssh_gu
 # (CVE-2026-123158), so a box that takes passwords must keep PAM on.
 ssh_guest "sudo sshd -T" >"$RUN_DIR/sshd.txt" 2>&1 || true
 ssh_guest "ssh -V" >"$RUN_DIR/openssh-version.txt" 2>&1 || true
-check "sshd checks passwords through PAM" grep -qx 'usepam yes' "$RUN_DIR/sshd.txt"
+check "sshd checks passwords through PAM" grep -qix 'usepam yes' "$RUN_DIR/sshd.txt"
 
 # Setup's own switch on, as on an edge box that tries it.
 ssh_guest "curl -sS -X PUT -H 'Content-Type: application/json' -d '{\"setup2\": true}' $TV/api/features" >"$RUN_DIR/features.json" 2>&1 || true
