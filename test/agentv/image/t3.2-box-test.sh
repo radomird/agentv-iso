@@ -5,8 +5,12 @@
 # hardware video decoding and only software Vulkan, the disk, and the wired
 # network. The package brings the tools it reads with. With the switch on,
 # setup goes from getting ready to "here's your box", with those lines on
-# the TV, and OK carries on to the location. QEMU's screen isn't 4K, so the
-# 4K test doesn't run.
+# the TV, and OK carries on to the location.
+#
+# QEMU's virtual monitor has an EDID that lists modes up to 3840 x 2160 and
+# wider, so the box counts it as a 4K TV, and the 4K test is wanted. But
+# QEMU draws the TV at 1280 x 800, so the test doesn't run: the box step
+# says 4K isn't checked yet, as on a 4K TV shown at a lower mode.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -42,8 +46,8 @@ log "The box check: $(jq -c . "$RUN_DIR/box.json" 2>/dev/null)"
 check "T3.2 /api/box answers in the plan's shape" jq -e 'keys_unsorted == ["model", "cpu", "memoryGb", "storage", "gpu", "tv", "network", "bluetooth", "gamepads", "widevine", "verdicts"]' "$RUN_DIR/box.json"
 check "T3.2 it has the VM's model, CPU, memory and disk" jq -e '(.model | test("QEMU|Standard PC")) and .cpu.threads >= 1 and (.cpu.name | length) > 0 and .memoryGb >= 2 and .storage.totalGb > 0 and .storage.freeGb > 0' "$RUN_DIR/box.json"
 check "T3.2 virtio's GPU decodes nothing in hardware and isn't for games" jq -e '.gpu.vendor == "other" and .gpu.decode == [] and .verdicts.games == "none"' "$RUN_DIR/box.json"
-check "QEMU's screen isn't a 4K TV, and the VM is on a wire" jq -e '.verdicts.fourK == false and .verdicts.fourKSmooth == false and .network.kind == "ethernet"' "$RUN_DIR/box.json"
-check "so the 4K test isn't asked for" until_json /api/box/smooth '.needed == false' 10
+check "T3.2 QEMU's monitor reads as a 4K TV from its EDID, not checked for 4K yet, and the VM is on a wire" jq -e '.tv.name == "QEMU Monitor" and (.tv.modes | index("3840x2160@60")) != null and .verdicts.fourK == true and .verdicts.fourKSmooth == false and .network.kind == "ethernet"' "$RUN_DIR/box.json"
+check "so the 4K test is wanted, with no result yet" until_json /api/box/smooth '.needed == true and .result == null' 10
 ssh_guest "bash -lc 'agentv box readings' </dev/null" >"$RUN_DIR/readings.json" 2>&1 || true
 check "agentv box readings prints what it read" jq -e '.gpus | length >= 1' "$RUN_DIR/readings.json"
 
@@ -61,7 +65,9 @@ setup_post /api/setup/finish '{"step": "ready"}'
 check "T3.2 setup's step after getting ready is your box" until_json /api/setup '.setup.step == "box"' 30
 check "T3.2 the TV says here's your box (OCR)" ocr_finds success-T3.2-box "your box" 30
 check "with the GPU's line (OCR)" ocr_finds success-T3.2-games "not for games" 10
+check "and the box line says 4K isn't checked, since QEMU draws the TV below 4K (OCR)" ocr_finds success-T3.2-unchecked "not checked" 10
 capture_console "success-T3.2-box"
+check "the 4K test didn't run at QEMU's mode" until_json /api/box/smooth '.result == null' 5
 
 # One press of OK.
 press ret
