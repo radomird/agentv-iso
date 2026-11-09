@@ -25,6 +25,14 @@ wait_tv 240 >/dev/null || { capture_console "failure-sleep-no-tv"; check "the TV
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 5
 
+# Sleep is daemon/sleep.ts. The Nightly's edge leg runs this on edge's last
+# build, which may be from before it, so on a box without it this waits.
+if ! ssh_guest "test -f /usr/share/agentv/daemon/sleep.ts"; then
+  log "This agentv can't sleep yet ($(guest "agentv version" 2>/dev/null | head -n 1)); T13.2 waits for it"
+  stop_vm
+  finish
+fi
+
 ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.txt" 2>&1 || true
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
