@@ -31,6 +31,7 @@ if ! ssh_guest "test -f /usr/share/agentv/daemon/sleep.ts"; then
   log "This agentv can't sleep yet ($(guest "agentv version" 2>/dev/null | head -n 1)); T13.2 waits for it"
   stop_vm
   finish
+  exit 0
 fi
 
 ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.txt" 2>&1 || true
