@@ -2,7 +2,8 @@
 #
 # Sleep as a setting on an installed box (ADR-072, T13.2). With the TV
 # reported off (agentv screen tv off stands in for its power, which a VM
-# can't switch) and the hour shortened to 30 s (agentv screen sleep-after):
+# can't switch) and the hour shortened to 2 minutes (agentv screen
+# sleep-after), long enough after a wake to look before it sleeps again:
 #   - with Settings → Power's sleep off, the box never suspends, and once the
 #     apps have closed, home waits on its ambient screen with the output off;
 #   - with it on, it doesn't suspend while something holds an inhibitor that
@@ -38,9 +39,18 @@ ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.tx
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
 
-# Suspends the kernel went into this boot, and came out of.
-entries() { timeout 20 ssh_guest "journalctl -k -b --no-pager -g 'PM: suspend entry'" 2>/dev/null | grep -c "PM: suspend entry" || true; }
-exits() { timeout 20 ssh_guest "journalctl -k -b --no-pager -g 'PM: suspend exit'" 2>/dev/null | grep -c "PM: suspend exit" || true; }
+# Suspends the kernel went into this boot, and came out of, or "?" when the
+# box doesn't answer, which is never taken for none.
+pm_count() {
+  local out
+  if out=$(timeout 20 ssh_guest "journalctl -k -b --no-pager | grep -c 'PM: suspend $1' || true" 2>/dev/null); then
+    echo "$out"
+  else
+    echo "?"
+  fi
+}
+entries() { pm_count entry; }
+exits() { pm_count exit; }
 screen_log() { timeout 20 ssh_guest "journalctl --user -b --no-pager -u agentv-screen" 2>/dev/null || true; }
 settings() {
   guest "curl -fsS --max-time 5 -X POST -H 'content-type: application/json' -d '$1' http://127.0.0.1:3000/api/settings" >>"$RUN_DIR/settings.log" 2>&1
@@ -75,7 +85,7 @@ power_button() {
   fi
 }
 
-guest "agentv screen sleep-after 30" >"$RUN_DIR/screen.log" 2>&1 || true
+guest "agentv screen sleep-after 120" >"$RUN_DIR/screen.log" 2>&1 || true
 
 # Sleep off, the TV off: the apps close after 2 minutes, home waits on its
 # ambient screen, the output goes off, and the box stays up.
@@ -89,17 +99,22 @@ check "T13.1 and the TV's output is off" jq -e '.output == "off"' "$RUN_DIR/stat
 check "the hour (shortened) is up" jq -e '.sleep.due_in_s == 0' "$RUN_DIR/status-off.json"
 check "T13.2 with sleep off, the box never suspends" test "$(entries)" = "0"
 
-# Sleep on, with something holding an inhibitor that blocks sleep.
+# Something holds an inhibitor that blocks sleep, as the owner, the way
+# Omarchy's update does, which logind itself would let the owner past. It's
+# up before sleep turns on, since the hour is already over.
+guest "systemd-run --user --unit=t13-2-hold systemd-inhibit --what=sleep --mode=block --who=t13.2 '--why=holding sleep' sleep 600" >>"$RUN_DIR/screen.log" 2>&1 || true
+sleep 2
+guest "systemd-inhibit --list --no-pager" >"$RUN_DIR/inhibitors.txt" 2>&1 || true
+check "the inhibitor is held" grep -q "t13.2" "$RUN_DIR/inhibitors.txt"
 settings '{"sleepWhenOff":true}'
 check "sleep turns on" test "$(guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/home" | jq -r '.settings.sleepWhenOff')" = "true"
-ssh_guest "nohup systemd-inhibit --what=sleep --mode=block --who=t13.2 --why='holding sleep' sleep 600 >/dev/null 2>&1 &" || true
 sleep 45
 check "T13.2 not while an inhibitor is held" test "$(entries)" = "0"
 screen_log >"$RUN_DIR/screen-journal-held.log"
 check "and the screen says who holds it" grep -q "not sleeping yet: t13.2 (holding sleep)" "$RUN_DIR/screen-journal-held.log"
 
 # Let go: it sleeps.
-ssh_guest "pkill -f 'systemd-inhibit --what=sleep --mode=block --who=t13.2'" || true
+guest "systemctl --user stop t13-2-hold" >>"$RUN_DIR/screen.log" 2>&1 || true
 if how=$(asleep 90); then
   log "The box went to sleep: $how"
   check "T13.2 once the inhibitor is let go, the box suspends" true
@@ -119,7 +134,7 @@ check "the screen daemon heard the box wake" grep -q "the box woke from sleep" "
 check "T13.2 the power button wakes it to the ambient screen" test "$(front '.ambient')" = "true"
 
 # Awake for the hour (shortened) again, it sleeps again, and a key wakes it.
-if how=$(asleep 120); then
+if how=$(asleep 240); then
   log "The box went to sleep again: $how"
   check "after the hour awake, it sleeps again" true
 else
