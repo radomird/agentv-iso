@@ -194,9 +194,10 @@ check "T9.2 home has a tile for each of the six" until_json /api/home "[.apps[].
 # Each tile's icon comes from its site as home lists it, in the background.
 check "T9.2 each one's icon has come from its own stand-in site" \
   until_json /api/home "[.apps[] | select(.id | startswith(\"agentv.check-\")) | select(.icon != null)] | length == ${#APPS[@]}" 120
+# By hash, since the test container has no cmp.
 for app in "${APPS[@]}"; do
-  ssh_guest "curl -fsS http://127.0.0.1:3000/api/apps/agentv.check-$app/icon" >"$RUN_DIR/icon-$app.svg" 2>/dev/null || true
-  check "T9.2 $app's tile shows the icon its site names" cmp -s "$RUN_DIR/icon-$app.svg" "$work/sites/$app/icon.svg"
+  served=$(ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/apps/agentv.check-$app/icon | sha256sum" 2>/dev/null | cut -d' ' -f1)
+  check "T9.2 $app's tile shows the icon its site names" test "$served" = "$(sha256sum <"$work/sites/$app/icon.svg" | cut -d' ' -f1)"
 done
 check "T9.2 the six tiles are on the TV (OCR)" ocr_finds success-T9.2-home "kite|harbour|lantern|paper|reel|tide" 30
 capture_console "success-T9.2-home"
