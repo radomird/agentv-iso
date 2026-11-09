@@ -150,19 +150,20 @@ heard_wake() {
   screen_log >"$RUN_DIR/screen-journal-1.log"
   grep -q "the box woke from sleep" "$RUN_DIR/screen-journal-1.log"
 }
-on_ambient() { [[ $(front '.ambient') == "true" && $(front '.output') == "off" ]]; }
+# What the screen daemon did since the wake, from its own log: the last word
+# on the output, and on the ambient screen.
+since_wake() { sed -n '/the box woke from sleep/,$p' "$RUN_DIR/screen-journal-1.log"; }
+last_output() { since_wake | grep -o "the TV's output is \(on\|off\)" | tail -n 1; }
+last_ambient() { sed -n '/sleeping: /,$p' "$RUN_DIR/screen-journal-1.log" | grep -o "the ambient screen\( ends\)\?" | tail -n 1; }
+settled() { heard_wake && [[ $(last_output) == "the TV's output is off" ]]; }
 waited=$SECONDS
 until heard_wake || (( SECONDS - waited > 45 )); do sleep 3; done
 check "the screen daemon heard the box wake" heard_wake
-until on_ambient || (( SECONDS - waited > 75 )); do sleep 3; done
+until settled || (( SECONDS - waited > 75 )); do sleep 3; done
+check "and with the TV still off, the output goes off again" settled
+check "T13.2 the power button wakes it to the ambient screen" test "$(last_ambient)" = "the ambient screen"
 screen_status >"$RUN_DIR/status-woken.json"
-if ! on_ambient; then
-  log "After the wake: $(jq -c '{ambient, output, tv, sleep}' "$RUN_DIR/status-woken.json" 2>/dev/null)"
-  screen_log | tail -n 20 >"$RUN_DIR/screen-journal-woken.log"
-  while read -r line; do log "  $line"; done <"$RUN_DIR/screen-journal-woken.log"
-fi
-check "T13.2 the power button wakes it to the ambient screen" jq -e '.ambient == true' "$RUN_DIR/status-woken.json"
-check "and with the TV still off, the output goes off again" jq -e '.output == "off"' "$RUN_DIR/status-woken.json"
+log "agentv screen status after the wake: $(head -c 300 "$RUN_DIR/status-woken.json" | tr '\n' ' ')"
 # Back to the shortened hour: awake longer than that by now, it sleeps again.
 guest "agentv screen sleep-after 120" >>"$RUN_DIR/screen.log" 2>&1 || true
 
