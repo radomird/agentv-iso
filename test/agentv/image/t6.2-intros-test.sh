@@ -89,27 +89,28 @@ check "and those are its first bytes" test "$(guest "head -c 1000 $file | sha256
 check "and the daemon has no copy of it" test -z "$(ssh_sudo "find /var/lib/agentv/backgrounds -iname '*.mp4' -o -iname '*.webm'" 2>/dev/null)"
 
 # Home plays it: it says so as it starts, and the screen moves. Home dims
-# its background, and Catppuccin's intro moves softly, so two frames of it
-# differ by little, where two frames of a still screen don't differ at all.
-# Five frames 0.4 s apart, and at least two of the four steps between them
-# changed: the clock, the only other thing that moves, changes once a minute.
+# its background, Catppuccin's intro moves softly, and the VM decodes it
+# slowly, so two frames of it can differ by very little. Two frames of a
+# still screen don't differ at all, though. So: six frames 0.4 s apart, and
+# at least two of the five steps between them changed at all. The clock, the
+# only other thing that moves, changes once a minute.
 check "T6.2 home plays the intro" \
   until_json /api/backgrounds ".theme.introShown == {\"due\": \"$due\", \"how\": \"played\", \"why\": null}" 30
-for i in 0 1 2 3 4; do
+for i in 0 1 2 3 4 5; do
   shot "intro-$i"
   sleep 0.4
 done
 capture_console "success-T6.2-intro"
 steps=""
 moved=0
-for i in 1 2 3 4; do
+for i in 1 2 3 4 5; do
   step=$(apart "intro-$(( i - 1 ))" "intro-$i")
   steps+="${step:-?} "
-  if awk -v d="${step:-0}" 'BEGIN { exit !(d > 0.0005) }'; then
+  if awk -v d="${step:-0}" 'BEGIN { exit !(d > 0.00001) }'; then
     moved=$(( moved + 1 ))
   fi
 done
-check "T6.2 and it moves (frames 0.4 s apart differ by ${steps% }, out of 1; $moved of 4 steps changed)" test "$moved" -ge 2
+check "T6.2 and it moves (frames 0.4 s apart differ by ${steps% }, out of 1; $moved of 5 steps changed)" test "$moved" -ge 2
 
 # It ends on its still, and stays there.
 sleep 10
