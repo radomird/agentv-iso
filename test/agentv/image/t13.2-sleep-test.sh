@@ -39,11 +39,22 @@ ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.tx
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
 
+# SSH that gives up after <seconds>: a suspended box takes the connection
+# and never answers, which ConnectTimeout alone doesn't cover. timeout can't
+# run a shell function, so this is ssh itself, as ssh_guest runs it.
+ssh_quick() {
+  local seconds=$1
+  shift
+  timeout "$seconds" ssh -i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR \
+    "$GUEST_USER@127.0.0.1" "$@"
+}
+
 # Suspends the kernel went into this boot, and came out of, or "?" when the
 # box doesn't answer, which is never taken for none.
 pm_count() {
   local out
-  if out=$(timeout 20 ssh_guest "journalctl -k -b --no-pager | grep -c 'PM: suspend $1' || true" 2>/dev/null); then
+  if out=$(ssh_quick 20 "echo $GUEST_PASSWORD | sudo -S -p '' journalctl -k -b --no-pager | grep -c 'PM: suspend $1' || true" 2>/dev/null); then
     echo "$out"
   else
     echo "?"
@@ -51,7 +62,7 @@ pm_count() {
 }
 entries() { pm_count entry; }
 exits() { pm_count exit; }
-screen_log() { timeout 20 ssh_guest "journalctl --user -b --no-pager -u agentv-screen" 2>/dev/null || true; }
+screen_log() { ssh_quick 20 "journalctl --user -b --no-pager -u agentv-screen" 2>/dev/null || true; }
 settings() {
   guest "curl -fsS --max-time 5 -X POST -H 'content-type: application/json' -d '$1' http://127.0.0.1:3000/api/settings" >>"$RUN_DIR/settings.log" 2>&1
 }
@@ -66,7 +77,7 @@ asleep() {
       echo "suspended (S3)"
       return 0
     fi
-    if ! timeout 10 ssh_guest true 2>/dev/null && ! timeout 10 ssh_guest true 2>/dev/null; then
+    if ! ssh_quick 10 true 2>/dev/null && ! ssh_quick 10 true 2>/dev/null; then
       echo "not answering (s2idle)"
       return 0
     fi
