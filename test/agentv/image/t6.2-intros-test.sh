@@ -88,15 +88,28 @@ check "T6.2 the intro streams from where Omarchy keeps it, in the parts asked fo
 check "and those are its first bytes" test "$(guest "head -c 1000 $file | sha256sum | cut -c1-16")" = "$(ssh_guest "sha256sum /tmp/t6.2-part | cut -c1-16")"
 check "and the daemon has no copy of it" test -z "$(ssh_sudo "find /var/lib/agentv/backgrounds -iname '*.mp4' -o -iname '*.webm'" 2>/dev/null)"
 
-# Home plays it: it says so as it starts, and the screen moves.
+# Home plays it: it says so as it starts, and the screen moves. Home dims
+# its background, and Catppuccin's intro moves softly, so two frames of it
+# differ by little, where two frames of a still screen don't differ at all.
+# Five frames 0.4 s apart, and at least two of the four steps between them
+# changed: the clock, the only other thing that moves, changes once a minute.
 check "T6.2 home plays the intro" \
   until_json /api/backgrounds ".theme.introShown == {\"due\": \"$due\", \"how\": \"played\", \"why\": null}" 30
-shot intro-1
-sleep 0.8
-shot intro-2
-moved=$(apart intro-1 intro-2)
+for i in 0 1 2 3 4; do
+  shot "intro-$i"
+  sleep 0.4
+done
 capture_console "success-T6.2-intro"
-check "T6.2 and it moves (two frames 0.8 s apart are ${moved:-?} apart, out of 1)" awk -v d="${moved:-0}" 'BEGIN { exit !(d > 0.01) }'
+steps=""
+moved=0
+for i in 1 2 3 4; do
+  step=$(apart "intro-$(( i - 1 ))" "intro-$i")
+  steps+="${step:-?} "
+  if awk -v d="${step:-0}" 'BEGIN { exit !(d > 0.0005) }'; then
+    moved=$(( moved + 1 ))
+  fi
+done
+check "T6.2 and it moves (frames 0.4 s apart differ by ${steps% }, out of 1; $moved of 4 steps changed)" test "$moved" -ge 2
 
 # It ends on its still, and stays there.
 sleep 10
