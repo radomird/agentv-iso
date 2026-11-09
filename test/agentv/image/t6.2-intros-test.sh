@@ -14,6 +14,11 @@
 # /etc/agentv/video-in-software lets this check's box play it anyway. On a
 # real box, the box check's codecs decide (layer 4 checks that part).
 # About four minutes, most of it the boot.
+#
+# A box whose home doesn't play the theme's videos yet stands this check
+# down. The nightly run's edge box can be one: it takes the edge channel's
+# last build, which can be from before a merge an hour old, while this
+# check is already here.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -63,6 +68,15 @@ wait_tv 300 >/dev/null || true
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "setup skipped, home is in front${took:+ (after $took s)}" test -n "$took"
+
+# Home's layer that plays them is launcher/backdrop.ts. Without it, there's
+# nothing here to check yet.
+if ! ssh_guest "test -f /usr/share/agentv/launcher/backdrop.ts"; then
+  log "This agentv's home doesn't play the theme's videos yet ($(guest "agentv version" 2>/dev/null | head -n 1)); T6.2 waits for it"
+  stop_vm
+  finish
+  exit 0
+fi
 
 # The switch on, as on an edge box, and video without hardware decoding.
 ssh_sudo "echo edge >/etc/agentv/channel && touch /etc/agentv/video-in-software" >"$RUN_DIR/switch.log" 2>&1 || true
