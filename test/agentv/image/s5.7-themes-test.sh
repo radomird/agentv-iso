@@ -55,9 +55,12 @@ if ! jq -e '[.themes[].id] | index("nord")' "$RUN_DIR/themes-before.json" >/dev/
   exit 0
 fi
 
-# Omarchy's themes, as its own theme menu finds them.
+# Omarchy's themes, as its own theme menu finds them, each one with its
+# colours. A folder without colors.toml isn't a theme: Omarchy 4.5's
+# omarchy-themes-intros still puts video intros under the old osaka-jade name,
+# beside jade-horse, and nothing can be drawn from that folder.
 omarchy_themes() {
-  guest "find /usr/share/omarchy/themes ~/.config/omarchy/themes -mindepth 1 -maxdepth 1 \\( -type d -o -type l \\) -printf '%f\\n' 2>/dev/null | sort -u" 2>/dev/null
+  guest "for theme in /usr/share/omarchy/themes/* ~/.config/omarchy/themes/*; do [ -f \"\$theme/colors.toml\" ] && basename \"\$theme\"; done 2>/dev/null | sort -u" 2>/dev/null
 }
 # Look's list and Omarchy's, and what's in only one of them in the log when
 # they differ. The image check's container has no diff, so bash compares

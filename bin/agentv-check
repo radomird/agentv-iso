@@ -87,9 +87,9 @@ if [[ ! -f .github/omarchy-base ]]; then
   pass "not a fork, so every file is AgenTV's"
 else
   base=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-base)
+  upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
 
   if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null && (( fetch_base )); then
-    upstream=$(sed -n '1{s/[[:space:]]//g;p;}' .github/omarchy-upstream)
     if [[ $base == v* ]]; then
       git fetch --quiet --no-tags "https://github.com/$upstream.git" "+refs/tags/$base:refs/tags/$base"
     else
@@ -102,6 +102,27 @@ else
     exit 1
   fi
   log_range="$base_commit..HEAD"
+
+  # The commits that are AgenTV's: not the base's, and not those of any base
+  # the fork sat on before. When Omarchy cuts a release beside the line the
+  # fork was on, as it did 4.5 beside 4.0.x, the old line's own commits are
+  # still in agentv's history but not in the new base's.
+  while IFS= read -r commit; do
+    old=$(git show "$commit:.github/omarchy-base" 2>/dev/null | sed -n '1{s/[[:space:]]//g;p;}')
+    [[ -n $old && $old != "$base" ]] || continue
+    if ! git rev-parse --verify --quiet "$old^{commit}" >/dev/null && (( fetch_base )); then
+      if [[ $old == v* ]]; then
+        git fetch --quiet --no-tags "https://github.com/$upstream.git" "+refs/tags/$old:refs/tags/$old" || true
+      else
+        git fetch --quiet --no-tags "https://github.com/$upstream.git" "$old" || true
+      fi
+    fi
+    if old_commit=$(git rev-parse --verify --quiet "$old^{commit}"); then
+      log_range+=" ^$old_commit"
+    else
+      fail "the earlier Omarchy base $old is in this clone" "run agentv-check --fetch-base, or fetch it from upstream"
+    fi
+  done < <(git log --format=%H -- .github/omarchy-base)
   pass "the Omarchy base is $base"
 
   # --- Omarchy's files are untouched ----------------------------------------
@@ -187,7 +208,8 @@ scan() {
 # --- No em dashes, in files or commit messages ------------------------------
 
 found=$(scan "$EM_DASH" bytes "$WORK/ours")
-git log --format='%h %s%n%b' "$log_range" | grep -F "$EM_DASH" >"$WORK/dash-commits" || true
+# shellcheck disable=SC2086 # the range is a list of revisions
+git log --format='%h %s%n%b' $log_range | grep -F "$EM_DASH" >"$WORK/dash-commits" || true
 if [[ -n $found || -s $WORK/dash-commits ]]; then
   fail "no em dashes in what AgenTV added" "$(printf '%s\n%s' "$found" "$(cat "$WORK/dash-commits")" | sed '/^$/d')"
 else
@@ -386,7 +408,8 @@ else
   # the first time it's read, so gitleaks would fetch them a commit at a
   # time. Fetch every version the AgenTV commits changed in one go first.
   if [[ $(git config --get remote.origin.promisor) == "true" ]]; then
-    git log --no-merges --raw --no-abbrev --format= "$log_range" \
+    # shellcheck disable=SC2086 # the range is a list of revisions
+    git log --no-merges --raw --no-abbrev --format= $log_range \
       | awk '$1 != ":160000" { print $3 } $2 != "160000" { print $4 }' \
       | grep -v '^0*$' | sort -u >"$WORK/blobs" || true
     if [[ -s $WORK/blobs ]]; then

@@ -80,7 +80,8 @@ check "S5.8 and shows them, by default" until_json /api/backgrounds '.source == 
 now=$(omarchy_current)
 check "S5.8 home's is the one Omarchy shows ($now)" until_json /api/backgrounds ".theme.current == \"$now\"" 30
 check "each credited to the theme" until_json /api/backgrounds '[.theme.items[].credit.text] | all(. == "tokyo night")' 10
-check "kept in /var/lib/agentv/backgrounds, the daemon's own" ssh_sudo "test -f /var/lib/agentv/backgrounds/theme/$now.jpg -o -f /var/lib/agentv/backgrounds/theme/$now.png"
+check "kept in /var/lib/agentv/backgrounds, the daemon's own" \
+  ssh_sudo "test -f /var/lib/agentv/backgrounds/theme/$now.jpg -o -f /var/lib/agentv/backgrounds/theme/$now.png -o -f /var/lib/agentv/backgrounds/theme/$now.webp"
 sleep 3
 busy=$(busyness home-theme)
 capture_console "success-S5.8-home"

@@ -164,7 +164,7 @@ jobs:
               printf "#!/bin/sh\nexit 0\n" >/usr/local/bin/omarchy-pkg-add
               chmod 0755 /usr/local/bin/omarchy-pkg-add
               qemu-system-x86_64 --version | head -1
-              ./test/integration release/*.iso boot --no-preview --memory 8192 --timeout 1800
+              ./test/integration release/*.iso boot ${{ matrix.channel == 'stable' && '--release-iso' || '' }} --no-preview --memory 8192 --timeout 1800
 
               base=$(ls -d test-runs/*-integration)
               ./test/vm-image/vm-seal "$base" sealed

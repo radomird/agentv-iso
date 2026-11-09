@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# AgenTV's packages are on the installed box (ADR-025): the ISO's build step
-# put agentv and agentv-keyring in the same install as Omarchy's own package,
+# AgenTV's packages are on the installed box (ADR-025): the ISO's build put
+# agentv and agentv-keyring in the root image beside Omarchy's own package,
 # pacman trusts AgenTV's key, and agentv runs. Boots the base image that
 # upstream's test/integration left behind, like its own scenarios do.
 
@@ -18,7 +18,23 @@ wait_for_ssh 300 failure-agentv-ssh-timeout || exit 1
 
 check "Omarchy's own package is installed" ssh_guest "pacman -Q omarchy"
 check "agentv and agentv-keyring are installed" ssh_guest "pacman -Q agentv agentv-keyring"
-check "pacman trusts AgenTV's key" ssh_guest "pacman-key --list-keys $fingerprint"
+# Right after boot, root's pacman (the update check's) can have the keyring
+# open, as a root gpg-agent did in one image run, and a read as the box's
+# own account fails while it does. So it's tried for up to 30 s.
+has_key() {
+  local started=$SECONDS
+  until ssh_guest "pacman-key --list-keys $fingerprint" >/dev/null 2>&1; do
+    (( SECONDS - started < 30 )) || return 1
+    sleep 2
+  done
+}
+check "pacman has AgenTV's key" has_key
+# Trusted, not only there: the installer fills the box's keyring itself,
+# from a list that has to name AgenTV's keyring (customize.sh), and a key
+# that isn't signed by the box's own master key fails every update.
+ssh_sudo "gpg --homedir /etc/pacman.d/gnupg --with-colons --list-keys $fingerprint" >"$RUN_DIR/agentv-key.txt" 2>&1 || true
+check "pacman trusts AgenTV's key fully" \
+  test "$(awk -F: '$1 == "pub" { print $2; exit }' "$RUN_DIR/agentv-key.txt")" = f -o "$(awk -F: '$1 == "pub" { print $2; exit }' "$RUN_DIR/agentv-key.txt")" = u
 check "agentv runs" ssh_guest "agentv version"
 check "nothing of AgenTV's is in Omarchy's folder" \
   ssh_guest "! pacman -Ql agentv | grep -q ' /usr/share/omarchy/'"

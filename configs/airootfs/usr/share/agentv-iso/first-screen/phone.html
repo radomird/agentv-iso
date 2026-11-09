@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>AgenTV setup</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c0caf5;
+    --muted: #a9b1d6;
+    --blue: #7aa2f7;
+    --red: #f7768e;
+    --line: #292e42;
+    --ink: #0e0e14;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.4 ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    min-height: 100vh;
+    padding: max(48px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+  }
+  .steps { display: flex; align-items: center; gap: 4px; margin-bottom: 20px; color: var(--muted); font-size: 13px; }
+  .steps i { width: 12px; height: 8px; background: var(--line); }
+  .steps i.done { background: var(--blue); }
+  .steps span { margin-left: 8px; }
+  h1 { margin: 0 0 16px; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+  p { margin: 0 0 12px; color: var(--muted); }
+  .disks { display: flex; flex-direction: column; gap: 10px; }
+  .disk {
+    text-align: left; width: 100%; padding: 12px 16px; border: 2px solid var(--line); background: none;
+    color: var(--fg); font: inherit; cursor: pointer;
+  }
+  .disk b { display: block; font-size: 17px; }
+  .disk small { font-size: 13px; color: var(--muted); }
+  .disk[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--ink); }
+  .disk[aria-pressed="true"] small { color: var(--ink); }
+  .warn { color: var(--red); font-weight: 700; margin-top: 16px; }
+  .error { color: var(--red); min-height: 1.4em; margin-top: 12px; }
+  .grow { flex: 1; }
+  button.go {
+    width: 100%; padding: 18px; border: 0; background: var(--blue); color: var(--ink);
+    font: inherit; font-weight: 800; font-size: 17px; cursor: pointer;
+  }
+  button.go:disabled { opacity: 0.4; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="steps" aria-label="step of 12"><span id="count">1 of 12</span></div>
+
+<main id="pick">
+  <h1>install agentv on</h1>
+  <div class="disks" id="disks" role="group" aria-label="disks"></div>
+  <p class="warn" id="erase">everything on it will be erased</p>
+  <p class="error" id="error" role="alert"></p>
+</main>
+<div class="grow"></div>
+<button class="go" id="go" disabled>erase and install</button>
+
+<main id="installing" hidden>
+  <h1>installing omarchy</h1>
+  <p>the tv restarts by itself, and this page carries on</p>
+</main>
+
+<script>
+  // The token comes with the page on the TV's own Wi-Fi, or in the address
+  // the TV's code points at on the home network. Without it, this phone can
+  // look but not erase.
+  const TOKEN = "{{TOKEN}}" || new URLSearchParams(location.search).get("t") || "";
+  const $ = (id) => document.getElementById(id);
+  let disks = [];
+  let picked = null;
+  let installing = false;
+  let away = 0;
+
+  function steps(step) {
+    const row = document.querySelector(".steps");
+    row.querySelectorAll("i").forEach((i) => i.remove());
+    for (let n = 12; n >= 1; n--) {
+      const block = document.createElement("i");
+      if (n <= step) block.className = "done";
+      row.prepend(block);
+    }
+    $("count").textContent = `${step} of 12`;
+  }
+
+  function draw() {
+    $("pick").hidden = installing;
+    $("go").hidden = installing;
+    $("installing").hidden = !installing;
+    steps(installing ? 2 : 1);
+    const list = $("disks");
+    list.replaceChildren(...disks.map((disk) => {
+      const button = document.createElement("button");
+      button.className = "disk";
+      button.setAttribute("aria-pressed", String(disk.path === picked));
+      const name = document.createElement("b");
+      name.textContent = disk.name;
+      const about = document.createElement("small");
+      about.textContent = [disk.model, disk.size].filter(Boolean).join(" · ");
+      button.append(name, about);
+      button.onclick = () => pick(disk.path);
+      return button;
+    }));
+    $("erase").hidden = disks.length === 0;
+    if (disks.length === 0 && !installing) $("error").textContent = "there's no disk to install agentv on";
+    $("go").disabled = !picked || !TOKEN;
+    if (!TOKEN && !installing) $("error").textContent = "scan the code on the tv to set it up from this phone";
+  }
+
+  async function send(path, disk) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ disk, token: TOKEN }),
+    });
+    const answer = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(answer.error || "the tv didn't answer");
+  }
+
+  async function pick(path) {
+    picked = path;
+    $("error").textContent = "";
+    draw();
+    if (TOKEN) send("/api/first/pick", path).catch(() => {});
+  }
+
+  $("go").onclick = async () => {
+    $("go").disabled = true;
+    try {
+      await send("/api/first/install", picked);
+      installing = true;
+      draw();
+    } catch (error) {
+      $("error").textContent = error.message;
+      $("go").disabled = false;
+    }
+  };
+
+  // The TV's list, every two seconds. Once the box restarts, this page goes
+  // quiet, then the installed box answers here instead, and its own page
+  // takes over.
+  async function look() {
+    try {
+      const response = await fetch("/api/first", { cache: "no-store" });
+      if (response.status === 404 && installing) {
+        location.replace("/");
+        return;
+      }
+      const state = await response.json();
+      away = 0;
+      disks = state.disks || [];
+      if (!disks.some((d) => d.path === picked)) picked = state.selected || (disks[0] && disks[0].path) || null;
+      if (state.step === 2) installing = true;
+      draw();
+    } catch {
+      away += 1;
+    }
+    setTimeout(look, 2000);
+  }
+  draw();
+  look();
+</script>
+</body>
+</html>

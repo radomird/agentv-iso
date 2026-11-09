@@ -45,7 +45,11 @@ check "pacman takes AgenTV from this run's own packages" \
   ssh_guest "grep -A3 '^\[agentv\]' /etc/pacman.conf | grep -qx 'Server = $server'"
 # The box reads the run's repository, its signature checked against
 # agentv-keyring's key, and finds the build it has on it: nothing newer.
-ssh_sudo "pacman -Sy" >"$RUN_DIR/sync.log" 2>&1 || { tail -n 20 "$RUN_DIR/sync.log"; }
+# -Syy, so pacman reads the run's database whatever the dates say. A box
+# from the night has just read edge's, and when edge was published after
+# this run built its packages, plain -Sy kept edge's database as the newer
+# one and checked it against the run's signature, which failed.
+ssh_sudo "pacman -Syy" >"$RUN_DIR/sync.log" 2>&1 || { tail -n 20 "$RUN_DIR/sync.log"; }
 offered=$(ssh_guest "pacman -Sl agentv" 2>/dev/null | awk '$2 == "agentv" { print $3 }')
 check "and finds the build it has, agentv $installed (offered: ${offered:-none})" test "$offered" = "$installed"
 

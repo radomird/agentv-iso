@@ -256,6 +256,34 @@ expect_fail "a file with an unusual name is still scanned" "no em dashes"
 printf 'fine\n' >"$(printf 'two\nlines')"
 expect_fail "a file name with a newline fails" "file names have no control characters"
 
+# --- A base on a sibling line -----------------------------------------------
+
+# Upstream cuts 1.5.0 from before 1.0.0's last commit, beside it, and the fork
+# moves its base there as a merge with the tag's tree plus AgenTV's files. The
+# old line's own commits, em dash and all, are still in the fork's history,
+# but they're upstream's, not AgenTV's.
+first=$(git rev-list --max-parents=0 HEAD)
+git switch -q --detach "$first"
+git commit -q --allow-empty -m "$(printf 'Upstream on the old line \xe2\x80\x94 not ours')"
+old_line=$(git rev-parse HEAD)
+git switch -q --detach "$first"
+git commit -q --allow-empty -m "Upstream 1.5.0"
+git tag v1.5.0
+git switch -q main
+# The fork has followed the old line to its newest release, also v1.0.0 here.
+git merge -q --no-edit -m "Merge the old line" "$old_line"
+git tag -f v1.0.0 "$old_line" >/dev/null
+git merge -q --no-edit -s ours -m "Merge Upstream 1.5.0, a sibling" v1.5.0
+printf 'v1.5.0\n' >.github/omarchy-base
+git commit -qam "Move the base to 1.5.0"
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "an earlier base's own commits aren't AgenTV's" "$output"
+pass "an earlier base's own commits aren't AgenTV's"
+
+git commit -q --allow-empty -m "$(printf 'AgenTV on 1.5 \xe2\x80\x94 ours')"
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) && fail "AgenTV's commits on the new base are still scanned" "$output"
+[[ $output == *"not ok - no em dashes"* ]] || fail "AgenTV's commits on the new base are still scanned" "$output"
+pass "AgenTV's commits on the new base are still scanned"
+
 # --- A repo of AgenTV's own has no Omarchy base ----------------------------
 
 own="$SANDBOX/own"
