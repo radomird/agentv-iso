@@ -140,9 +140,19 @@ power_button
 wait_for_ssh 180 failure-sleep-wake-ssh-timeout || { check "the power button wakes the box" false; stop_vm; finish; }
 sleep 5
 check "the kernel went into a suspend and came out of it" test "$(entries)-$(exits)" = "1-1"
-screen_log >"$RUN_DIR/screen-journal-1.log"
-check "the screen daemon heard the box wake" grep -q "the box woke from sleep" "$RUN_DIR/screen-journal-1.log"
-check "T13.2 the power button wakes it to the ambient screen" test "$(front '.ambient')" = "true"
+# The screen daemon notices at its next look, within 15 s, then looks for the
+# TV for 10 s. A pointer that moves as the box wakes can end the ambient
+# screen meanwhile, and it's back once the TV is found still off.
+heard_wake() {
+  screen_log >"$RUN_DIR/screen-journal-1.log"
+  grep -q "the box woke from sleep" "$RUN_DIR/screen-journal-1.log"
+}
+on_ambient() { [[ $(front '.ambient') == "true" && $(front '.output') == "off" ]]; }
+waited=$SECONDS
+until heard_wake || (( SECONDS - waited > 45 )); do sleep 3; done
+check "the screen daemon heard the box wake" heard_wake
+until on_ambient || (( SECONDS - waited > 75 )); do sleep 3; done
+check "T13.2 the power button wakes it to the ambient screen, with the TV still dark" on_ambient
 
 # Awake for the hour (shortened) again, it sleeps again, and a key wakes it.
 if how=$(asleep 240); then
