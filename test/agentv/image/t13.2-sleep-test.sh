@@ -138,6 +138,9 @@ sleep 10
 # The power button wakes it, to the ambient screen.
 power_button
 wait_for_ssh 180 failure-sleep-wake-ssh-timeout || { check "the power button wakes the box" false; stop_vm; finish; }
+# The shortened hour would put it back to sleep while the check looks, so
+# it's longer until then.
+guest "agentv screen sleep-after 900" >>"$RUN_DIR/screen.log" 2>&1 || true
 sleep 5
 check "the kernel went into a suspend and came out of it" test "$(entries)-$(exits)" = "1-1"
 # The screen daemon notices at its next look, within 15 s, then looks for the
@@ -152,7 +155,16 @@ waited=$SECONDS
 until heard_wake || (( SECONDS - waited > 45 )); do sleep 3; done
 check "the screen daemon heard the box wake" heard_wake
 until on_ambient || (( SECONDS - waited > 75 )); do sleep 3; done
-check "T13.2 the power button wakes it to the ambient screen, with the TV still dark" on_ambient
+screen_status >"$RUN_DIR/status-woken.json"
+if ! on_ambient; then
+  log "After the wake: $(jq -c '{ambient, output, tv, sleep}' "$RUN_DIR/status-woken.json" 2>/dev/null)"
+  screen_log | tail -n 20 >"$RUN_DIR/screen-journal-woken.log"
+  while read -r line; do log "  $line"; done <"$RUN_DIR/screen-journal-woken.log"
+fi
+check "T13.2 the power button wakes it to the ambient screen" jq -e '.ambient == true' "$RUN_DIR/status-woken.json"
+check "and with the TV still off, the output goes off again" jq -e '.output == "off"' "$RUN_DIR/status-woken.json"
+# Back to the shortened hour: awake longer than that by now, it sleeps again.
+guest "agentv screen sleep-after 120" >>"$RUN_DIR/screen.log" 2>&1 || true
 
 # Awake for the hour (shortened) again, it sleeps again, and a key wakes it.
 if how=$(asleep 240); then
