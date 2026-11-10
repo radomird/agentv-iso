@@ -12,6 +12,8 @@
 # - Avahi, which the TV finds the home's servers with, and the name
 #   lookups of systemd-resolved and the TV's own Chromium;
 # - NetworkManager's DHCP clients;
+# - systemd-timesyncd while it asks for the time: its own socket, on a port
+#   the kernel picks, there until the answer comes;
 # - the daemon's look for servers, UDP 3006 to 3009, only while it looks;
 # - sshd, which this test's own harness turns on to reach the VM. A box
 #   has it off (NUC-CHECKS has the check on a real one).
@@ -84,6 +86,12 @@ allowed() {
   # containers. With Docker off no device has that address, so nothing
   # reaches it. It's Omarchy's file, so it stays.
   [[ $port == 53 && $addr == "172.17.0.1" && $name == systemd-resolve* ]] && return 0
+  # systemd-timesyncd asking the time (seen on a run of 2026-11-10, in two
+  # lists a minute apart): a UDP socket of its own on a port the kernel
+  # picks, 32768 and up, open until the time server answers or it gives up.
+  # It isn't a server, and the firewall lets nothing in to it but that
+  # answer. ss cuts the name short.
+  [[ $proto == "udp" && $name == systemd-timesyn* ]] && (( port >= 32768 )) && return 0
   # With the hotspot open: dnsmasq, on the hotspot's address and device only.
   if [[ -n $HOTSPOT_IF && $name == "dnsmasq" ]]; then
     [[ $port == 53 && $addr == "10.42.0.1" ]] && return 0
