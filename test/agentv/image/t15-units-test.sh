@@ -18,20 +18,18 @@
 #   listed so a new unit has to be put in a class on purpose.
 # A unit that isn't in a class fails the check: say which it is.
 #
-# TIGHTEN AFTER THE FIRST RUN. The ceilings below are set from reading the
-# unit files, not from a run. The table this prints (and units.txt in the
-# run's folder) has every unit's real score: bring SANDBOXED_MAX and
-# KEPT_IN_MAX down to just above the highest score in their class, or give
-# a unit its own line in CEILING.
+# The ceilings sit just above what the first run on a box scored
+# (2026-11-10). The table this prints, and units.txt in the run's folder,
+# has every unit's score: raise a ceiling only with a reason.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
-SANDBOXED_MAX=7.0 # tighten: first guess, the daemon and the router should land near 4 to 6
-KEPT_IN_MAX=9.2   # tighten: first guess, root with ProtectSystem= and a few paths
-ROOT_MAX=10       # systemd's own top of the scale
+SANDBOXED_MAX=4.0 # the builder and the router score 2.6 to 3.6
+KEPT_IN_MAX=9.0   # they score 8.7 to 8.8
+ROOT_MAX=9.7      # they score 9.0 to 9.6
 # A unit that's meant to be sandboxed and scores this or more has lost its
 # sandbox, whatever the ceilings above have been set to.
 EXPOSED=9.0
@@ -43,7 +41,9 @@ ROOT_HELPERS=(agentv-firstboot agentv-update-check agentv-update-tv agentv-updat
   agentv-go-back-cleanup agentv-hotspot agentv-hotspot-boot agentv-hotspot-drop agentv-share agentv-shares
   agentv-wake agentv-app-package@ agentv-boot-splash-release)
 # A unit's own ceiling, when its class's is too loose or too tight for it.
-declare -A CEILING=()
+# The daemon forks app workers and reads the GPU, so it keeps more than the
+# router does. It scored 6.3.
+declare -A CEILING=([agentv-daemon]=6.5)
 
 start_vm_from_base
 wait_for_ssh 300 failure-t15-units-ssh-timeout || exit 1
@@ -51,9 +51,11 @@ passwordless_sudo
 wait_tv 240 >/dev/null || true
 
 # Every agentv-* service the package brings. A template is scored as an
-# instance of it, since only an instance has settings to score.
+# instance of it, since only an instance has settings to score. A unit
+# systemd-run made for one job (the splash's two minute fallback) says
+# "transient" and isn't the package's, so it's left out.
 ssh_guest "systemctl list-unit-files 'agentv-*' --type=service --no-legend --no-pager" >"$RUN_DIR/unit-files.txt" 2>&1 || true
-mapfile -t units < <(awk '{ sub(/\.service$/, "", $1); print $1 }' "$RUN_DIR/unit-files.txt" | sort -u)
+mapfile -t units < <(awk '$2 != "transient" { sub(/\.service$/, "", $1); print $1 }' "$RUN_DIR/unit-files.txt" | sort -u)
 check "the box has AgenTV's services to score" test "${#units[@]}" -ge 10
 
 : >"$RUN_DIR/units.txt"

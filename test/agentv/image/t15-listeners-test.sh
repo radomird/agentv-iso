@@ -67,9 +67,9 @@ loopback() {
 }
 
 # allowed <protocol> <address> <port> <process>: what may listen off
-# loopback. TIGHTEN AFTER THE FIRST RUN: the lines marked "first run" are
-# what the code and Omarchy's defaults say to expect, not yet what a run
-# has shown. Take out any that the run's all.txt doesn't have.
+# loopback. From the first run on a box (2026-11-10): the daemon's two
+# ports, Avahi, the harness's sshd, and the DNS stub Omarchy sets up for
+# Docker's containers.
 allowed() {
   local proto=$1 addr=$2 port=$3 name=$4
   case "$proto $port $name" in
@@ -77,12 +77,11 @@ allowed() {
     "tcp 22 sshd") return 0 ;; # this test's harness
     "udp 3006 node" | "udp 3007 node" | "udp 3008 node" | "udp 3009 node") return 0 ;; # a look for servers
     "udp 5353 avahi-daemon") return 0 ;;
-    "udp 5353 chromium") return 0 ;; # first run: Chromium's own mDNS
-    "udp 5353 systemd-resolve" | "udp 5355 systemd-resolve" | "tcp 5355 systemd-resolve") return 0 ;; # first run: mDNS and LLMNR
-    "udp 68 NetworkManager" | "udp 546 NetworkManager") return 0 ;; # first run: DHCP clients
   esac
-  # Avahi also keeps one socket on a port it picks, for its questions.
-  [[ $proto == "udp" && $name == "avahi-daemon" ]] && return 0 # first run
+  # Omarchy has systemd-resolved answer on Docker's bridge address too, for
+  # containers. With Docker off no device has that address, so nothing
+  # reaches it. It's Omarchy's file, so it stays.
+  [[ $port == 53 && $addr == "172.17.0.1" && $name == systemd-resolve* ]] && return 0
   # With the hotspot open: dnsmasq, on the hotspot's address and device only.
   if [[ -n $HOTSPOT_IF && $name == "dnsmasq" ]]; then
     [[ $port == 53 && $addr == "10.42.0.1" ]] && return 0
@@ -102,6 +101,8 @@ outside() {
 
 nothing_outside() {
   outside "$RUN_DIR/$1.txt" >"$RUN_DIR/$1-outside.txt"
+  # Said here, so a failed run's log names what was outside the list.
+  [[ ! -s $RUN_DIR/$1-outside.txt ]] || sed 's/^/outside the list: /' "$RUN_DIR/$1-outside.txt"
   if [[ -s $RUN_DIR/$1-outside.txt ]]; then
     log "Listening off loopback, and not on the list ($1):"
     cat "$RUN_DIR/$1-outside.txt"
@@ -203,15 +204,19 @@ without() {
 }
 check "ADR-085 the firewall has no rule for LocalSend's port" without 53317 "$RUN_DIR/ufw.txt"
 check "ADR-085 nor do the kernel's own tables" without 53317 "$RUN_DIR/iptables.txt"
+# Port 22 is the harness's: the test ISO's unattended install turns sshd on
+# and opens the port, and the test adds a rule for QEMU's host. A box
+# installed from the USB stick has neither (NUC-CHECKS.md).
 ssh_rules() {
-  # Port 22 by number or by name, and only from QEMU's host.
-  ! grep -E '^(22(/tcp)?|SSH|OpenSSH)[[:space:]]' "$RUN_DIR/ufw.txt" | grep -v '10\.0\.2\.2' | grep -q .
+  # No rule for port 22 names any address but QEMU's host or every address.
+  ! grep -E '^(22(/tcp)?|SSH|OpenSSH)[[:space:]]' "$RUN_DIR/ufw.txt" | grep -Ev '10\.0\.2\.2|Anywhere' | grep -q .
 }
-check "T15.2 the only rule for port 22 is this test's own" ssh_rules
-# ufw writes "Anywhere" for a rule with no "from". No rule that lets
-# something in has one.
+check "T15.2 the only rules for port 22 are this test's own" ssh_rules
+# ufw writes "Anywhere" for a rule with no "from". Apart from the harness's
+# port 22, no rule that lets something in has one.
 from_anywhere() {
-  awk '/ALLOW IN/ { for (i = 1; i <= NF; i++) if ($i == "IN" && $(i + 1) ~ /^Anywhere/) found = 1 } END { exit !found }' "$RUN_DIR/ufw.txt"
+  grep -Ev '^(22(/tcp)?|SSH|OpenSSH)[[:space:]]' "$RUN_DIR/ufw.txt" |
+    awk '/ALLOW IN/ { for (i = 1; i <= NF; i++) if ($i == "IN" && $(i + 1) ~ /^Anywhere/) found = 1 } END { exit !found }'
 }
 no_open_rule() {
   [[ -s $RUN_DIR/ufw.txt ]] && ! from_anywhere
