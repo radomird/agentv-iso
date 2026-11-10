@@ -143,7 +143,7 @@ keys right up up up up up up right
 # reading off, in dark themes and light. It reads JetBrains Mono's u as a v
 # at times, so "avrora" counts too.
 aurora_box() {
-  local shot="$RUN_DIR/.box.ppm" w h started=$SECONDS
+  local shot="$RUN_DIR/.box.ppm" w h crop ch cy started=$SECONDS
   while (( SECONDS - started < $1 )); do
     rm -f "$shot"
     screendump "$shot"
@@ -154,8 +154,16 @@ aurora_box() {
       h=$(( h * 1920 / w ))
       w=1920
     fi
-    if [[ -n ${w:-} ]] && magick "$shot" -resize '1920x1080>' -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
-      tesseract "$RUN_DIR/.box.png" - --psm 7 >"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
+    # Its row sits a little lower on a 16:9 screen than on a 16:10 one, and
+    # tesseract reads the name only with the box's edges just so, so a few
+    # crops of the same screenshot are read.
+    : >"$RUN_DIR/success-S5.7-settings.txt"
+    if [[ -n ${w:-} ]]; then
+      for crop in "6 17" "7 16" "6 15"; do
+        read -r ch cy <<<"$crop"
+        magick "$shot" -resize '1920x1080>' -crop "$(( w * 26 / 100 ))x$(( h * ch / 100 ))+$(( w * 65 / 100 ))+$(( h * cy / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null &&
+          tesseract "$RUN_DIR/.box.png" - --psm 7 >>"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
+      done
       grep -Eqi "a[uv]rora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
     fi
     sleep 1
