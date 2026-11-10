@@ -1,36 +1,235 @@
 #!/bin/bash
 
-# agentv:summary=Put an ISO and its checksum where people download it
-# agentv:args=<iso>
+# agentv:summary=Put an ISO where people download it, under its channel's name
+# agentv:args=names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale | clean
 
-# Uploads an ISO and the .sha256 file beside it to AgenTV's Cloudflare R2
-# bucket, at iso/<name>.iso, and prints the link people download it from.
-# The ISO is over GitHub's 2 GiB cap for release files, so it lives there
-# instead. R2 speaks S3, so the AWS CLI on GitHub's runners does the upload,
-# in parts. The bucket and its keys come from the environment, which CI
-# fills from the repo's secrets and variables. None of them is in the repo.
+# AgenTV's ISOs live in a Cloudflare R2 bucket, since an ISO is over GitHub's
+# 2 GiB cap for release files. The bucket's iso/ folder holds three, and
+# only three: the edge build, the latest stable release and the latest
+# release candidate. Each goes by a name that doesn't change with its
+# version, so a link to it keeps working:
+#
+#   iso/agentv-<channel>.iso             the ISO (edge, stable or rc)
+#   iso/agentv-<channel>.iso.sha256      its checksum, which names that file
+#   iso/agentv-<channel>.iso.sha256.sig  the checksum, signed with AgenTV's key
+#   iso/agentv-<channel>.version         which version it is, on one line
+#
+# Publishing one replaces the one before it. What's left to do is take out
+# what doesn't belong: ISOs published under their version's name before
+# this, and strays.
+#
+#   names <channel> <iso.sha256> <dir>
+#       Writes the checksum file and the version note for the published
+#       name into <dir>, from the checksum file a build left beside its ISO
+#       (agentv-1.0.0-x86_64.iso.sha256). Needs no keys. The checksum file
+#       is what gets signed, before the upload.
+#   upload <channel> <iso> <dir>
+#       Checks the ISO against <dir>'s checksum, uploads the ISO and what's
+#       in <dir>, then asks the bucket for each file's size and compares.
+#   stale
+#       Prints what clean would remove, one key a line, and removes nothing.
+#   clean
+#       Removes those, one at a time, each by its exact key.
+#
+# stale and clean only ever name a key that is right under iso/, is an ISO,
+# an ISO's checksum, a checksum's signature or a version note, and isn't one
+# of the three sets above. If the bucket can't be listed, if the listing
+# doesn't show the stable ISO, or if more than AGENTV_ISO_STALE_MAX (20)
+# keys would go, nothing is removed.
+#
+# R2 speaks S3, so the AWS CLI on GitHub's runners does the work. The bucket
+# and its keys come from the environment, which CI fills from the repo's
+# secrets and variables. None of them is in the repo.
 
 set -euo pipefail
 
-iso="${1:?usage: agentv-iso-publish <iso>}"
-: "${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID to the ID of the Cloudflare account}"
-: "${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID to the access key of the R2 token}"
-: "${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY to the secret of the R2 token}"
-: "${R2_BUCKET:?set R2_BUCKET to the name of the bucket}"
-: "${ISO_URL:?set ISO_URL to the public address of the bucket}"
+usage() {
+  echo "usage: agentv-iso-publish names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale | clean" >&2
+  exit 2
+}
 
-sum="$iso.sha256"
-[[ -f $iso && -f $sum ]] || { echo "agentv-iso-publish: need $iso and $sum" >&2; exit 1; }
-# The checksum file names the ISO, so check it before anything leaves.
-(cd "$(dirname "$iso")" && sha256sum --quiet -c "$(basename "$sum")")
+CHANNELS=(edge stable rc)
+PREFIX=iso/
 
-export AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=auto
-# R2 doesn't take the checksums newer AWS CLIs add to every upload.
-export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+channel_ok() {
+  local channel
+  for channel in "${CHANNELS[@]}"; do
+    [[ $1 == "$channel" ]] && return 0
+  done
+  echo "agentv-iso-publish: the channel is edge, stable or rc, not '$1'" >&2
+  return 1
+}
 
-for file in "$iso" "$sum"; do
-  aws s3 cp --endpoint-url "$endpoint" --only-show-errors "$file" "s3://$R2_BUCKET/iso/$(basename "$file")"
-done
+# The four keys a channel's ISO goes by.
+channel_keys() {
+  printf '%s\n' "${PREFIX}agentv-$1.iso" "${PREFIX}agentv-$1.iso.sha256" "${PREFIX}agentv-$1.iso.sha256.sig" "${PREFIX}agentv-$1.version"
+}
 
-echo "${ISO_URL%/}/iso/$(basename "$iso")"
+r2() {
+  : "${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID to the ID of the Cloudflare account}"
+  : "${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID to the access key of the R2 token}"
+  : "${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY to the secret of the R2 token}"
+  : "${R2_BUCKET:?set R2_BUCKET to the name of the bucket}"
+  export AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=auto
+  # R2 doesn't take the checksums newer AWS CLIs add to every upload.
+  export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+  endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+}
+
+names() {
+  local channel=$1 sum=$2 dir=$3 hash file version
+  channel_ok "$channel"
+  [[ -f $sum ]] || { echo "agentv-iso-publish: no checksum file at $sum" >&2; exit 1; }
+  # One line, "<sha256>  <name>.iso", as sha256sum writes it.
+  [[ $(wc -l <"$sum") == 1 ]] || { echo "agentv-iso-publish: $sum isn't one ISO's checksum" >&2; exit 1; }
+  read -r hash file <"$sum"
+  file=${file#\*}
+  if [[ ! $hash =~ ^[0-9a-f]{64}$ || ! $file =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64\.iso$ ]]; then
+    echo "agentv-iso-publish: $sum isn't an AgenTV ISO's checksum" >&2
+    exit 1
+  fi
+  # agentv-1.0.0-x86_64.iso is 1.0.0, agentv-edge-2026.11.10-abc1234-x86_64.iso
+  # is edge-2026.11.10-abc1234.
+  version=${file#agentv-}
+  version=${version%-x86_64.iso}
+  mkdir -p "$dir"
+  printf '%s  agentv-%s.iso\n' "$hash" "$channel" >"$dir/agentv-$channel.iso.sha256"
+  printf '%s\n' "$version" >"$dir/agentv-$channel.version"
+  rm -f "$dir/agentv-$channel.iso.sha256.sig"
+  echo "agentv-$channel.iso is $version, sha256 $hash"
+}
+
+upload() {
+  local channel=$1 iso=$2 dir=$3 hash name file size served
+  channel_ok "$channel"
+  : "${ISO_URL:?set ISO_URL to the public address of the bucket}"
+  r2
+  name="agentv-$channel"
+  for file in "$dir/$name.iso.sha256" "$dir/$name.version" "$iso"; do
+    [[ -s $file ]] || { echo "agentv-iso-publish: need $file" >&2; exit 1; }
+  done
+  # The checksum file names the published name, so check the ISO by its
+  # hash before anything leaves.
+  read -r hash _ <"$dir/$name.iso.sha256"
+  if [[ $(sha256sum "$iso" | cut -d' ' -f1) != "$hash" ]]; then
+    echo "agentv-iso-publish: $iso isn't the ISO $dir/$name.iso.sha256 is the checksum of" >&2
+    exit 1
+  fi
+
+  # The ISO first, then what describes it. With no signature this time, the
+  # one that went with the ISO before goes: it isn't this checksum's.
+  local -a files=("$iso:$name.iso" "$dir/$name.iso.sha256:$name.iso.sha256")
+  if [[ -s $dir/$name.iso.sha256.sig ]]; then
+    files+=("$dir/$name.iso.sha256.sig:$name.iso.sha256.sig")
+  fi
+  files+=("$dir/$name.version:$name.version")
+  for file in "${files[@]}"; do
+    aws s3 cp --endpoint-url "$endpoint" --only-show-errors "${file%%:*}" "s3://$R2_BUCKET/$PREFIX${file##*:}" >&2
+  done
+  if [[ ! -s $dir/$name.iso.sha256.sig ]]; then
+    aws s3api delete-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$name.iso.sha256.sig" >&2
+  fi
+
+  # What the bucket has now, by size.
+  for file in "${files[@]}"; do
+    size=$(stat -c %s "${file%%:*}")
+    served=$(aws s3api head-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX${file##*:}" \
+      --query ContentLength --output text)
+    if [[ $served != "$size" ]]; then
+      echo "agentv-iso-publish: the bucket's $PREFIX${file##*:} is $served bytes, expected $size" >&2
+      exit 1
+    fi
+  done
+
+  echo "${ISO_URL%/}/$PREFIX$name.iso"
+}
+
+# Prints the keys that don't belong, one a line. Fails, printing none, when
+# the listing can't be trusted or too many would go.
+stale() {
+  local max=${AGENTV_ISO_STALE_MAX:-20} listing key channel
+  local -a keys keep=() gone=()
+  r2
+  [[ $max =~ ^[0-9]+$ ]] || { echo "agentv-iso-publish: AGENTV_ISO_STALE_MAX is a number" >&2; return 1; }
+
+  if ! listing=$(aws s3api list-objects-v2 --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --prefix "$PREFIX" \
+    --query 'Contents[].Key' --output json); then
+    echo "agentv-iso-publish: couldn't list the bucket's $PREFIX, so nothing is removed" >&2
+    return 1
+  fi
+  if ! jq -e 'type == "array" and all(.[]; type == "string")' <<<"$listing" >/dev/null 2>&1; then
+    echo "agentv-iso-publish: the bucket's listing of $PREFIX isn't a list of keys, so nothing is removed" >&2
+    return 1
+  fi
+  mapfile -t keys < <(jq -r '.[]' <<<"$listing")
+
+  for channel in "${CHANNELS[@]}"; do
+    mapfile -t -O "${#keep[@]}" keep < <(channel_keys "$channel")
+  done
+  # The stable ISO is always there once the first one is published under its
+  # new name. A listing without it is the wrong bucket, the wrong folder, a
+  # listing gone wrong, or a bucket that still has its latest release only
+  # under its version's name, which must not go before it's published again.
+  local found=0
+  for key in "${keys[@]}"; do
+    [[ $key == "${PREFIX}agentv-stable.iso" ]] && found=1
+  done
+  if (( ! found )); then
+    echo "agentv-iso-publish: the listing of $PREFIX has no agentv-stable.iso, so nothing is removed. Publish the latest release as stable first." >&2
+    return 1
+  fi
+
+  for key in "${keys[@]}"; do
+    # Right under iso/, a plain name, and nothing else in the bucket.
+    [[ $key =~ ^iso/[A-Za-z0-9._-]+$ ]] || continue
+    # An ISO, its checksum, the checksum's signature, or a version note.
+    [[ $key =~ \.iso(\.sha256(\.sig)?)?$ || $key =~ ^iso/agentv-[A-Za-z0-9._-]+\.version$ ]] || continue
+    # Never one of the three sets.
+    printf '%s\n' "${keep[@]}" | grep -qxF -- "$key" && continue
+    gone+=("$key")
+  done
+
+  if (( ${#gone[@]} > max )); then
+    echo "agentv-iso-publish: ${#gone[@]} keys would go, more than $max, so nothing is removed. Look at the bucket first:" >&2
+    printf '  %s\n' "${gone[@]}" >&2
+    return 1
+  fi
+  (( ${#gone[@]} == 0 )) || printf '%s\n' "${gone[@]}"
+}
+
+clean() {
+  local list key
+  local -a gone
+  r2
+  list=$(stale) || exit 1
+  if [[ -z $list ]]; then
+    echo "Nothing to remove: iso/ has the three ISOs and what goes with them."
+    return 0
+  fi
+  mapfile -t gone <<<"$list"
+  for key in "${gone[@]}"; do
+    # Once more, right before it goes: under iso/, a plain name, no wildcard.
+    [[ $key =~ ^iso/[A-Za-z0-9._-]+$ ]] || { echo "agentv-iso-publish: won't remove '$key'" >&2; exit 1; }
+    aws s3api delete-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$key" >/dev/null
+    echo "Removed $key"
+  done
+}
+
+case ${1:-} in
+  names) (( $# == 4 )) || usage; names "$2" "$3" "$4" ;;
+  upload) (( $# == 4 )) || usage; upload "$2" "$3" "$4" ;;
+  stale)
+    (( $# == 1 )) || usage
+    list=$(stale) || exit 1
+    if [[ -z $list ]]; then
+      echo "Nothing would be removed: iso/ has the three ISOs and what goes with them."
+    else
+      echo "These would be removed:"
+      while IFS= read -r key; do
+        echo "  $key"
+      done <<<"$list"
+    fi
+    ;;
+  clean) (( $# == 1 )) || usage; clean ;;
+  *) usage ;;
+esac
