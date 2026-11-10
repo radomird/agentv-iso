@@ -1,0 +1,54 @@
+name: The installer went wrong
+description: Tell me what happened with the USB stick
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling me. Please leave out keys, passwords and anything from your own accounts.
+
+        Found a security problem? Don't write it here. [Tell me privately](https://github.com/radomird/agentv-iso/security/advisories/new) instead.
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: How far it got, and what the TV showed when it stopped. A photo of the screen helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: false
+
+  - type: input
+    id: release
+    attributes:
+      label: AgenTV release
+      description: The number in the ISO's file name.
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: box
+    attributes:
+      label: Box
+      description: The make and model.
+      placeholder: e.g. Intel NUC8i5BEH
+    validations:
+      required: true
+
+  - type: dropdown
+    id: way
+    attributes:
+      label: How did you go through the first screen?
+      options:
+        - From my phone
+        - With a keyboard
+        - I didn't get that far
+    validations:
+      required: false
