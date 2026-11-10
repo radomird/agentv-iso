@@ -82,7 +82,7 @@ check "S5.5 the phone is asked to accept Claude's terms for a plan" \
 phone /api/phone/terms '{"provider": "claude", "path": "plan"}' >"$RUN_DIR/accepted.json" || true
 check "S5.5 the box records the acceptance: which terms, who, on which phone, and when" \
   until_json /api/ai '.accepted.provider == "claude" and .accepted.path == "plan" and .accepted.by.phone == "image check" and (.accepted.at | test("^[0-9]{4}-")) and (.accepted.terms[0].id == "anthropic-consumer-terms")' 10
-ssh_sudo "cat /var/lib/private/agentv/daemon/terms.json 2>/dev/null || cat /var/lib/agentv/daemon/terms.json" >"$RUN_DIR/terms.json" 2>&1 || true
+ssh_sudo "cat /var/lib/agentv/daemon/terms.json" >"$RUN_DIR/terms.json" 2>&1 || true
 check "S5.5 and keeps it in terms.json" jq -e 'length == 1 and .[0].by.phone == "image check"' "$RUN_DIR/terms.json"
 
 # Then Claude Code arrives, through Omarchy's own wrapper.
