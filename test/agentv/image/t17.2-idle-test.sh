@@ -74,7 +74,8 @@ log "Leaving the TV alone, with the app paused"
 check "T17.2 idle shows the ambient screen" until_status '.ambient' 150
 sleep 12
 check "T17.2 home is what's in front, on its ambient screen" test "$(front '[.ambient, .front.role] | map(tostring) | join(" ")')" = "true home"
-check "T17.2 no terminal and no effect runs for it" guest "! pgrep -x ttfx && ! pgrep -f org.agentv.screensaver"
+# The brackets keep pgrep from finding the shell that runs this very line.
+check "T17.2 no terminal and no effect runs for it" guest "! pgrep -x ttfx && ! pgrep -f 'org[.]agentv[.]screensaver'"
 # Its date, in the corner over the background's picture.
 check "T17.2 the ambient screen is on the TV (OCR)" ocr_finds success-T17.2-idle '(mon|tues|wednes|thurs|fri|satur|sun)day' 15
 capture_console "success-T17.2-idle"
