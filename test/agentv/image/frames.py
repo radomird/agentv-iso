@@ -43,6 +43,13 @@ MENU_WORDS = re.compile(r"arrows\s+select|enter\s+boot|blank\s+entry|firmware\s+
 # check was written to catch, gave 1.4 s and 4.2 s there, and t2.1-boot
 # checks that order in the boot's journal as well.
 SESSION_BLACK_S = 2.0
+# The same, when the session's first frame is at another resolution than the
+# splash's. The TV session starts at the TV's kept mode (its size), which
+# can differ from the one the kernel and the splash run at, and then the
+# screen changes resolution, as a TV does when its input does: 1.9 to 2.3 s
+# in the VM, from QEMU's 1280 x 800 to 1920 x 1080. Booting at the kept
+# mode would take it away (Q274).
+SESSION_RESIZE_S = 3.5
 # A word, for the text rule: three letters or more. OCR reads a picture's
 # edges as one or two letters at times, never as a word.
 WORD = re.compile(r"[A-Za-z]{3,}")
@@ -148,6 +155,10 @@ def record(args):
 
 def run(command):
     return subprocess.run(command, capture_output=True, text=True).stdout
+
+
+def size(path):
+    return run(["magick", "identify", "-format", "%wx%h", path]).strip()
 
 
 def rgb(hex_colour):
@@ -298,13 +309,21 @@ def analyse(args):
     # stretch of black right before the session's first frame is said
     # apart from the gaps. Any other black or white still is one.
     session_black = []
+    resized = None
     first_black = next((k for k, f in enumerate(since_splash) if f["kind"] == "black"), None)
     if first_black is not None:
         k = first_black
         while k < len(since_splash) and since_splash[k]["kind"] == "black":
             k += 1
         stretch = since_splash[first_black:k]
-        if k < len(since_splash) and since_splash[k]["kind"] in ("background", "splash") and sum(seconds(f) for f in stretch) <= SESSION_BLACK_S:
+        allowed = SESSION_BLACK_S
+        if first_black > 0 and k < len(since_splash):
+            was = size(os.path.join(args.out, since_splash[first_black - 1]["file"]))
+            now = size(os.path.join(args.out, since_splash[k]["file"]))
+            if was and now and was != now:
+                resized = f"{was} to {now}"
+                allowed = SESSION_RESIZE_S
+        if k < len(since_splash) and since_splash[k]["kind"] in ("background", "splash") and sum(seconds(f) for f in stretch) <= allowed:
             session_black = stretch
     verdict = {
         "handover": handover is not None,
@@ -314,6 +333,7 @@ def analyse(args):
         "text": [f"{f['file']}: {f['words']}" for f in on_the_way if f["kind"] == "text" and before(f)],
         "gaps": [f"{f['file']} ({f['kind']}, {seconds(f):.1f} s)" for f in since_splash if f not in session_black and (f["kind"] in ("black", "white") or (f["kind"] == "other" and before(f)))],
         "session_black_seconds": round(sum(seconds(f) for f in session_black), 1),
+        "session_resized": resized,
         "background_seconds": round(sum(seconds(f) for f in since_splash if f["kind"] == "background"), 1),
         "boot_loader_at": handover,
         "splash_at": after[first_splash]["t"] if first_splash is not None else None,

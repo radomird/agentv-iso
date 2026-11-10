@@ -2,7 +2,7 @@
 #
 # The home screen (stage 2): once setup is done, the TV shows AgenTV's
 # launcher, which the daemon serves, in the Omarchy theme's colours, with
-# the built-in clock and weather on it (stage 3). The remote's keys move
+# the built-in weather on it (stage 3). The remote's keys move
 # around it, and setting up again brings the welcome page
 # back, and a layout stays as it was left when the box restarts. Layer 4
 # checks the launcher itself in a Chromium (S2.3 to S2.7); this checks it's
@@ -24,7 +24,7 @@ screen_says() {
 
   while (( SECONDS - started < ${3:-30} )); do
     ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
-    if grep -qi "$2" "$RUN_DIR/$1.txt"; then
+    if grep -qiE "$2" "$RUN_DIR/$1.txt"; then
       capture_console "$1"
       return 0
     fi
@@ -46,48 +46,47 @@ check "the TV has the Omarchy theme's colours (its background is ${background:-u
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 check "agentv setup skip marks setup done (daemon /health)" \
   test "$(jq -r '.screen' <<<"$(health)" 2>/dev/null)" = "home"
-check "with setup done, the TV shows the home screen's grid (OCR)" screen_says "success-home-grid" "installed"
+check "with setup done, the TV shows the home screen's grid (OCR)" screen_says "success-home-grid" "$HOME_TEXT"
 check "the home screen has its status bar (OCR)" grep -qi "settings" "$RUN_DIR/success-home-grid.txt"
 check "the home screen is still in front, full screen" \
   test "$(front '[.front.role, .front.fullscreen] | join(" ")')" = "home 2"
 
-# The built-ins come first (stage 3), so the all apps tile's in the first
-# row after them; the focus starts on the first tile.
-check "the built-in clock and weather are on home (OCR)" bash -c "grep -qi clock '$RUN_DIR/success-home-grid.txt' && grep -qi weather '$RUN_DIR/success-home-grid.txt'"
-rights=$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq '[.layout | sort_by(.y, .x)[] | .id] | index("apps") // 0' 2>/dev/null || echo 0)
-for _ in $(seq 1 "$rights"); do
-  guest "agentv input key right" >>"$RUN_DIR/input.log" 2>&1 || true
+# The built-ins come first (stage 3); the focus starts on the first tile.
+check "the built-in weather is on home (OCR)" grep -qi weather "$RUN_DIR/success-home-grid.txt"
+
+# The remote's keys: down from the tiles reaches the bar along the foot,
+# whose first link is Apps, and OK on it opens the apps page; back comes
+# home.
+for key in down down down down left left left; do
+  guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
 done
 sleep 1
-
-# The remote's keys: OK on the all apps tile opens the apps page, back
-# comes home.
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
-check "OK on the all apps tile opens the apps page (OCR)" screen_says "success-home-apps" "on your home" 15
+check "OK on the bar's apps opens the apps page (OCR)" screen_says "success-home-apps" "on your home" 15
 guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
-check "back comes home again (OCR)" screen_says "success-home-back" "installed" 15
+check "back comes home again (OCR)" screen_says "success-home-back" "$HOME_TEXT" 15
 
 # The layout is the daemon's to keep (S2.4): a tile moved stays where it was
 # put when the box restarts, and the TV comes back to home, not setup.
-ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":[{\"id\":\"apps\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' http://127.0.0.1:3000/api/layout" \
+ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":[{\"id\":\"agentv.weather\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' http://127.0.0.1:3000/api/layout" \
   >"$RUN_DIR/layout.json" 2>&1 || true
-log "Restarting the box with the all apps tile moved"
+log "Restarting the box with the weather tile moved"
 ssh_sudo "systemctl reboot" >/dev/null 2>&1 || true
 sleep 15
 wait_for_ssh 300 failure-home-reboot-ssh-timeout || exit 1
 started=$SECONDS
 until [[ $(front '.front.role // ""') == "home" ]] || (( SECONDS - started > 240 )); do sleep 1; done
-check "after a restart the TV comes back to the home screen's grid (OCR)" screen_says "success-home-reboot" "installed" 60
+check "after a restart the TV comes back to the home screen's grid (OCR)" screen_says "success-home-reboot" "$HOME_TEXT" 60
 # What the TV session did after the restart, and which windows it has.
 guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen-after-restart.log" 2>&1 || true
 guest_hyprctl "clients -j" >"$RUN_DIR/clients-after-restart.json" 2>&1 || true
-if ! grep -qi "installed" "$RUN_DIR/success-home-reboot.txt" 2>/dev/null; then
+if ! grep -qiE "$HOME_TEXT" "$RUN_DIR/success-home-reboot.txt" 2>/dev/null; then
   tail -n 40 "$RUN_DIR/screen-after-restart.log"
   jq -c '[.[] | {class, title, workspace: .workspace.name, mapped, hidden, fullscreen}]' "$RUN_DIR/clients-after-restart.json" 2>&1 || true
   screen_status
 fi
 check "S2.4 a moved tile is where it was put after the box restarts" \
-  test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | "\(.id) \(.size)@\(.x),\(.y)"]')" = '["apps s@3,2"]'
+  test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | "\(.id) \(.size)@\(.x),\(.y)"]')" = '["agentv.weather s@3,2"]'
 
 # Setting up again brings the welcome page back, without a restart.
 seen=$(jq -r '.welcome_shown_count // 0' <<<"$(health)" 2>/dev/null || echo 0)

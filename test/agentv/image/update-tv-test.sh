@@ -199,12 +199,11 @@ check "AgenTV's migrations ran in the update from the TV" \
 # Omarchy's update ends by restarting its shell in the session that's
 # running; the TV session stops it again.
 check "after an update from the TV, Omarchy's shell isn't on the TV: no bar, no process (ADR-031)" no_omarchy_shell 30
-# Home is the all apps tile: its "installed" count, or its name, since the
-# toast after Go back sits over the count's corner of the tile.
+# Home, as OCR reads it (tv.sh), with the toast after Go back over it or not.
 screen_home() {
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -qiE "installed|all apps" "$RUN_DIR/$1.txt"
+  grep -qiE "$HOME_TEXT" "$RUN_DIR/$1.txt"
 }
 started=$SECONDS
 until screen_home "success-update-tv-home" || (( SECONDS - started > 120 )); do sleep 5; done

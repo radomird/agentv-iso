@@ -10,7 +10,7 @@
 # Steam, sound card or real screen.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
-source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ssh.sh"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
@@ -46,7 +46,9 @@ check "agentv selftest leaves no hotspot behind" ssh_guest "! nmcli -g NAME conn
 check "agentv selftest ends with every id passing" grep -qx "S0.2 pass, S0.3 pass" "$RUN_DIR/selftest.txt"
 
 # Stage 2 measures the home screen itself, its tiles and UI sounds, so TV
-# setup is marked done first, as it is on the NUC.
+# setup is marked done first, as it is on the NUC, with the box at the
+# output its box step leaves it on.
+check "the box is at 1080p output, as setup leaves a box that can't keep 4K smooth" at_1080p 60
 ssh_guest "bash -lc 'agentv setup skip' </dev/null" >"$RUN_DIR/setup.log" 2>&1 || true
 for _ in $(seq 30); do
   [[ $(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/health" 2>/dev/null | jq -r '.screen // ""' 2>/dev/null) == "home" ]] && break

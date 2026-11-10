@@ -51,6 +51,8 @@ check "the hand-over to root is waiting for setup's apps" test "$(ssh_guest "sys
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 # Where the TV is (ADR-055), on a release that has the step.
 setup_post /api/setup/finish '{"step": "country"}' || true
 setup_post /api/setup/finish '{"step": "ai"}'
@@ -78,6 +80,16 @@ for key in right enter up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
+# A server's app, such as Plex, then asks where its server is, from what
+# the box finds on the network. There's none in the VM, so "set it up
+# later", under "type an address on your phone", carries on.
+if ocr_finds setup-apps-server "set it up later" 15; then
+  capture_console "success-setup-apps-server"
+  for key in down enter; do
+    guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
+    sleep 1
+  done
+fi
 # Continue moves setup on: to its look once that step is there, or home.
 # The steps after this one have checks of their own, so it skips them.
 check "continue moves setup on from its apps" until_json /api/setup '.setup.done or (.setup.step != "apps")' 60
