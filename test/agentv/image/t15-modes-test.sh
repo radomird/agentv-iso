@@ -54,7 +54,7 @@ check "nor the daemon's state" cannot "ls /var/lib/private/agentv/daemon"
 # of the builder, with every setting of the real one, the umask too.
 ssh_guest "sudo -u agentv-builder env HOME=/var/lib/agentv/builder bash -c 'mkdir -p ~/.local/bin && printf \"#!/bin/sh\\n\" >~/.local/bin/claude && chmod 755 ~/.local/bin/claude'"
 ssh_guest "sudo mkdir -p '/run/systemd/system/$UNIT.d' && printf '[Service]\nExecStart=\nExecStart=/usr/bin/bash /usr/local/share/agentv-modes-probe.sh\n' | sudo tee '/run/systemd/system/$UNIT.d/probe.conf' >/dev/null && sudo systemctl daemon-reload"
-ssh_guest "sudo install -D -m 644 /dev/stdin /usr/local/share/agentv-modes-probe.sh" <<PROBE
+ssh_guest "sudo mkdir -p /usr/local/share && sudo tee /usr/local/share/agentv-modes-probe.sh >/dev/null && sudo chmod 644 /usr/local/share/agentv-modes-probe.sh" <<PROBE
 #!/bin/bash
 # As agentv-builder, in the build's sandbox: what a build saves.
 mkdir -p $DIR/work/fixtures/pages
