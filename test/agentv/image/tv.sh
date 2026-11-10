@@ -170,7 +170,7 @@ screen_shows_welcome() {
 exec {OCR_LOG_FD}>&2
 
 ocr_finds() {
-  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
+  local started=$SECONDS reads=0 shot="$RUN_DIR/.ocr.ppm" sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
 
   while true; do
     : >"$RUN_DIR/$1.txt"
@@ -190,13 +190,17 @@ ocr_finds() {
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
+    reads=$((reads + 1))
+    (( reads > 1 )) || cp -f "$RUN_DIR/$1.txt" "$RUN_DIR/$1.first.txt" 2>/dev/null || true
     if (( SECONDS - started >= $3 )); then
       # What it read instead, so a failed run's log says what was on the TV.
       # check sends this function's own output nowhere, so it goes to the
       # script's, kept open below.
       {
-        echo "ocr_finds: no \"$2\" in $3 s. The last read:"
-        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -40
+        echo "ocr_finds: no \"$2\" in $3 s, in $reads reads. The first read:"
+        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.first.txt" 2>/dev/null | head -25
+        echo "ocr_finds: the last read:"
+        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -25
       } >&"$OCR_LOG_FD" 2>/dev/null || true
       return 1
     fi
