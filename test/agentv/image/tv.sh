@@ -189,8 +189,12 @@ ocr_finds() {
     fi
     if (( SECONDS - started >= $3 )); then
       # What it read instead, so a failed run's log says what was on the TV.
-      echo "ocr_finds: no \"$2\" in $3 s. The last read:" >&2
-      grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -40 >&2 || true
+      # check sends this function's own output nowhere, so it goes to the
+      # script's.
+      {
+        echo "ocr_finds: no \"$2\" in $3 s. The last read:"
+        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -40
+      } >"/proc/$$/fd/2" 2>/dev/null || true
       return 1
     fi
     sleep 1
