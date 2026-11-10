@@ -89,6 +89,8 @@ fi
 
 # Stopping the daemon takes its workers with it.
 ssh_guest "journalctl -b --no-pager -u agentv-daemon" >"$RUN_DIR/daemon.log" 2>&1 || true
+# Said here, so a failed run's log has bubblewrap's own reason.
+grep -m 5 "sandbox didn't start" "$RUN_DIR/daemon.log" | sed 's/^/the daemon said: /' || true
 check "no app was refused for want of a sandbox" bash -c "! grep -q \"sandbox didn't start\" '$RUN_DIR/daemon.log'"
 ssh_guest "sudo systemctl stop agentv-daemon" >/dev/null 2>&1 || true
 sleep 2
