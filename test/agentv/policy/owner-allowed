@@ -7,3 +7,9 @@
 # GitHub's Sponsor button reads a Sponsors account by its name here. It names
 # the person, not where the repos live, so a move to an organisation keeps it.
 .github/FUNDING.yml
+
+# GitHub's issue chooser and forms need whole addresses for the private
+# security report and the other repos, so these name the owner. A move to an
+# organisation changes them by hand.
+.github/ISSUE_TEMPLATE/bug.yml
+.github/ISSUE_TEMPLATE/config.yml
