@@ -55,7 +55,7 @@ unreadable() {
   ! ssh_guest "cat /var/lib/agentv/daemon/pin.json" >/dev/null 2>&1
 }
 hashed() {
-  ssh_sudo "test -s /var/lib/private/agentv/daemon/pin.json && ! grep -q 4826 /var/lib/private/agentv/daemon/pin.json" >/dev/null 2>&1
+  ssh_sudo "test -s /var/lib/agentv/daemon/pin.json && ! grep -q 4826 /var/lib/agentv/daemon/pin.json" >/dev/null 2>&1
 }
 check "S4.5 the user account can't read the PIN's hash" unreadable
 check "it's there for the daemon, as a hash, not the PIN" hashed

@@ -76,10 +76,10 @@ check "New this week's region follows it" until_json /api/whats-new/settings '.r
 
 # --- A zone zone.tab doesn't list, dropped by hand, changes nothing ---------------
 
-ssh_sudo "printf '{\"zone\":\"Europe/Atlantis\"}' >/var/lib/private/agentv/daemon/zone-drop/zone.json" >>"$RUN_DIR/timezone.log" 2>&1 || true
+ssh_sudo "printf '{\"zone\":\"Europe/Atlantis\"}' >/var/lib/agentv/daemon/zone-drop/zone.json" >>"$RUN_DIR/timezone.log" 2>&1 || true
 sleep 5
 check "a zone zone.tab doesn't list changes nothing" test "$(zone_now)" = "America/New_York"
-check "and its drop is gone" ssh_sudo "test ! -e /var/lib/private/agentv/daemon/zone-drop/zone.json"
+check "and its drop is gone" ssh_sudo "test ! -e /var/lib/agentv/daemon/zone-drop/zone.json"
 
 ssh_sudo "journalctl -b --no-pager -u agentv-zone -u agentv-daemon" >"$RUN_DIR/journal.log" 2>&1 || true
 check "the journal says root set New York's zone, and turned the other away" \
