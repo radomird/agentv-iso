@@ -59,7 +59,8 @@ kernel=$(ssh_guest "uname -r")
 boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
 
 # A small app made on this box, which the check after the update loads. It's
-# there before the update, so the snapshot has it.
+# there before the update, so the snapshot has it. Its page is on this box,
+# which only a stand-in for the checks may reach, so it's recorded as one.
 ssh_guest "cat >/tmp/clock.sh" <<'SH'
 set -e
 dir=/var/lib/agentv/apps/local.clock
@@ -89,7 +90,7 @@ JSON
 printf '%s\n' 'export default {' '  id: "local.clock",' '  async launch() {},' '};' >"$dir/app.ts"
 record=/var/lib/agentv/apps/installed.json
 [ -f "$record" ] || echo '{}' >"$record"
-jq '. + {"local.clock": {id: "local.clock", name: "Clock", version: "1.0.0", tier: "local", installedAt: "2026-10-23T12:00:00Z"}}' "$record" >"$record.new"
+jq '. + {"local.clock": {id: "local.clock", name: "Clock", version: "1.0.0", tier: "local", installedAt: "2026-10-23T12:00:00Z", standIn: true}}' "$record" >"$record.new"
 mv "$record.new" "$record"
 chmod 644 "$dir/manifest.json" "$dir/app.ts" "$record"
 SH

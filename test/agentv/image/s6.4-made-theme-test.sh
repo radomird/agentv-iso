@@ -20,7 +20,7 @@ ID=local.theme-calm-forest
 NAME=calm-forest
 BUILDS=/var/lib/agentv/build
 THEMES=/var/lib/agentv/themes
-STATE=/var/lib/private/agentv/daemon
+STATE=/var/lib/agentv/daemon
 DROP=$STATE/build-drop
 RUN=/run/agentv-build
 

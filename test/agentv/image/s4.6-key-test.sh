@@ -38,7 +38,7 @@ check "the phone is asked to accept claude's terms for a key" jq -e '.ai.ask == 
 ssh_guest "agentv-phone-call $phone_key POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"key\"}'" >"$RUN_DIR/accepted.json" 2>&1 || true
 check "Q104 an adult accepts them on the phone" jq -e '.ok and .accepted.provider == "claude" and .accepted.path == "key" and .accepted.by.phone == "image check"' "$RUN_DIR/accepted.json"
 recorded() {
-  ssh_sudo "jq -e 'map(select(.provider == \"claude\" and .path == \"key\")) | length == 1' /var/lib/private/agentv/daemon/terms.json" >/dev/null
+  ssh_sudo "jq -e 'map(select(.provider == \"claude\" and .path == \"key\")) | length == 1' /var/lib/agentv/daemon/terms.json" >/dev/null
 }
 check "and the box records it in terms.json, the daemon's own" recorded
 
@@ -55,7 +55,7 @@ unreadable() {
   ! ssh_guest "cat /etc/agentv/env" >/dev/null 2>&1
 }
 no_drop() {
-  ssh_sudo "test ! -e /var/lib/private/agentv/daemon/key-drop/key.json"
+  ssh_sudo "test ! -e /var/lib/agentv/daemon/key-drop/key.json"
 }
 status_only() {
   local status
