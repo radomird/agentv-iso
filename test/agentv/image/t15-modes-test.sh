@@ -32,7 +32,7 @@ is() { [[ $(ssh_guest "sudo stat -c %U:%G:%a '$1'" 2>/dev/null) == "$2" ]]; }
 cannot() { ! ssh_guest "$1"; }
 absent() { ! ssh_guest "sudo test -e '$1'"; }
 
-ssh_guest "sudo stat -c '%n %U:%G:%a' /etc/agentv /etc/agentv/env /etc/agentv/shares /var/lib/agentv /var/lib/agentv/chromium /var/lib/agentv/builder /var/lib/agentv/build /var/lib/private /var/lib/private/agentv /var/lib/private/agentv/daemon" >"$RUN_DIR/modes.txt" 2>&1 || true
+ssh_guest "sudo stat -c '%n %U:%G:%a' /etc/agentv /etc/agentv/env /etc/agentv/shares /var/lib/agentv /var/lib/agentv/chromium /var/lib/agentv/builder /var/lib/agentv/build /var/lib/agentv/daemon /var/lib/agentv/backgrounds /var/lib/agentv/shared" >"$RUN_DIR/modes.txt" 2>&1 || true
 
 check "/etc/agentv is root's, and only root writes it" is /etc/agentv root:root:755
 check "the keys' file is root's alone" is /etc/agentv/env root:root:600
@@ -41,14 +41,14 @@ check "the NAS passwords' folder, when there is one, is root's alone" shares_clo
 check "the TV's sign-ins are the owner's alone" is /var/lib/agentv/chromium "$GUEST_USER:$GUEST_USER:700"
 check "the builder's home is the builder's alone" is /var/lib/agentv/builder agentv-builder:agentv-builder:700
 check "the builds' folder is root's, and only root writes it" is /var/lib/agentv/build root:root:755
-check "the daemon's own state is behind a folder only root opens" is /var/lib/private root:root:700
+check "the daemon's own state is the daemon's alone" is /var/lib/agentv/daemon agentv-server:agentv-server:700
 # Nothing in /etc/agentv is writable by anyone but root, and nothing that
 # holds a key or a password is readable by others.
 ssh_guest "sudo find /etc/agentv \( -perm /022 -o ! -user root \) -print" >"$RUN_DIR/etc-writable.txt" 2>&1 || true
 check "nothing in /etc/agentv is writable by anyone but root" test ! -s "$RUN_DIR/etc-writable.txt"
 check "the person's account can't read the keys" cannot "cat /etc/agentv/env"
 check "nor the builder's home" cannot "ls /var/lib/agentv/builder"
-check "nor the daemon's state" cannot "ls /var/lib/private/agentv/daemon"
+check "nor the daemon's state" cannot "ls /var/lib/agentv/daemon"
 
 # A build, asked for the way the daemon asks. Its unit runs a probe in place
 # of the builder, with every setting of the real one, the umask too.
@@ -62,7 +62,7 @@ echo $MARK >$DIR/work/fixtures/pages/page.html
 echo '{"build":"b1","id":"local.modes","version":"1.0.0","phase":"build","state":"running","steps":[],"started":"","at":""}' >$DIR/status.json
 echo done >$DIR/probe.out
 PROBE
-ssh_guest "sudo install -d -m 700 /var/lib/private/agentv/daemon/build-drop && printf '%s' '{\"build\":\"b1\",\"id\":\"local.modes\",\"version\":\"1.0.0\",\"sentence\":\"a probe\",\"phase\":\"build\",\"recipe\":\"game\",\"provider\":\"claude\",\"path\":\"key\",\"safeguards\":true}' | sudo tee /var/lib/private/agentv/daemon/build-drop/start.json >/dev/null"
+ssh_guest "sudo install -d -m 700 /var/lib/agentv/daemon/build-drop && printf '%s' '{\"build\":\"b1\",\"id\":\"local.modes\",\"version\":\"1.0.0\",\"sentence\":\"a probe\",\"phase\":\"build\",\"recipe\":\"game\",\"provider\":\"claude\",\"path\":\"key\",\"safeguards\":true}' | sudo tee /var/lib/agentv/daemon/build-drop/start.json >/dev/null"
 
 started=$SECONDS
 while (( SECONDS - started < 240 )); do
