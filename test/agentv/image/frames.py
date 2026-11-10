@@ -48,7 +48,7 @@ SESSION_BLACK_S = 2.0
 # can differ from the one the kernel and the splash run at, and then the
 # screen changes resolution, as a TV does when its input does: 1.9 to 2.3 s
 # in the VM, from QEMU's 1280 x 800 to 1920 x 1080. Booting at the kept
-# mode would take it away (Q261).
+# mode would take it away (Q269).
 SESSION_RESIZE_S = 3.5
 # A word, for the text rule: three letters or more. OCR reads a picture's
 # edges as one or two letters at times, never as a word.
