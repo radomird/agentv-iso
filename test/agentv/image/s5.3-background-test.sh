@@ -44,12 +44,12 @@ before=$(brightness home-before)
 
 # A phone on the box's own address pairs, as from the TV's code.
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
 
 # The photo, made here, and sent from the phone with its credit.
 magick -size 1920x1080 gradient:'#1f4e79-#e8a33d' -quality 90 jpg:- 2>/dev/null | ssh_guest "cat >/tmp/s5.3.jpg"
-ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: image/jpeg' --data-binary @/tmp/s5.3.jpg 'http://127.0.0.1:3001/api/phone/background?credit=photo%20by%20the%20image%20check'" >"$RUN_DIR/sent.json" 2>&1 || true
+ssh_guest "agentv-phone-call $phone_key POST '/api/phone/background?credit=photo%20by%20the%20image%20check' @/tmp/s5.3.jpg image/jpeg" >"$RUN_DIR/sent.json" 2>&1 || true
 id=$(jq -r '.background.id // empty' "$RUN_DIR/sent.json" 2>/dev/null)
 check "S5.3 the box takes the photo from the phone, with its credit" jq -e '.ok and .background.credit.text == "photo by the image check"' "$RUN_DIR/sent.json"
 check "S5.3 it's the background now" until_json /api/backgrounds ".source == \"photos\" and .current == \"$id\"" 10

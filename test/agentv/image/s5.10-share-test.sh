@@ -37,7 +37,7 @@ until_json() {
 until_tv() {
   local started=$SECONDS
   while (( SECONDS - started < $2 )); do
-    [[ $(ssh_guest "curl -fsS --max-time 5 -H 'Authorization: Bearer $token' http://127.0.0.1:3001/api/phone/state" 2>/dev/null | jq -r ".tv | $1" 2>/dev/null) == "true" ]] && return 0
+    [[ $(ssh_guest "timeout 5 agentv-phone-call $phone_key GET /api/phone/state" 2>/dev/null | jq -r ".tv | $1" 2>/dev/null) == "true" ]] && return 0
     sleep 1
   done
   return 1
@@ -55,9 +55,9 @@ wait_front() {
 # share <kind> <file on the box, or a link> [query]: as the phone sends it.
 share() {
   if [[ $1 == "link" ]]; then
-    ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"url\": \"$2\"}' http://127.0.0.1:3001/api/phone/share/link"
+    ssh_guest "agentv-phone-call $phone_key POST /api/phone/share/link '{\"url\": \"$2\"}'"
   else
-    ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/octet-stream' --data-binary @$2 'http://127.0.0.1:3001/api/phone/share/$1${3:-}'"
+    ssh_guest "agentv-phone-call $phone_key POST '/api/phone/share/$1${3:-}' @$2 application/octet-stream"
   fi
 }
 
@@ -98,8 +98,8 @@ guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "setup skipped, home is in front${took:+ (after $took s)}" test -n "$took"
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
 
 # A photo: the TV asks, Open shows it, and it becomes the background.
 magick -size 640x360 "xc:#336699" "$RUN_DIR/photo.jpg"

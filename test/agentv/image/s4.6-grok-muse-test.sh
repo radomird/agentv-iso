@@ -23,8 +23,8 @@ guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 3
 
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
 
 # A key as Settings → AI gives it: its provider, the key, and where the
 # answer goes.
@@ -60,10 +60,10 @@ provider() {
   put_key "$name" "$key" "$name-asked"
   check "ADR-047 Q104 a key for $name waits for $name's terms for a key" \
     jq -e --arg p "$name" --arg t "$terms" '.ok == false and .terms.provider == $p and .terms.terms[0].id == $t' "$RUN_DIR/$name-asked.json"
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' http://127.0.0.1:3001/api/phone/state" >"$RUN_DIR/$name-phone.json" 2>&1 || true
+  ssh_guest "agentv-phone-call $phone_key GET /api/phone/state" >"$RUN_DIR/$name-phone.json" 2>&1 || true
   check "the phone is asked to accept $name's terms for a key" \
     jq -e --arg p "$name" '.ai.ask == "terms" and .ai.provider == $p and .ai.path == "key"' "$RUN_DIR/$name-phone.json"
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"provider\": \"$name\", \"path\": \"key\"}' http://127.0.0.1:3001/api/phone/terms" >"$RUN_DIR/$name-accepted.json" 2>&1 || true
+  ssh_guest "agentv-phone-call $phone_key POST /api/phone/terms '{\"provider\": \"$name\", \"path\": \"key\"}'" >"$RUN_DIR/$name-accepted.json" 2>&1 || true
   check "an adult accepts them on the phone" \
     jq -e --arg p "$name" '.ok and .accepted.provider == $p and .accepted.path == "key" and .accepted.by.phone == "image check"' "$RUN_DIR/$name-accepted.json"
   check "and the box records it in terms.json, the daemon's own" accepted "$name" 1

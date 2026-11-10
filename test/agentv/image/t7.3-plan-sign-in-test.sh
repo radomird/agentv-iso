@@ -78,8 +78,8 @@ check "setup is on its AI step" jq -e '.setup.step == "ai" and .setup.done == fa
 # Claude's plan, with its terms accepted on a paired phone.
 tv_post /api/ai '{"provider": "claude", "path": "plan"}' >"$RUN_DIR/picked.json" 2>&1 || true
 code=$(ssh_guest "curl -fsS -X POST $TV/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' $PHONE/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-ssh_guest "curl -sS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"provider\": \"claude\", \"path\": \"plan\"}' $PHONE/api/phone/terms" >"$RUN_DIR/accepted.json" 2>&1 || true
+phone_key=$(ssh_guest "AGENTV_PHONE_URL=$PHONE agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+ssh_guest "AGENTV_PHONE_URL=$PHONE agentv-phone-call --errors $phone_key POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"plan\"}'" >"$RUN_DIR/accepted.json" 2>&1 || true
 check "Claude's plan is picked, with its terms accepted on the phone" jq -e '.ok == true' "$RUN_DIR/accepted.json"
 
 # The sign-in, started from setup's AI step, with no build.
@@ -96,7 +96,7 @@ qr_drawn() { ssh_guest "curl -fsS $TV/api/ai/sign-in/qr" | grep -q '<svg'; }
 check "and draws it as a QR code" qr_drawn
 
 # The code the provider's page gave, pasted on the phone.
-ssh_guest "curl -sS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"code\": \"good-code#t73\"}' $PHONE/api/phone/ai/sign-in/code" >"$RUN_DIR/code.json" 2>&1 || true
+ssh_guest "AGENTV_PHONE_URL=$PHONE agentv-phone-call --errors $phone_key POST /api/phone/ai/sign-in/code '{\"code\": \"good-code#t73\"}'" >"$RUN_DIR/code.json" 2>&1 || true
 check "the phone hands over the code" jq -e '.ok == true' "$RUN_DIR/code.json"
 started=$SECONDS
 while (( SECONDS - started < 90 )) && [[ $(sign_in) != in && $(sign_in) != failed ]]; do sleep 2; done

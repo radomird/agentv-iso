@@ -64,13 +64,15 @@ check "S5.5 and Claude Code still isn't on the box" bash -c "! grep -qi claude '
 
 # A phone on the box's own address pairs, hears the terms and accepts them.
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
-# phone <path> [<json>]: the phone's request, with its token.
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
+# phone <path> [<json>]: the phone's request, signed and sealed.
 phone() {
-  local data=""
-  [[ -n ${2:-} ]] && data="-d '$2'"
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' $data http://127.0.0.1:3001$1" 2>/dev/null
+  if [[ -n ${2:-} ]]; then
+    ssh_guest "agentv-phone-call $phone_key POST $1 '$2'" 2>/dev/null
+  else
+    ssh_guest "agentv-phone-call $phone_key GET $1" 2>/dev/null
+  fi
 }
 phone /api/phone/state >"$RUN_DIR/phone-state.json" || true
 check "S5.5 the phone is asked to accept Claude's terms for a plan" \

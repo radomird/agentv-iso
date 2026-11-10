@@ -96,12 +96,12 @@ check "with no ttfx left" test -z "$(guest 'pgrep -x ttfx' 2>/dev/null)"
 
 # Then a press from a paired phone.
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
 log "Leaving the TV alone again"
 took=$(until_screensaver 150) || took=""
 check "S5.9 the screensaver comes up again${took:+ (after $took s)}" test -n "$took"
-ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"key\": \"enter\"}' http://127.0.0.1:3001/api/phone/remote" >"$RUN_DIR/phone-key.json" 2>&1 || true
+ssh_guest "agentv-phone-call $phone_key POST /api/phone/remote '{\"key\": \"enter\"}'" >"$RUN_DIR/phone-key.json" 2>&1 || true
 check "S5.9 one press on the phone brings back the app" wait_front web 15
 check "and the ambient screen is over" test "$(front '.ambient')" = "false"
 

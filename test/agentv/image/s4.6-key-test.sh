@@ -32,11 +32,11 @@ put_key() {
 put_key asked
 check "Q104 a key for claude waits for claude's terms for a key" jq -e '.ok == false and .terms.provider == "claude" and .terms.terms[0].id == "anthropic-commercial-terms"' "$RUN_DIR/asked.json"
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
-ssh_guest "curl -fsS -H 'Authorization: Bearer $token' http://127.0.0.1:3001/api/phone/state" >"$RUN_DIR/phone.json" 2>&1 || true
+phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
+ssh_guest "agentv-phone-call $phone_key GET /api/phone/state" >"$RUN_DIR/phone.json" 2>&1 || true
 check "the phone is asked to accept claude's terms for a key" jq -e '.ai.ask == "terms" and .ai.provider == "claude" and .ai.path == "key"' "$RUN_DIR/phone.json"
-ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"provider\": \"claude\", \"path\": \"key\"}' http://127.0.0.1:3001/api/phone/terms" >"$RUN_DIR/accepted.json" 2>&1 || true
+ssh_guest "agentv-phone-call $phone_key POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"key\"}'" >"$RUN_DIR/accepted.json" 2>&1 || true
 check "Q104 an adult accepts them on the phone" jq -e '.ok and .accepted.provider == "claude" and .accepted.path == "key" and .accepted.by.phone == "image check"' "$RUN_DIR/accepted.json"
 recorded() {
   ssh_sudo "jq -e 'map(select(.provider == \"claude\" and .path == \"key\")) | length == 1' /var/lib/private/agentv/daemon/terms.json" >/dev/null

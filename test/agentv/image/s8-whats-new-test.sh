@@ -184,11 +184,11 @@ STANDIN
 ssh_guest "nohup node /tmp/router-standin.mjs $ROUTER_PORT >/tmp/router-standin.log 2>&1 </dev/null & disown" || true
 KEY="sk-ant-api03-agentvwhatsnew$(printf '0%.0s' {1..30})"
 code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\": \"$code\", \"name\": \"image check\"}' http://127.0.0.1:3001/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
+phone=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
 # The key asks for Anthropic's terms first, which an adult accepts on a
 # phone (Q104), then it's kept.
 api PUT /api/key "{\"provider\":\"claude\",\"key\":\"$KEY\"}" provider-key-asked
-ssh_guest "curl -fsS -H 'Authorization: Bearer $phone' -H 'Content-Type: application/json' -d '{\"provider\": \"claude\", \"path\": \"key\"}' http://127.0.0.1:3001/api/phone/terms" >/dev/null 2>&1 || true
+ssh_guest "agentv-phone-call $phone POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"key\"}'" >/dev/null 2>&1 || true
 api PUT /api/key "{\"provider\":\"claude\",\"key\":\"$KEY\"}" provider-key
 check "a key for claude is kept for the router" jq -e '.set == true and .provider == "claude"' "$RUN_DIR/provider-key.json"
 sleep 3
