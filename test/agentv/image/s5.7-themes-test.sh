@@ -105,12 +105,16 @@ check "S5.7 and Look still lists every theme Omarchy has, aurora among them" sam
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 # Where the TV is (ADR-055), on a release that has the step.
 setup_post /api/setup/finish '{"step": "country"}' || true
 for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
+# The look for home, on a release that has the step, as it stands.
+setup_post /api/setup/finish '{"step": "look"}' || true
 check "setup is at its look" until_json /api/setup '.setup.step == "theme"' 30
 check "S5.7 setup's look shows aurora beside Omarchy's own (OCR)" ocr_finds success-S5.7-setup "aurora" 30
 capture_console "success-S5.7-setup"
@@ -124,7 +128,12 @@ guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarch
 check "Omarchy's desktop moves on to gruvbox, and so does the TV" until_json /api/themes '.current == "gruvbox"' 30
 
 # Settings → Look, at aurora with the TV's keys: into the list, up to its
-# first row, which is Tokyo Night, then right, to aurora.
+# first row, which is Tokyo Night, then right, to aurora. That's Look as it
+# was before the looks, so the looks are switched off for it, as any box can
+# switch them off. The looks' own Themes and backgrounds is checked in a
+# browser and on the NUC.
+guest "agentv feature off looks" >>"$RUN_DIR/input.log" 2>&1 || true
+check "the looks are off for Settings → Look" until_json /api/features '.looks == false' 10
 guest "agentv screen settings look" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 keys right up up up up up up right
@@ -134,13 +143,27 @@ keys right up up up up up up right
 # reading off, in dark themes and light. It reads JetBrains Mono's u as a v
 # at times, so "avrora" counts too.
 aurora_box() {
-  local shot="$RUN_DIR/.box.ppm" w h started=$SECONDS
+  local shot="$RUN_DIR/.box.ppm" w h crop ch cy started=$SECONDS
   while (( SECONDS - started < $1 )); do
     rm -f "$shot"
     screendump "$shot"
     read -r w h < <(magick identify -format '%w %h' "$shot" 2>/dev/null)
-    if [[ -n ${w:-} ]] && magick "$shot" -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
-      tesseract "$RUN_DIR/.box.png" - --psm 7 >"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
+    # A screen bigger than 1920 x 1080, such as QEMU's at 4K, is read at that
+    # size, where the crop was measured.
+    if (( ${w:-0} > 1920 )); then
+      h=$(( h * 1920 / w ))
+      w=1920
+    fi
+    # Its row sits a little lower on a 16:9 screen than on a 16:10 one, and
+    # tesseract reads the name only with the box's edges just so, so a few
+    # crops of the same screenshot are read.
+    : >"$RUN_DIR/success-S5.7-settings.txt"
+    if [[ -n ${w:-} ]]; then
+      for crop in "6 17" "7 16" "6 15"; do
+        read -r ch cy <<<"$crop"
+        magick "$shot" -resize '1920x1080>' -crop "$(( w * 26 / 100 ))x$(( h * ch / 100 ))+$(( w * 65 / 100 ))+$(( h * cy / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null &&
+          tesseract "$RUN_DIR/.box.png" - --psm 7 >>"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
+      done
       grep -Eqi "a[uv]rora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
     fi
     sleep 1
@@ -166,6 +189,7 @@ check "S5.7 aurora picked on the TV changes the TV and the desktop within 2 s ($
 check "and Look says it's on" until_json /api/themes '.current == "aurora"' 10
 sleep 1
 capture_console "success-S5.7-aurora"
+guest "agentv feature on looks" >>"$RUN_DIR/input.log" 2>&1 || true
 guest "journalctl --user -b --no-pager -u agentv-screen | grep -i theme | tail -n 40" >"$RUN_DIR/screen-themes.log" 2>&1 || true
 
 stop_vm

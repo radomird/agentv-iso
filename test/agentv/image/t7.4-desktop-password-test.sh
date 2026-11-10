@@ -40,8 +40,8 @@ ssh_guest "sudo sshd -T" >"$RUN_DIR/sshd.txt" 2>&1 || true
 ssh_guest "ssh -V" >"$RUN_DIR/openssh-version.txt" 2>&1 || true
 check "sshd checks passwords through PAM" grep -qix 'usepam yes' "$RUN_DIR/sshd.txt"
 
-# Setup's own switch on, as on an edge box that tries it.
-ssh_guest "curl -sS -X PUT -H 'Content-Type: application/json' -d '{\"setup2\": true}' $TV/api/features" >"$RUN_DIR/features.json" 2>&1 || true
+# Setup's own switch is on, as every box has it.
+ssh_guest "curl -sS $TV/api/features" >"$RUN_DIR/features.json" 2>&1 || true
 check "setup's own switch is on" jq -e '.setup2 == true' "$RUN_DIR/features.json"
 ssh_guest "curl -sS $TV/api/desktop/password" >"$RUN_DIR/before.json" 2>&1 || true
 check "T7.4 Settings sees the account with no password known" jq -e '.password == {"managed": true, "name": "agentv", "known": false}' "$RUN_DIR/before.json"

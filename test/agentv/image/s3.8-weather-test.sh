@@ -55,9 +55,10 @@ check "S3.9 agentv selftest finds the medium and large tiles as MET's days" grep
 ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":[{\"id\":\"agentv.weather\",\"x\":0,\"y\":0,\"size\":\"l\"},{\"id\":\"agentv.clock\",\"x\":2,\"y\":0,\"size\":\"m\"},{\"id\":\"apps\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' http://127.0.0.1:3000/api/layout" \
   >"$RUN_DIR/layout.json" 2>&1 || true
 sleep 8
-ocr_screen >"$RUN_DIR/success-weather-large.txt" 2>/dev/null || true
+# Read at 1920 x 1080 even on QEMU's 4K screen (ocr_finds), where a block
+# reading of the whole screen splits the city's name.
+check "the TV shows the large weather tile for Oslo (OCR)" ocr_finds success-weather-large "oslo" 15
 capture_console "success-weather-large"
-check "the TV shows the large weather tile for Oslo (OCR)" grep -qi "oslo" "$RUN_DIR/success-weather-large.txt"
 check "the TV shows its seven days (OCR)" grep -qi "7 days" "$RUN_DIR/success-weather-large.txt"
 
 ssh_guest "journalctl -b --no-pager -u agentv-daemon" >"$RUN_DIR/daemon.log" 2>&1 || true
