@@ -60,7 +60,7 @@ export default {
   },
 };
 APP
-guest "agentv app install --local $work/app --yes" >"$RUN_DIR/install.log" 2>&1 || true
+guest "agentv app install --local $work/app --yes --stand-in" >"$RUN_DIR/install.log" 2>&1 || true
 check "the app installs with agentv app install --local" grep -q "^Installed Profile check 1.0.0" "$RUN_DIR/install.log"
 
 api() {

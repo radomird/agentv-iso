@@ -65,7 +65,7 @@ export default {
 };
 APP
 # Installed the way an app built on this box is (ADR-039).
-guest "agentv app install --local /tmp/agentv-sign-in-check/app --yes" >"$RUN_DIR/install.log" 2>&1 || true
+guest "agentv app install --local /tmp/agentv-sign-in-check/app --yes --stand-in" >"$RUN_DIR/install.log" 2>&1 || true
 check "the stand-in installs with agentv app install --local" grep -q "^Installed Sign-in check 1.0.0" "$RUN_DIR/install.log"
 
 signin_bar() {
