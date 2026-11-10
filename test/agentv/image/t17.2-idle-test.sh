@@ -55,7 +55,8 @@ ssh_guest "sudo jq '. + {ambient: \"terminal\"}' $file | sudo tee $file.test >/d
 check "the box's settings say terminal, as before the update" ssh_sudo "jq -e '.ambient == \"terminal\" and .idleMinutes == 30' $file"
 check "T17.2 home never hears of the pick" test "$(settings | jq -r 'has("ambient")')" = "false"
 
-migration=$(guest "grep -l 'The terminal screensaver is gone' /usr/share/agentv/migrations/agentv/*.sh" 2>/dev/null | head -n 1)
+# The package has AgenTV's migrations in one folder.
+migration=$(guest "grep -l 'The terminal screensaver is gone' /usr/share/agentv/migrations/*.sh" 2>/dev/null | head -n 1 || true)
 check "the migration is on the box" test -n "$migration"
 guest "bash $migration" >"$RUN_DIR/migration.log" 2>&1 || true
 check "T17.2 the migration takes the pick out of the box's settings" ssh_sudo "jq -e 'has(\"ambient\") | not' $file"
@@ -74,7 +75,8 @@ check "T17.2 idle shows the ambient screen" until_status '.ambient' 150
 sleep 12
 check "T17.2 home is what's in front, on its ambient screen" test "$(front '[.ambient, .front.role] | map(tostring) | join(" ")')" = "true home"
 check "T17.2 no terminal and no effect runs for it" guest "! pgrep -x ttfx && ! pgrep -f org.agentv.screensaver"
-ocr_screen >"$RUN_DIR/success-T17.2-idle.txt" 2>/dev/null || true
+# Its date, in the corner over the background's picture.
+check "T17.2 the ambient screen is on the TV (OCR)" ocr_finds success-T17.2-idle '(mon|tues|wednes|thurs|fri|satur|sun)day' 15
 capture_console "success-T17.2-idle"
 guest_hyprctl clients -j >"$RUN_DIR/clients.json" 2>&1 || true
 check "T17.2 the TV session has no terminal window" jq -e '[.[] | select(.class | test("screensaver|foot"; "i"))] | length == 0' "$RUN_DIR/clients.json"
