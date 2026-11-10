@@ -73,10 +73,14 @@ asks() {
   while (( SECONDS - started < $3 )); do
     rm -f "$shot"
     screendump "$shot"
+    # A screen bigger than 1920 x 1080, such as QEMU's at 4K, is read at that
+    # size, where the crop was measured.
     read -r w _ < <(magick identify -format '%w %h' "$shot" 2>/dev/null)
-    if [[ -n ${w:-} ]] && magick "$shot" -crop "$(( w * 745 / 1920 ))x$(( w * 110 / 1920 ))+$(( w * 1125 / 1920 ))+$(( w * 60 / 1920 ))" +repage -colorspace gray -negate -resize 300% "$RUN_DIR/.notice.png" 2>/dev/null; then
+    if (( ${w:-0} > 1920 )); then w=1920; fi
+    if [[ -n ${w:-} ]] && magick "$shot" -resize '1920x1080>' -crop "$(( w * 745 / 1920 ))x$(( w * 110 / 1920 ))+$(( w * 1125 / 1920 ))+$(( w * 60 / 1920 ))" +repage -colorspace gray -negate -resize 300% "$RUN_DIR/.notice.png" 2>/dev/null; then
       tesseract "$RUN_DIR/.notice.png" - --psm 6 2>/dev/null | tr '\n' ' ' >"$RUN_DIR/$1.txt"
-      grep -Eqi "image check sent an? $2" "$RUN_DIR/$1.txt" && return 0
+      # OCR reads the sender's "image" as "1mage" now and then.
+      grep -Eqi "[i1]mage check sent an? ${2//image/[i1]mage}" "$RUN_DIR/$1.txt" && return 0
     fi
     sleep 1
   done

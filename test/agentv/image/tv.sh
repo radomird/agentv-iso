@@ -111,11 +111,35 @@ wait_desktop() {
   return 1
 }
 
-# What OCR reads on the welcome screen: TV setup's (stage 5), whose code
-# to pair the phone sits beside its words, or the stage 0 placeholder an
-# older release has, as before an update.
+# at_1080p <seconds>: the box as setup's box step leaves one that can't keep
+# 4K smooth, such as the VM with virtio's GPU: the 4K test's result kept, and
+# the TV at 1080p output, until Hyprland runs the screen at 1920 x 1080. For
+# a check that times the TV or skips setup, which would otherwise leave QEMU's
+# 4K screen drawn in software, slower than any box once setup has run.
+at_1080p() {
+  local started=$SECONDS
+  ssh_guest "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"width\": 3840, \"height\": 2160, \"fps\": 10, \"slow\": 0.9}' http://127.0.0.1:3000/api/box/smooth" >/dev/null 2>&1 || true
+  while (( SECONDS - started < $1 )); do
+    if [[ $(guest_hyprctl "-j monitors" 2>/dev/null | jq -r '.[0].width // 0' 2>/dev/null) == 1920 ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# What OCR reads on the welcome screen: setup's, which asks you to scan its
+# code with your phone, the one before it, whose code to pair the phone sat
+# beside its words, or the stage 0 placeholder an older release has, as
+# before an update.
 # shellcheck disable=SC2034 # the checks that source this use it
-WELCOME_TEXT="TV setup starts here|use a keyboard|1/6 connect"
+WELCOME_TEXT="scan the code with your phone|TV setup starts here|use a keyboard|1/6 connect"
+
+# What OCR reads on home: the look's bar, whose links on home are apps, ask
+# and settings (home itself sits in a block OCR misses), or an older
+# release's grid, whose all apps tile says how many are installed.
+# shellcheck disable=SC2034 # the checks that source this use it
+HOME_TEXT="apps ask settings|installed|all apps"
 
 # The welcome screen is on the TV, read with OCR, which reads it as scattered
 # text too, since the QR code beside it turns a block reading to noise.
@@ -125,29 +149,35 @@ screen_shows_welcome() {
 }
 
 # ocr_finds <name> <pattern> <seconds>: until OCR finds the pattern (grep -E,
-# any case) on the screen. Each try reads one screenshot four ways: as a
+# any case) on the screen. Each try reads one screenshot five ways: as a
 # block of text, as ocr_screen does; as scattered text, which still reads a
 # headline with a QR code beside it, where the block reading turns to noise
 # at a VM's small screen; the right 62% as a block, larger, which leaves
-# out a QR code on the left; and the bottom 30% as a block, larger, where a
-# small line such as the ambient screen's credit sits over a picture. What
-# it read last is in $RUN_DIR/<name>.txt, and the screenshot in
+# out a QR code on the left; the bottom 30% as a block, larger, where a
+# small line such as the ambient screen's credit sits over a picture; and
+# the top fifth, larger, where a toast sits over setup's moving pixels. A
+# screen bigger than 1920 x 1080, such as QEMU's at 4K, is read at that size
+# first, where the readings are tuned: tesseract misses text drawn that big.
+# What it read last is in $RUN_DIR/<name>.txt, and the screenshot in
 # $RUN_DIR/.ocr.ppm.
 ocr_finds() {
-  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png"
+  local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
 
   while true; do
     : >"$RUN_DIR/$1.txt"
     rm -f "$shot"
     screendump "$shot"
-    if [[ -s $shot ]] && magick "$shot" -colorspace gray -negate -resize 150% "$prepped" 2>/dev/null; then
+    if [[ -s $shot ]] && magick "$shot" -resize '1920x1080>' "$sized" 2>/dev/null &&
+      magick "$sized" -colorspace gray -negate -resize 150% "$prepped" 2>/dev/null; then
       {
         tesseract "$prepped" - --psm 6 2>/dev/null
         tesseract "$prepped" - --psm 11 2>/dev/null
-        magick "$shot" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
+        magick "$sized" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
           tesseract "$right" - --psm 6 2>/dev/null
-        magick "$shot" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
+        magick "$sized" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
           tesseract "$bottom" - --psm 6 2>/dev/null
+        magick "$sized" -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 200% "$top" 2>/dev/null &&
+          tesseract "$top" - --psm 6 2>/dev/null
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
@@ -169,7 +199,7 @@ print_screen() {
 # Hyprland's own notices are, larger than ocr_screen does, so small text
 # comes through.
 ocr_top() {
-  magick "$1" -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 300% "$RUN_DIR/.top.png" 2>/dev/null &&
+  magick "$1" -resize '1920x1080>' -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 300% "$RUN_DIR/.top.png" 2>/dev/null &&
     tesseract "$RUN_DIR/.top.png" - --psm 6 >"$2" 2>/dev/null
 }
 

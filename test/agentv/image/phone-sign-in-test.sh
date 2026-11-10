@@ -84,10 +84,11 @@ on_phone() {
   ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' $*"
 }
 
-# S4.7: a tile moved on the phone is where the daemon keeps it.
-on_phone "-X PUT -d '{\"layout\":[{\"id\":\"apps\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' $phone/api/phone/layout" >"$RUN_DIR/layout.json" 2>&1 || true
+# S4.7: a tile moved on the phone, the built-in weather's, is where the
+# daemon keeps it.
+on_phone "-X PUT -d '{\"layout\":[{\"id\":\"agentv.weather\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' $phone/api/phone/layout" >"$RUN_DIR/layout.json" 2>&1 || true
 moved() {
-  [[ $(ssh_guest "curl -fsS http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | select(.id == "apps") | [.x, .y]]') == "[[3,2]]" ]]
+  [[ $(ssh_guest "curl -fsS http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | select(.id == "agentv.weather") | [.x, .y]]') == "[[3,2]]" ]]
 }
 check "S4.7 a tile moved on the phone is moved on home" moved
 

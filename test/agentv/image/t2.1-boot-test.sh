@@ -47,6 +47,9 @@ log "Booting the installed system once, to get it ready"
 start_vm_from_base
 wait_for_ssh 300 failure-T2.1-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-T2.1-no-tv"; check "the TV session came up" false; stop_vm; finish; }
+# The output setup's box step leaves the VM on, which the next session
+# starts at.
+check "the box is at 1080p output, as setup leaves a box that can't keep 4K smooth" at_1080p 60
 
 # The boot loader as Omarchy 4.5 sets it: one quiet second (ADR-060).
 ssh_sudo "cat /boot/limine.conf" >"$RUN_DIR/limine.conf.txt" 2>&1 || true

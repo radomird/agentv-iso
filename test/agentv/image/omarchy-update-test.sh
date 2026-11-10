@@ -109,7 +109,7 @@ screen_home() {
   [[ $(front '.front.role // ""') == "home" ]] || return 1
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -qiE "installed|all apps" "$RUN_DIR/$1.txt"
+  grep -qiE "$HOME_TEXT" "$RUN_DIR/$1.txt"
 }
 power_menu() {
   local _

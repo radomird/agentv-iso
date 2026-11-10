@@ -71,6 +71,7 @@ tv_post() {
 tv_post /api/setup/finish '{"step": "welcome"}' >/dev/null 2>&1 || true
 tv_post /api/setup/ready '{"update": "none"}' >/dev/null 2>&1 || true
 tv_post /api/setup/finish '{"step": "ready"}' >/dev/null 2>&1 || true
+tv_post /api/setup/finish '{"step": "box"}' >/dev/null 2>&1 || true
 tv_post /api/setup/finish '{"step": "country"}' >/dev/null 2>&1 || true
 ssh_guest "curl -sS $TV/api/setup" >"$RUN_DIR/setup.json" 2>&1 || true
 check "setup is on its AI step" jq -e '.setup.step == "ai" and .setup.done == false' "$RUN_DIR/setup.json"

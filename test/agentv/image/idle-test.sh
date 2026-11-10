@@ -50,9 +50,9 @@ guest "agentv screen idle-after 45" >>"$RUN_DIR/screen.log" 2>&1 || true
 log "Leaving the TV alone, with the app paused"
 check "S2.17 with no input and nothing playing, the ambient screen starts" until_status '.ambient' 150
 sleep 2
-ocr_screen >"$RUN_DIR/success-idle-ambient.txt" 2>/dev/null || true
+# Its date, in the corner over the background's picture.
+check "S2.17 the ambient screen is on the TV (OCR)" ocr_finds success-idle-ambient '(mon|tues|wednes|thurs|fri|satur|sun)day' 15
 capture_console "success-idle-ambient"
-check "S2.17 the ambient screen is on the TV (OCR)" grep -Eqi '(mon|tues|wednes|thurs|fri|satur|sun)day' "$RUN_DIR/success-idle-ambient.txt"
 check "S2.17 the paused app stays open behind it" test "$(jq -c '[.open[].id]' <<<"$(screen_status)")" = "[\"$page\"]"
 
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
@@ -80,7 +80,7 @@ check "S2.9 when the TV is back, a key brings the home screen" test "$(front '[.
 screen_shows_home() {
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -qi "installed" "$RUN_DIR/$1.txt"
+  grep -qiE "$HOME_TEXT" "$RUN_DIR/$1.txt"
 }
 check "the home screen's grid is on the TV again (OCR)" screen_shows_home "success-idle-home"
 

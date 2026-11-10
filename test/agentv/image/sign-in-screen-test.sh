@@ -120,7 +120,8 @@ capture_console "success-sign-in-screen"
 # button is found as the one solid block of its blue (a 9 x 9 opening wipes
 # out the bluish edges of the bar's text) and read on its own.
 : >"$RUN_DIR/bar.txt"
-if magick "$RUN_DIR/success-sign-in-screen.png" -gravity south -crop 100%x22%+0+0 +repage "$RUN_DIR/.bar.png" 2>/dev/null; then
+# Read at 1920 x 1080 even on QEMU's 4K screen, where the crop was measured.
+if magick "$RUN_DIR/success-sign-in-screen.png" -resize '1920x1080>' -gravity south -crop 100%x22%+0+0 +repage "$RUN_DIR/.bar.png" 2>/dev/null; then
   magick "$RUN_DIR/.bar.png" -colorspace gray -negate -resize 200% png:- 2>/dev/null |
     tesseract - - --psm 6 >>"$RUN_DIR/bar.txt" 2>/dev/null || true
   button=$(magick "$RUN_DIR/.bar.png" -fuzz 8% -fill black +opaque "#7aa2f7" -fill white -opaque "#7aa2f7" \
