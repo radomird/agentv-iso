@@ -44,12 +44,16 @@ check "the owner's theme hand-over is waiting in their session" test "$(guest "s
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 # Where the TV is (ADR-055), on a release that has the step.
 setup_post /api/setup/finish '{"step": "country"}' || true
 for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
+# The look for home, on a release that has the step, as it stands.
+setup_post /api/setup/finish '{"step": "look"}' || true
 check "setup is at its look" until_json /api/setup '.setup.step == "theme"' 30
 # Tokyo Night first, then the rest (every theme Omarchy has since ADR-048,
 # three before it). The right arrow goes to the second.

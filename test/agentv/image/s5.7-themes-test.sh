@@ -105,12 +105,16 @@ check "S5.7 and Look still lists every theme Omarchy has, aurora among them" sam
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 # Where the TV is (ADR-055), on a release that has the step.
 setup_post /api/setup/finish '{"step": "country"}' || true
 for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
+# The look for home, on a release that has the step, as it stands.
+setup_post /api/setup/finish '{"step": "look"}' || true
 check "setup is at its look" until_json /api/setup '.setup.step == "theme"' 30
 check "S5.7 setup's look shows aurora beside Omarchy's own (OCR)" ocr_finds success-S5.7-setup "aurora" 30
 capture_console "success-S5.7-setup"

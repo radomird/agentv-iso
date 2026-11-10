@@ -153,6 +153,8 @@ check "the daemon is back with the test index" up
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 setup_post /api/setup/finish '{"step": "country"}' || true
 setup_post /api/setup/finish '{"step": "ai"}'
 setup_post /api/setup/finish '{"step": "people"}'
