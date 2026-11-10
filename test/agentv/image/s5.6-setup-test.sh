@@ -52,6 +52,10 @@ wait_tv 240 >/dev/null || true
 
 check "setup starts on the welcome screen" until_setup '.setup.step == "welcome" and (.setup.done | not)' 30
 check "the welcome screen is on the TV (OCR)" screen_shows_welcome "success-S5.6-welcome"
+# The output the box step would leave the VM on, so the TV session the
+# update restarts draws again in time for getting ready to be read. At
+# QEMU's 4K in software it's still drawing 30 s on.
+check "the box is at 1080p output, as setup leaves a box that can't keep 4K smooth" at_1080p 60
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
   # The newer agentv this run hands over, on edge, where it doesn't wait for
