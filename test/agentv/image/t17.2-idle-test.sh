@@ -49,7 +49,7 @@ check "T17.2 there's no terminal screensaver on the box" guest "! type -P agentv
 
 # A box from before: the terminal screensaver picked, and a wait of 30
 # minutes, in the daemon's own settings.
-file=/var/lib/private/agentv/daemon/settings.json
+file=/var/lib/agentv/daemon/settings.json
 ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"idleMinutes\": 30}' http://127.0.0.1:3000/api/settings" >"$RUN_DIR/settings-set.json" 2>&1 || true
 ssh_guest "sudo jq '. + {ambient: \"terminal\"}' $file | sudo tee $file.test >/dev/null && sudo chown --reference=$file $file.test && sudo mv $file.test $file" >"$RUN_DIR/settings-old.log" 2>&1 || true
 check "the box's settings say terminal, as before the update" ssh_sudo "jq -e '.ambient == \"terminal\" and .idleMinutes == 30' $file"
