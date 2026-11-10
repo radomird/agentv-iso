@@ -12,6 +12,11 @@
 # files, so the merge can't conflict unless a file of upstream's was edited
 # or upstream added a file AgenTV has too.
 #
+# The few files of upstream's that AgenTV replaces with its own are listed in
+# test/agentv/policy/upstream-exceptions (the security policy and the issue
+# forms). Those stay AgenTV's through every sync, whatever upstream does to
+# its own, and they don't count against a sync merging itself.
+#
 # Omarchy can cut a release as a sibling of the line the fork is on, as it
 # did 4.5 beside 4.0.x (ADR-058): the tag doesn't descend from the base, and
 # a merge would fight over every file both lines changed. Then the sync
@@ -128,9 +133,25 @@ else
   followed="$release_branch at $upstream_ref"
 fi
 
+# Upstream's files that AgenTV keeps its own version of, and has one of now.
+kept=$(mktemp)
+if [[ -f test/agentv/policy/upstream-exceptions ]]; then
+  sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' test/agentv/policy/upstream-exceptions |
+    while IFS= read -r file; do
+      if git cat-file -e "HEAD:$file" 2>/dev/null; then printf '%s\n' "$file"; fi
+    done >"$kept"
+fi
+
 sibling=false
 if git merge-base --is-ancestor "$base_commit" "$upstream_ref"; then
-  if ! git merge --quiet --no-ff --no-edit -m "Merge Omarchy $tag" "$upstream_ref"; then
+  merged=true
+  git merge --quiet --no-ff --no-commit "$upstream_ref" >/dev/null 2>&1 || merged=false
+  # AgenTV's version of each, whether upstream's change conflicted, merged
+  # into it line by line, or removed the file.
+  while IFS= read -r file; do
+    git checkout --quiet HEAD -- "$file"
+  done <"$kept"
+  if [[ -n $(git diff --name-only --diff-filter=U) ]]; then
     {
       echo "Merging Omarchy $tag conflicts in these files:"
       git status --porcelain | grep -E '^(AA|UU|DU|UD|AU|UA|DD) ' || true
@@ -140,6 +161,13 @@ if git merge-base --is-ancestor "$base_commit" "$upstream_ref"; then
     git merge --abort || true
     exit 3
   fi
+  # A merge with nothing left to settle may still have stopped for another
+  # reason, and then there's no merge to finish.
+  if [[ $merged == false ]] && ! git rev-parse --quiet --verify MERGE_HEAD >/dev/null; then
+    echo "Merging Omarchy $tag failed before it started." >&2
+    exit 3
+  fi
+  git commit --quiet --no-edit -m "Merge Omarchy $tag"
 else
   # A sibling line: the tag's tree, plus every file AgenTV added since the
   # base, in an index of its own so the working tree stays as it is.
@@ -163,6 +191,10 @@ else
   if [[ -s $ours ]]; then
     xargs -0 git ls-tree -z HEAD -- <"$ours" | GIT_INDEX_FILE=$index git update-index -z --index-info
   fi
+  # And AgenTV's version of the files it keeps its own of.
+  while IFS= read -r file; do
+    git ls-tree -z HEAD -- "$file" | GIT_INDEX_FILE=$index git update-index -z --index-info
+  done <"$kept"
   rm -f "$ours"
   tree=$(GIT_INDEX_FILE=$index git write-tree)
   rm -f "$index"

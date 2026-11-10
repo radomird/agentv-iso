@@ -18,13 +18,26 @@ It's Omarchy's own installer, set up to install AgenTV instead of plain Omarchy.
 
 ## Getting the ISO
 
-The latest is [the 0.1.4 ISO](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.4-x86_64.iso) (about 6.6 GB). Grab [its checksum](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-0.1.4-x86_64.iso.sha256) too, so you can check the download. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
+The latest release's ISO is [agentv-stable.iso](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso) (about 6.6 GB). [agentv-stable.version](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.version) says which release that is. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
 
-The ISO is too big for GitHub's release files, so it lives on Cloudflare R2, and each [release](https://github.com/radomird/agentv-iso/releases) here links to its own.
+To check your download, grab [its checksum](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso.sha256) and [the checksum's signature](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso.sha256.sig) too. Put them in the folder with the ISO and run:
+
+```
+curl -LO https://raw.githubusercontent.com/radomird/agentv-pkgs/main/agentv-keyring/agentv.gpg
+gpg --import agentv.gpg
+gpg --verify agentv-stable.iso.sha256.sig agentv-stable.iso.sha256
+sha256sum -c agentv-stable.iso.sha256
+```
+
+The first two lines fetch AgenTV's public key. You only need them once. `gpg --verify` should say "Good signature", from the key `B4D4 7D67 1A03 84BF 7516 4CF1 AD68 7DD5 C049 475F`. That tells you the checksum is mine. gpg also warns that you haven't told it to trust the key, and that's fine. `sha256sum -c` then tells you the ISO matches the checksum. On a Mac it's `shasum -a 256 -c`.
+
+There are two more ISOs, for trying what's next. [agentv-rc.iso](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-rc.iso) is the latest release candidate, when there is one. [agentv-edge.iso](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-edge.iso) is last night's build. Each has its `.sha256`, `.sha256.sig` and `.version` beside it, the same way.
+
+The ISO is too big for GitHub's release files, so it lives on Cloudflare R2. These links always give you the newest of each, and older ISOs aren't kept. Each [release](https://github.com/radomird/agentv-iso/releases) here has its ISO's checksum in its notes.
 
 ## How an ISO gets made
 
-Every release tag builds the ISO here and puts it on R2 (`bin/agentv-iso-publish`). Before you see it, it has to pass a test run in GitHub Actions: a VM installs it by itself, then boots what it installed into AgenTV's TV session.
+Every release tag builds the ISO here. Before you see it, it has to pass a test run in GitHub Actions: a VM installs it by itself, then boots what it installed into AgenTV's TV session. Then its checksum gets signed and the ISO goes to R2 (`bin/agentv-iso-publish`).
 
 ## Support AgenTV
 
