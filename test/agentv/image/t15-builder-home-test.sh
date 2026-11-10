@@ -108,7 +108,7 @@ echo done >>"\$out"
 PROBE
 
 # The daemon's ask, as root's hand-over takes it.
-ssh_guest "sudo install -d -m 700 /var/lib/private/agentv/daemon/build-drop && printf '%s' '{\"build\":\"b1\",\"id\":\"local.home\",\"version\":\"1.0.0\",\"sentence\":\"a probe\",\"phase\":\"build\",\"recipe\":\"game\",\"provider\":\"claude\",\"path\":\"key\",\"safeguards\":true}' | sudo tee /var/lib/private/agentv/daemon/build-drop/start.json >/dev/null"
+ssh_guest "sudo install -d -m 700 /var/lib/agentv/daemon/build-drop && printf '%s' '{\"build\":\"b1\",\"id\":\"local.home\",\"version\":\"1.0.0\",\"sentence\":\"a probe\",\"phase\":\"build\",\"recipe\":\"game\",\"provider\":\"claude\",\"path\":\"key\",\"safeguards\":true}' | sudo tee /var/lib/agentv/daemon/build-drop/start.json >/dev/null"
 
 started=$SECONDS
 while (( SECONDS - started < 240 )); do
