@@ -108,7 +108,7 @@ check "home is arranged by hand" test "$(put_layout '[{"id":"apps","x":0,"y":0,"
 
 # With no PIN and no terminal, --yes is the adult's yes.
 make_app 1.0.0 "$id"
-guest "agentv app install --local $work/app --yes; echo exit=\$?" >"$RUN_DIR/install.log" 2>&1 || true
+guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$RUN_DIR/install.log" 2>&1 || true
 cat "$RUN_DIR/install.log"
 check "ADR-039 agentv app install --local installs the app" grep -q "^exit=0" "$RUN_DIR/install.log"
 check "it said what the app can reach first" grep -q "It can reach 127.0.0.1:8768, and nothing else." "$RUN_DIR/install.log"
@@ -157,7 +157,7 @@ ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"pin\":\"4
 check "a PIN can be set" jq -e '.set == true' "$RUN_DIR/pin.json"
 
 make_app 1.0.1 "$id"
-guest "agentv app install --local $work/app --yes; echo exit=\$?" >"$RUN_DIR/install-cancel.log" 2>&1 &
+guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$RUN_DIR/install-cancel.log" 2>&1 &
 asking=$!
 before=$FAILURES
 check "ADR-039 with the PIN set and no terminal, the TV asks for it (OCR)" wait_pad "success-local-app-pin" 40
@@ -174,7 +174,7 @@ check "cancelled on the TV, nothing is installed" grep -q "^exit=1" "$RUN_DIR/in
 check "and it says the PIN was needed" grep -q "Couldn't do it: that needs the adult PIN, so nothing was installed." "$RUN_DIR/install-cancel.log"
 check "the app is still 1.0.0" listed "$id 1.0.0 local"
 
-guest "agentv app install --local $work/app --yes; echo exit=\$?" >"$RUN_DIR/install-pin.log" 2>&1 &
+guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$RUN_DIR/install-pin.log" 2>&1 &
 asking=$!
 wait_pad "success-local-app-pin-again" 40 || true
 guest "agentv input key 4 8 2 6" >>"$RUN_DIR/input.log" 2>&1 || true
@@ -185,7 +185,7 @@ check "the app is 1.0.1 now" listed "$id 1.0.1 local"
 
 # A folder that isn't a local app installs nothing, and asks nobody.
 make_app 1.0.0 agentv.image-check
-guest "agentv app install --local $work/app --yes; echo exit=\$?" >"$RUN_DIR/install-refused.log" 2>&1 || true
+guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$RUN_DIR/install-refused.log" 2>&1 || true
 cat "$RUN_DIR/install-refused.log"
 check "ADR-039 a folder that isn't a local app is refused" grep -q "^exit=1" "$RUN_DIR/install-refused.log"
 check "it says why" grep -q "an app built on this box has an id that starts with local., not 'agentv.image-check'" "$RUN_DIR/install-refused.log"
