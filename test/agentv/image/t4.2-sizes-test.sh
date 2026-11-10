@@ -9,7 +9,7 @@
 #     that wide too, and its body text is at least 23 of the TV's pixels;
 #   - a toast keeps its size in logical pixels, so on the TV it grows and
 #     shrinks with the size;
-#   - a size change applies within a second, and so does the switch;
+#   - a size change applies within a second;
 #   - and a new TV session starts at the size picked, from the line the
 #     screen daemon kept, without setting it again.
 # About five minutes, most of it the boot and one switch to Omarchy's
@@ -43,17 +43,14 @@ guest_hyprctl "-j monitors" >"$RUN_DIR/monitors-before.json" 2>&1 || true
 check "the VM's screen is 4K, as the TV's is (modes: $(monitor '.availableModes | join(" ")'))" \
   grep -q "3840x2160" <<<"$(monitor '.availableModes | join(" ")')"
 
-# The sizes switched on, as on an edge box: switches turn on on edge only,
-# and nothing updates during this check, so the box goes to edge by its
-# channel file alone. The TV follows the switch at once, with no restart.
-ssh_sudo "echo edge >/etc/agentv/channel" >"$RUN_DIR/switch.log" 2>&1 || true
-guest "agentv feature on sizes" >>"$RUN_DIR/switch.log" 2>&1 || true
+# The sizes are on, as every box has them, so the TV runs at standard from
+# the start.
 check "the daemon says the sizes are on" test "$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/features" 2>/dev/null | jq -r '.sizes' 2>/dev/null)" = "true"
 for _ in $(seq 1 30); do
   [[ $(monitor '"\(.width)x\(.height) \(.scale)"') == "3840x2160 2" ]] && break
   sleep 0.5
 done
-check "T4.2 with the sizes switched on, the TV moves at once to 3840 x 2160 at scale 2, standard's (it runs $(monitor '"\(.width)x\(.height) at \(.scale)"'))" \
+check "T4.2 with the sizes on, the TV runs at 3840 x 2160 at scale 2, standard's (it runs $(monitor '"\(.width)x\(.height) at \(.scale)"'))" \
   test "$(monitor '"\(.width)x\(.height) \(.scale)"')" = "3840x2160 2"
 
 # The stand-in service page, served on the box itself.

@@ -187,9 +187,10 @@ check "S3.5 Steam opens in front, in its gamescope" test "$up" = yes
 [[ $up == yes ]] || said
 sleep 3
 check "S3.5 it fills the screen" fills_screen
-# How the screen daemon started gamescope: full screen, at the TV's mode,
-# with Steam's Big Picture.
-mode=$(guest_hyprctl "-j monitors" 2>/dev/null | jq -r '.[0] | "-W \(.width) -H \(.height)"' 2>/dev/null || true)
+# How the screen daemon started gamescope: full screen, at the TV's mode in
+# Hyprland's logical pixels (a 4K TV at scale 2 is 1920 x 1080 to it), with
+# Steam's Big Picture.
+mode=$(guest_hyprctl "-j monitors" 2>/dev/null | jq -r '.[0] | (if (.scale // 0) > 0 then .scale else 1 end) as $s | "-W \((.width / $s) | round) -H \((.height / $s) | round)"' 2>/dev/null || true)
 started=$(ssh_guest "cat /tmp/agentv-gamescope-args" 2>/dev/null || true)
 log "gamescope was started with: $started"
 started_right() {

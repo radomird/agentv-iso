@@ -1,8 +1,9 @@
 #!/bin/bash
 #
 # Where the TV is on an installed box (ADR-055). Setup's country step comes
-# after getting ready and starts on the country of the box's time zone, so
-# one press of OK confirms it. Another country, as Settings → country picks
+# after getting ready and your box, and starts on the country of the box's
+# time zone, so one press of OK confirms it. Another country, as Settings →
+# country picks
 # one, moves the time zone with it: the daemon hands the zone to root,
 # agentv-zone.path starts agentv-zone-set, and timedatectl sets it. Clock,
 # Weather and New this week's region follow. A drop with a zone zone.tab
@@ -47,12 +48,14 @@ check "the time zone's hand-over to root runs" ssh_guest "systemctl is-active --
 ssh_sudo "timedatectl set-timezone Europe/Oslo" >"$RUN_DIR/timezone.log" 2>&1 || true
 check "the box is in Oslo's time zone" until_zone Europe/Oslo
 
-# --- Setup: past the welcome screen and getting ready, to where the TV is -------
+# --- Setup: past the welcome screen, getting ready and your box, to where the TV is
 
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
-check "ADR-055 setup's step after getting ready is the country" until_json /api/setup '.setup.step == "country"' 30
+check "setup's step after getting ready is your box" until_json /api/setup '.setup.step == "box"' 30
+setup_post /api/setup/finish '{"step": "box"}'
+check "ADR-055 setup's step after your box is the country" until_json /api/setup '.setup.step == "country"' 30
 check "ADR-055 it asks where the TV is, starting on the time zone's country (OCR)" ocr_finds success-S8-country "norway" 30
 capture_console "success-S8-country"
 check "the daemon has Norway, from the time zone, not picked yet" until_json /api/country '.code == "NO" and .picked == false and .zone == "Europe/Oslo"' 10

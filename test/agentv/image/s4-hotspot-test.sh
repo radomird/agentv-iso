@@ -275,7 +275,9 @@ check "the password is in no log" bash -c "! grep -q '$HOME_PASSWORD' '$RUN_DIR/
 # Read for up to 15 s. check keeps what it runs quiet, so what OCR read is
 # printed after it, when it didn't find it.
 before=$FAILURES
-check "the welcome screen says the TV is on the home Wi-Fi, and to pair the phone (OCR)" ocr_finds welcome-joined "tv is on|pair it" 15
+# On the hotspot it says to scan the code; once the TV is on the home Wi-Fi,
+# to scan it to pair the phone ("pair it", which OCR reads as "pair 1it" too).
+check "the welcome screen says the TV is on the home Wi-Fi, and to pair the phone (OCR)" ocr_finds welcome-joined "tv is on|to pair" 15
 if (( FAILURES > before )); then
   capture_console "failure-hotspot-joined"
   log "What OCR read on the welcome screen:"
