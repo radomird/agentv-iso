@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# agentv:summary=Sign an ISO's checksum file with AgenTV's key
+# agentv:args=<file> [<fingerprint-file>]
+
+# Signs <file>, an ISO's checksum file, and leaves the signature beside it as
+# <file>.sig. With it, someone who downloads the ISO can tell that the
+# checksum is AgenTV's and not just whatever the download site holds.
+#
+# That's all it does: it needs gpg, and it fetches nothing, so the job that
+# has the key runs this and nothing else. The key comes in
+# AGENTV_SIGNING_KEY (the armored secret key), goes into a keyring made for
+# this run, and is out of the environment before anything else happens. It
+# has to be the key this repo pins, in
+# configs/airootfs/usr/share/agentv-iso/key-fingerprint, the one the ISO's
+# own packages are checked against.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+file="${1:?usage: agentv-iso-sign <file> [<fingerprint-file>]}"
+pinned_file="${2:-$ROOT/configs/airootfs/usr/share/agentv-iso/key-fingerprint}"
+
+if [[ -z ${AGENTV_SIGNING_KEY:-} ]]; then
+  echo "::error::AGENTV_SIGNING_KEY is empty, so there's nothing to sign with." >&2
+  exit 1
+fi
+[[ -s $file ]] || { echo "::error::agentv-iso-sign: no file at $file" >&2; exit 1; }
+pinned=$(tr -d '[:space:]' <"$pinned_file")
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+export GNUPGHOME="$work/gnupg"
+mkdir -m 700 "$GNUPGHOME"
+
+# In, and straight out of the environment: nothing this script starts after
+# the import inherits the key.
+key=$AGENTV_SIGNING_KEY
+unset AGENTV_SIGNING_KEY
+printf '%s\n' "$key" | gpg --batch --quiet --import
+unset key
+
+mapfile -t secret < <(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "sec" { want = 1 } want && $1 == "fpr" { print $10; want = 0 }')
+if (( ${#secret[@]} != 1 )); then
+  echo "::error::AGENTV_SIGNING_KEY holds ${#secret[@]} keys. It signs with exactly one." >&2
+  exit 1
+fi
+fpr=${secret[0]}
+if [[ $fpr != "$pinned" ]]; then
+  echo "::error::the signing key ($fpr) isn't the one this repo pins ($pinned)" >&2
+  exit 1
+fi
+
+rm -f "$file.sig"
+gpg --batch --yes --quiet --local-user "$fpr" --detach-sign --output "$file.sig" "$file"
+
+# gpgv takes a signature only from a key in the keyring it's given, and this
+# one holds the signing key alone.
+gpg --batch --export "$fpr" >"$work/signer.gpg"
+if ! gpgv --quiet --keyring "$work/signer.gpg" "$file.sig" "$file" 2>"$work/gpgv.log"; then
+  cat "$work/gpgv.log" >&2
+  echo "::error::$file isn't signed by $fpr" >&2
+  exit 1
+fi
+echo "$(basename "$file") signed by $fpr"
