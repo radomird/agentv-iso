@@ -44,7 +44,7 @@ for step in box country; do
   fi
 done
 check "then the AI step" until_json /api/setup '.setup.step == "ai"' 60
-check "the AI step is on the TV (OCR)" ocr_finds success-S5.5-pick "which ai do you use|pick one" 30
+check "the AI step is on the TV (OCR)" ocr_finds success-S5.5-pick "pick your ai|which ai do you use|pick one" 30
 capture_console "success-S5.5-pick"
 
 # What mise has before anything's accepted, for the record.
@@ -91,8 +91,10 @@ ssh_guest "curl -fsS http://127.0.0.1:3000/api/ai" >"$RUN_DIR/ai.json" 2>&1 || t
 check "S5.5 once they're accepted, Claude Code arrives on its first run ($(jq -r '"\(.cli.state // "nothing"): \(.cli.version // .cli.error // "")"' "$RUN_DIR/ai.json" 2>/dev/null))" \
   jq -e '.cli.state == "ready" and .cli.cli == "claude"' "$RUN_DIR/ai.json"
 check "and claude runs for the owner" guest "claude --version"
-# A plan signs in at the first build (ADR-040): the TV says it's ready.
-check "the TV says it's ready, with the terms accepted (OCR)" ocr_finds success-S5.5-done "ready\\.|terms accepted" 30
+# With the terms accepted, the AI step goes on to the plan's sign-in, its
+# code to scan on the TV. A release before it signed in at the first build
+# (ADR-040), and said it was ready. OCR reads "sign in" as "sign 1n" too.
+check "the TV goes on to the plan's sign-in, with the terms accepted (OCR)" ocr_finds success-S5.5-done "sign [i1]n to claude|scan to sign in|ready\\.|terms accepted" 30
 capture_console "success-S5.5-done"
 
 stop_vm

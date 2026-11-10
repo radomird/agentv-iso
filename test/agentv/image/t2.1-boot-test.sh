@@ -116,6 +116,7 @@ record() {
   check "home is on the recording, $what" test "$(verdict .verdict.home)" = true
   log "The splash's background alone, before the TV session's splash drew: $(verdict .verdict.background_seconds) s"
   log "Black as the TV session took the screen, before Hyprland's first frame: $(verdict .verdict.session_black_seconds) s"
+  log "The screen's resolution as the TV session took it: $(verdict '.verdict.session_resized // "unchanged"')"
   # What the boot and the screen daemon said about the splash, with when,
   # in seconds since the kernel started.
   # journalctl takes a tag and a unit together as both, so they're asked

@@ -116,15 +116,21 @@ wait_desktop() {
 # the TV at 1080p output, until Hyprland runs the screen at 1920 x 1080. For
 # a check that times the TV or skips setup, which would otherwise leave QEMU's
 # 4K screen drawn in software, slower than any box once setup has run.
+# What the daemon said, and on a miss its display and the display lines of
+# both daemons' logs, are in $RUN_DIR/at-1080p-*.
 at_1080p() {
   local started=$SECONDS
-  ssh_guest "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"width\": 3840, \"height\": 2160, \"fps\": 10, \"slow\": 0.9}' http://127.0.0.1:3000/api/box/smooth" >/dev/null 2>&1 || true
+  ssh_guest "curl -sS -X POST -H 'Content-Type: application/json' -d '{\"width\": 3840, \"height\": 2160, \"fps\": 10, \"slow\": 0.9}' http://127.0.0.1:3000/api/box/smooth" >"$RUN_DIR/at-1080p-smooth.json" 2>&1 || true
   while (( SECONDS - started < $1 )); do
     if [[ $(guest_hyprctl "-j monitors" 2>/dev/null | jq -r '.[0].width // 0' 2>/dev/null) == 1920 ]]; then
       return 0
     fi
     sleep 1
   done
+  ssh_guest "curl -sS http://127.0.0.1:3000/api/display" >"$RUN_DIR/at-1080p-display.json" 2>&1 || true
+  guest_hyprctl "-j monitors" >"$RUN_DIR/at-1080p-monitors.json" 2>&1 || true
+  ssh_guest "journalctl -b --no-pager -u agentv-daemon | grep -i 'display\|4k'" >"$RUN_DIR/at-1080p-daemon.log" 2>&1 || true
+  guest "journalctl --user -b --no-pager -u agentv-screen | grep -i 'display'" >"$RUN_DIR/at-1080p-screen.log" 2>&1 || true
   return 1
 }
 
