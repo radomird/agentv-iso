@@ -128,7 +128,12 @@ guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarch
 check "Omarchy's desktop moves on to gruvbox, and so does the TV" until_json /api/themes '.current == "gruvbox"' 30
 
 # Settings → Look, at aurora with the TV's keys: into the list, up to its
-# first row, which is Tokyo Night, then right, to aurora.
+# first row, which is Tokyo Night, then right, to aurora. That's Look as it
+# was before the looks, so the looks are switched off for it, as any box can
+# switch them off. The looks' own Themes and backgrounds is checked in a
+# browser and on the NUC.
+guest "agentv feature off looks" >>"$RUN_DIR/input.log" 2>&1 || true
+check "the looks are off for Settings → Look" until_json /api/features '.looks == false' 10
 guest "agentv screen settings look" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 keys right up up up up up up right
@@ -143,7 +148,13 @@ aurora_box() {
     rm -f "$shot"
     screendump "$shot"
     read -r w h < <(magick identify -format '%w %h' "$shot" 2>/dev/null)
-    if [[ -n ${w:-} ]] && magick "$shot" -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
+    # A screen bigger than 1920 x 1080, such as QEMU's at 4K, is read at that
+    # size, where the crop was measured.
+    if (( ${w:-0} > 1920 )); then
+      h=$(( h * 1920 / w ))
+      w=1920
+    fi
+    if [[ -n ${w:-} ]] && magick "$shot" -resize '1920x1080>' -crop "$(( w * 26 / 100 ))x$(( h * 6 / 100 ))+$(( w * 65 / 100 ))+$(( h * 15 / 100 ))" +repage -colorspace gray -negate -resize 400% "$RUN_DIR/.box.png" 2>/dev/null; then
       tesseract "$RUN_DIR/.box.png" - --psm 7 >"$RUN_DIR/success-S5.7-settings.txt" 2>/dev/null
       grep -Eqi "a[uv]rora" "$RUN_DIR/success-S5.7-settings.txt" && return 0
     fi
@@ -170,6 +181,7 @@ check "S5.7 aurora picked on the TV changes the TV and the desktop within 2 s ($
 check "and Look says it's on" until_json /api/themes '.current == "aurora"' 10
 sleep 1
 capture_console "success-S5.7-aurora"
+guest "agentv feature on looks" >>"$RUN_DIR/input.log" 2>&1 || true
 guest "journalctl --user -b --no-pager -u agentv-screen | grep -i theme | tail -n 40" >"$RUN_DIR/screen-themes.log" 2>&1 || true
 
 stop_vm
