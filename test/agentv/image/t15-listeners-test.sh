@@ -84,6 +84,10 @@ allowed() {
   # containers. With Docker off no device has that address, so nothing
   # reaches it. It's Omarchy's file, so it stays.
   [[ $port == 53 && $addr == "172.17.0.1" && $name == systemd-resolve* ]] && return 0
+  # The clock's own question to a time server: systemd-timesyncd opens a UDP
+  # socket on a port of the moment while it asks, and closes it. It's a
+  # client's socket, seen now and then, not something that listens.
+  [[ $proto == "udp" && $name == systemd-timesyn* ]] && (( port >= 32768 )) && return 0
   # With the hotspot open: dnsmasq, on the hotspot's address and device only.
   if [[ -n $HOTSPOT_IF && $name == "dnsmasq" ]]; then
     [[ $port == 53 && $addr == "10.42.0.1" ]] && return 0

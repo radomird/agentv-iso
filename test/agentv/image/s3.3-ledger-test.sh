@@ -29,7 +29,7 @@ check "the row is the stand-in's episode, for the box's own person" \
 check "S3.10 its medium tile continues from the ledger" grep -q "^pass S3.10 the stand-in's medium tile continues from the ledger: agentv selftest" "$RUN_DIR/selftest.txt"
 check "the stand-in is gone after" ssh_guest "test ! -e /var/lib/agentv/apps/local.selftest-player"
 check "and so are its rows" test "$(ssh_guest "curl -fsS --max-time 3 'http://127.0.0.1:3000/api/ledger?app=local.selftest-player'" | jq '.rows | length')" = "0"
-check "the ledger is the daemon's own database" ssh_sudo "test -s /var/lib/private/agentv/daemon/ledger.db"
+check "the ledger is the daemon's own database" ssh_sudo "test -s /var/lib/agentv/daemon/ledger.db"
 
 guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen.log" 2>&1 || true
 ssh_guest "journalctl -b --no-pager -u agentv-daemon" >"$RUN_DIR/daemon.log" 2>&1 || true
