@@ -4,7 +4,7 @@
 # sign-ins and builds, each owned by who its units say and closed to
 # everyone else. The key's file and the NAS passwords are root's alone, the
 # TV's sign-ins the owner's alone, the builder's home the builder's alone,
-# and the daemon's own state is behind /var/lib/private. A build's folder,
+# and the daemon's own state the daemon's alone. A build's folder,
 # made the way the daemon asks root for one, is the builder's and its
 # group's: the person's account and any other user can't read what a build
 # saved, and the daemon and the builder's way out, which do read it, are in
