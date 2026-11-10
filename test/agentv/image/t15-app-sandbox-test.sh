@@ -87,6 +87,12 @@ if [[ -n $pid ]]; then
   check "its package is read-only to it" read_only
 fi
 
+# The daemon has an account of its own now, and its state is only its own.
+for folder in daemon backgrounds shared; do
+  check "/var/lib/agentv/$folder is the daemon's alone" \
+    test "$(ssh_guest "sudo stat -c '%U %a %F' /var/lib/agentv/$folder" 2>/dev/null)" = "agentv-server 700 directory"
+done
+
 # Stopping the daemon takes its workers with it.
 ssh_guest "journalctl -b --no-pager -u agentv-daemon" >"$RUN_DIR/daemon.log" 2>&1 || true
 # Said here, so a failed run's log has bubblewrap's own reason.

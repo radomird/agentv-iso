@@ -32,7 +32,7 @@ put_key() {
   ssh_guest "curl -sS --max-time 20 -X PUT -H 'Content-Type: application/json' -d '{\"provider\":\"$1\",\"key\":\"$2\"}' http://127.0.0.1:3000/api/key" >"$RUN_DIR/$3.json" 2>&1 || true
 }
 accepted() {
-  [[ $(ssh_sudo "jq 'map(select(.provider == \"$1\" and .path == \"key\")) | length' /var/lib/private/agentv/daemon/terms.json" 2>/dev/null) == "$2" ]]
+  [[ $(ssh_sudo "jq 'map(select(.provider == \"$1\" and .path == \"key\")) | length' /var/lib/agentv/daemon/terms.json" 2>/dev/null) == "$2" ]]
 }
 root_only() {
   [[ $(ssh_sudo "stat -c '%U %a' /etc/agentv/env" 2>/dev/null) == "root 600" ]]

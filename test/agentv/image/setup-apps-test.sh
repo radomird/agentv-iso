@@ -97,7 +97,7 @@ check "and only that one" jq -e --arg id "$ticked" '.apps | keys == [$id]' "$RUN
 guest "agentv app list" >"$RUN_DIR/app-list.txt" 2>&1 || true
 check "agentv app list has it" grep -q "^$ticked " "$RUN_DIR/app-list.txt"
 check "home has it" until_json /api/home "[.apps[].id] | index(\"$ticked\") != null" 30
-check "the daemon's drop is gone" test -z "$(ssh_sudo "ls /var/lib/private/agentv/daemon/apps-drop 2>/dev/null")"
+check "the daemon's drop is gone" test -z "$(ssh_sudo "ls /var/lib/agentv/daemon/apps-drop 2>/dev/null")"
 
 stop_vm
 finish
