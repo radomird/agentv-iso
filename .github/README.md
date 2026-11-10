@@ -18,7 +18,7 @@ It's Omarchy's own installer, set up to install AgenTV instead of plain Omarchy.
 
 ## Getting the ISO
 
-The latest release's ISO is [agentv-stable.iso](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso) (about 6.6 GB). [agentv-stable.version](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.version) says which release that is. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
+The latest release's ISO is [agentv-stable.iso](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso) (about 6.7 GB). [agentv-stable.version](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.version) says which release that is. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
 
 To check your download, grab [its checksum](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso.sha256) and [the checksum's signature](https://pub-18fa48b004b845838c98225b8955c7e6.r2.dev/iso/agentv-stable.iso.sha256.sig) too. Put them in the folder with the ISO and run:
 
