@@ -14,8 +14,9 @@ name: ISO
 #
 # The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
 # 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
-# workflow artifact, and a tag also publishes it to AgenTV's R2 bucket for
-# people to download (publish-iso.yml does the same for an ISO kept earlier).
+# workflow artifact. This workflow has no keys and publishes nothing: when a
+# release tag's run passes, publish-iso.yml takes the ISO it kept, signs its
+# checksum and puts it in AgenTV's R2 bucket for people to download.
 
 on:
   push:
@@ -166,8 +167,9 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 150
     env:
-      # A release tag carries stable packages; everything else edge.
-      CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && 'stable') || 'edge' }}
+      # A release tag carries stable packages; everything else edge, a
+      # release candidate's tag (v1.0.0-rc1) too.
+      CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-rc') && 'stable') || 'edge' }}
       # Only an ISO that went through every check is kept.
       KEEP_ISO: ${{ inputs.checks == '' && (inputs.keep-iso || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
@@ -284,17 +286,13 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      # A release's ISO also goes where people download it, AgenTV's R2
-      # bucket, once the repo has its secrets (bin/agentv-iso-publish).
-      - name: Publish the ISO
-        if: success() && startsWith(github.ref, 'refs/tags/v') && vars.R2_BUCKET != ''
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          ISO_URL: ${{ vars.ISO_URL }}
-          NAME: ${{ steps.name.outputs.name }}
-        run: |
-          url=$(bin/agentv-iso-publish "release/$NAME.iso")
-          echo "Download: $url" >>"$GITHUB_STEP_SUMMARY"
+      # The checksum on its own too, a few bytes: publish-iso.yml signs it
+      # without fetching the ISO.
+      - name: Keep the checksum
+        if: success() && env.KEEP_ISO == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.name }}.sha256
+          path: release/*.iso.sha256
+          if-no-files-found: error
+          retention-days: 30

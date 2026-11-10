@@ -1,57 +1,390 @@
 name: Publish ISO
 
-# Puts an ISO that an earlier run kept where people download it: AgenTV's
+# Puts an ISO that passed its checks where people download it: AgenTV's
 # Cloudflare R2 bucket, since the ISO is over GitHub's 2 GiB cap for release
-# files. A release tag's ISO run publishes its own ISO (iso.yml), so this is
-# for one kept before that, such as 0.1.3's. It needs the repo's secrets
-# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, and its variables
-# R2_BUCKET and ISO_URL (bin/agentv-iso-publish).
+# files. The bucket holds three ISOs, each under a name that doesn't change
+# with its version (bin/agentv-iso-publish):
+#
+#   stable  the latest release, from a tag like v1.0.0
+#   rc      the latest release candidate, from a tag like v1.0.0-rc1
+#   edge    last night's build, from agentv-os's nightly run
+#
+# Publishing one replaces the one before it, and then anything in the
+# bucket's iso/ folder that isn't one of the three is removed.
+#
+# It starts three ways. When the ISO workflow finishes a release tag's run,
+# it publishes that run's ISO as stable or rc. Every morning it looks for
+# the edge ISO the night's run in agentv-os kept, and publishes it when it's
+# a new one. And by hand, for any ISO a run kept.
+#
+# It always runs from the agentv branch, never from the tag or the branch
+# that built the ISO, so the build never has the bucket's keys or the
+# signing key. Four jobs:
+#
+#   which    works out which ISO, with no secrets
+#   sum      fetches the ISO's checksum and writes it for the published name
+#   sign     has AgenTV's signing key and does nothing but sign that file
+#   publish  has the bucket's keys: uploads, checks, and cleans up
+#
+# sign and publish read their secrets through the "release" environment,
+# which only agentv may use: AGENTV_SIGNING_KEY for sign, and
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY for publish. The
+# variables R2_BUCKET and ISO_URL say where the bucket is.
 
 on:
+  workflow_run:
+    workflows: [ISO]
+    types: [completed]
+  schedule:
+    - cron: "41 7 * * *"
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Which of the three ISOs this one becomes"
+        type: choice
+        options: [edge, stable, rc]
+        required: true
+      repo:
+        description: "The repo whose run kept the ISO"
+        type: choice
+        options: [agentv-iso, agentv-os]
+        default: agentv-iso
       run-id:
-        description: "The ISO run that kept the ISO"
+        description: "The run that kept the ISO"
         type: string
         required: true
       name:
-        description: "The kept ISO's name, such as agentv-0.1.3-x86_64"
+        description: "The kept ISO's name, such as agentv-1.0.0-x86_64"
         type: string
         required: true
 
 permissions:
   contents: read
-  actions: read
+
+concurrency:
+  group: publish-iso
+  cancel-in-progress: false
 
 jobs:
+  which:
+    name: "Which ISO?"
+    # A run of the ISO workflow counts only when it was a tag's and it passed.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.which.outputs.publish }}
+      channel: ${{ steps.which.outputs.channel }}
+      repo: ${{ steps.which.outputs.repo }}
+      run-id: ${{ steps.which.outputs.run-id }}
+      name: ${{ steps.which.outputs.name }}
+    steps:
+      - name: Decide, and say why
+        id: which
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          TAG_RUN: ${{ github.event.workflow_run.id }}
+          TAG_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_REPO: ${{ inputs.repo }}
+          IN_RUN: ${{ inputs.run-id }}
+          IN_NAME: ${{ inputs.name }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          ISO_URL: ${{ vars.ISO_URL }}
+        run: |
+          say() { echo "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          skip() { say "$*"; echo "publish=false" >>"$GITHUB_OUTPUT"; exit 0; }
+
+          [[ -n $R2_BUCKET && -n $ISO_URL ]] || skip "Nothing is published: this repo's R2_BUCKET and ISO_URL variables aren't set."
+
+          case $EVENT in
+            workflow_run)
+              # The ISO workflow only runs for a push when it's a tag's.
+              [[ $TAG_REPO == "$GITHUB_REPOSITORY" ]] || skip "Nothing is published: that run wasn't this repo's."
+              if [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                channel=stable
+              elif [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
+                channel=rc
+              else
+                skip "Nothing is published: \`$TAG\` isn't a release tag (v1.0.0) or a release candidate's (v1.0.0-rc1)."
+              fi
+              repo=agentv-iso
+              run=$TAG_RUN
+              name="agentv-${TAG#v}-x86_64"
+              ;;
+            schedule)
+              # The edge ISO agentv-os's newest finished nightly run kept. A
+              # night with a failed check keeps none: its last job takes the
+              # ISO back.
+              channel=edge
+              repo=agentv-os
+              run=$(gh api "repos/$OWNER/agentv-os/actions/workflows/nightly.yml/runs?branch=agentv&status=completed&per_page=1" \
+                --jq '.workflow_runs[0].id // empty')
+              [[ -n $run ]] || skip "Nothing is published: agentv-os has no finished nightly run."
+              name=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/artifacts?per_page=100" --paginate \
+                --jq '.artifacts[] | select(.expired == false and (.name | test("^agentv-edge-[0-9.]+-[0-9a-f]{7}-x86_64$"))) | .name' | head -n 1)
+              [[ -n $name ]] || skip "Nothing is published: agentv-os's newest nightly run ($run) kept no edge ISO."
+              # Published already?
+              version=${name#agentv-}
+              version=${version%-x86_64}
+              served=$(curl -fsSL --retry 2 "${ISO_URL%/}/iso/agentv-edge.version?run=$GITHUB_RUN_ID" || true)
+              [[ $served != "$version" ]] || skip "Nothing to do: the edge ISO people download is \`$version\` already."
+              ;;
+            workflow_dispatch)
+              channel=$IN_CHANNEL
+              repo=$IN_REPO
+              run=$IN_RUN
+              name=$IN_NAME
+              ;;
+            *) skip "Nothing is published for $EVENT." ;;
+          esac
+
+          [[ $channel =~ ^(edge|stable|rc)$ ]] || { echo "::error::the channel is edge, stable or rc"; exit 1; }
+          [[ $repo =~ ^agentv-(iso|os)$ ]] || { echo "::error::the repo is agentv-iso or agentv-os"; exit 1; }
+          [[ $run =~ ^[0-9]+$ ]] || { echo "::error::run-id is a run's number"; exit 1; }
+          [[ $name =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64$ ]] || { echo "::error::name is an ISO's name, such as agentv-1.0.0-x86_64"; exit 1; }
+          {
+            echo "publish=true"
+            echo "channel=$channel"
+            echo "repo=$repo"
+            echo "run-id=$run"
+            echo "name=$name"
+          } >>"$GITHUB_OUTPUT"
+          say "Publishing \`$name\` from $repo's run $run as the $channel ISO."
+
+  # The checksum the build left beside its ISO, written for the name people
+  # download. No secrets here.
+  sum:
+    name: "The ISO's checksum, for the published name"
+    needs: which
+    if: needs.which.outputs.publish == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    env:
+      CHANNEL: ${{ needs.which.outputs.channel }}
+      NAME: ${{ needs.which.outputs.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: bin
+          persist-credentials: false
+
+      # A run keeps the checksum on its own too, so this needn't fetch the
+      # ISO. An older run didn't: then the ISO comes with it, and is checked.
+      - name: Fetch the checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository_owner }}/${{ needs.which.outputs.repo }}
+          RUN_ID: ${{ needs.which.outputs.run-id }}
+        run: |
+          if ! gh run download "$RUN_ID" -R "$REPO" -n "$NAME.sha256" -D "$RUNNER_TEMP/iso"; then
+            echo "That run kept no checksum on its own, so the ISO comes too."
+            gh run download "$RUN_ID" -R "$REPO" -n "$NAME" -D "$RUNNER_TEMP/iso"
+            (cd "$RUNNER_TEMP/iso" && sha256sum -c "$NAME.iso.sha256")
+          fi
+
+      - name: Write it for the published name
+        run: |
+          set -o pipefail
+          bin/agentv-iso-publish names "$CHANNEL" "$RUNNER_TEMP/iso/$NAME.iso.sha256" names | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The list the signing job checks the files against. Its own checksum
+      # goes to that job as this job's output, not with the files.
+      - name: Write down what was made
+        id: sums
+        run: |
+          (cd names && sha256sum "agentv-$CHANNEL.iso.sha256" "agentv-$CHANNEL.version") >SHA256SUMS
+          echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: names-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            names/
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job that has the signing key. It fetches nothing but the two
+  # small files the job above made.
+  sign:
+    name: "Sign the checksum"
+    needs: [which, sum]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    environment: release
+    env:
+      CHANNEL: ${{ needs.which.outputs.channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            bin
+            configs/airootfs/usr/share/agentv-iso
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: names-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Check the files are the ones the job before made
+        env:
+          SUMS: ${{ needs.sum.outputs.sums }}
+        run: |
+          echo "$SUMS  SHA256SUMS" | sha256sum -c -
+          (cd names && sha256sum -c ../SHA256SUMS)
+
+      # Until the release environment has AGENTV_SIGNING_KEY, the ISO goes
+      # out with its checksum unsigned, and the run says so. Once it has
+      # the key, take the first branch out, so a missing key stops the run.
+      - name: Sign
+        env:
+          AGENTV_SIGNING_KEY: ${{ secrets.AGENTV_SIGNING_KEY }}
+        run: |
+          set -o pipefail
+          if [[ -z $AGENTV_SIGNING_KEY ]]; then
+            echo "::warning title=The ISO's checksum isn't signed::The release environment has no AGENTV_SIGNING_KEY, so agentv-$CHANNEL.iso goes out without agentv-$CHANNEL.iso.sha256.sig."
+            {
+              echo "## The checksum is NOT signed"
+              echo
+              echo "This repo's \`release\` environment has no \`AGENTV_SIGNING_KEY\`, so \`agentv-$CHANNEL.iso\` is published without \`agentv-$CHANNEL.iso.sha256.sig\`. Add the secret, then run this workflow again for the same ISO."
+            } >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          bin/agentv-iso-sign "names/agentv-$CHANNEL.iso.sha256" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-names-${{ github.run_id }}-${{ github.run_attempt }}
+          path: names/
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     name: "Publish the ISO"
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    needs: [which, sign]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    environment: release
+    permissions:
+      # contents: write is for the checksum in the release's notes.
+      contents: write
+      actions: read
+    env:
+      CHANNEL: ${{ needs.which.outputs.channel }}
+      NAME: ${{ needs.which.outputs.name }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      ISO_URL: ${{ vars.ISO_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-names-${{ github.run_id }}-${{ github.run_attempt }}
+          path: names
+
       - name: Fetch the kept ISO
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run-id }}
-          NAME: ${{ inputs.name }}
+          REPO: ${{ github.repository_owner }}/${{ needs.which.outputs.repo }}
+          RUN_ID: ${{ needs.which.outputs.run-id }}
         run: |
-          [[ $RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::run-id is a run's number"; exit 1; }
-          [[ $NAME =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64$ ]] || { echo "::error::name is an ISO's name, such as agentv-0.1.3-x86_64"; exit 1; }
           echo "Free: $(df -BG --output=avail "$RUNNER_TEMP" | tail -1)"
-          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "$NAME" -D "$RUNNER_TEMP/iso"
+          gh run download "$RUN_ID" -R "$REPO" -n "$NAME" -D "$RUNNER_TEMP/iso"
+          ls -l "$RUNNER_TEMP/iso"
 
+      # A signature counts only from the key this repo pins, the one the
+      # ISO's own packages are checked against. Its public half comes from
+      # agentv-keyring, in agentv-pkgs.
+      - name: Check the signature
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          sum="names/agentv-$CHANNEL.iso.sha256"
+          if [[ ! -f $sum.sig ]]; then
+            echo "::warning title=The ISO's checksum isn't signed::agentv-$CHANNEL.iso is published without a signature."
+            exit 0
+          fi
+          pinned=$(tr -d '[:space:]' <configs/airootfs/usr/share/agentv-iso/key-fingerprint)
+          work=$(mktemp -d)
+          export GNUPGHOME="$work/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          curl -fsSL --retry 5 --retry-delay 10 -o "$work/agentv.asc" \
+            "https://raw.githubusercontent.com/$OWNER/agentv-pkgs/main/agentv-keyring/agentv.gpg"
+          gpg --batch --quiet --import "$work/agentv.asc"
+          gpg --batch --export "$pinned" >"$work/pinned.gpg"
+          [[ -s $work/pinned.gpg ]] || { echo "::error::agentv-keyring doesn't carry the key this repo pins ($pinned)"; exit 1; }
+          gpgv --quiet --keyring "$work/pinned.gpg" "$sum.sig" "$sum"
+          echo "The checksum is signed by \`$pinned\`." >>"$GITHUB_STEP_SUMMARY"
+
+      # Checks the ISO against the checksum first, then asks the bucket for
+      # each file's size after.
       - name: Upload it
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          ISO_URL: ${{ vars.ISO_URL }}
-          NAME: ${{ inputs.name }}
         run: |
-          url=$(bin/agentv-iso-publish "$RUNNER_TEMP/iso/$NAME.iso")
-          echo "Download: $url" >>"$GITHUB_STEP_SUMMARY"
+          url=$(bin/agentv-iso-publish upload "$CHANNEL" "$RUNNER_TEMP/iso/$NAME.iso" names)
+          {
+            echo "Download: $url"
+            echo
+            echo '```'
+            cat "names/agentv-$CHANNEL.iso.sha256"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      # A second place for the checksum, one the bucket's keys can't change:
+      # the notes of the release's own page here, when it has one.
+      - name: Put the checksum in the release's notes
+        if: needs.which.outputs.channel != 'edge'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(cat "names/agentv-$CHANNEL.version")
+          read -r hash _ <"names/agentv-$CHANNEL.iso.sha256"
+          line="SHA-256 of the ISO: \`$hash\`"
+          if ! body=$(gh release view "v$version" -R "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null); then
+            echo "There's no release for v$version here yet. When there is, put this in its notes: $line" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if grep -qF "$hash" <<<"$body"; then
+            echo "The release's notes have the checksum already."
+            exit 0
+          fi
+          # A checksum from an earlier publish of this version goes.
+          body=$(grep -v '^SHA-256 of the ISO: ' <<<"$body" || true)
+          printf '%s\n\n%s\n' "$body" "$line" >"$RUNNER_TEMP/notes.md"
+          gh release edit "v$version" -R "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "The checksum is in v$version's release notes." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # What the next step would remove, and nothing removed yet. If the
+      # bucket can't be listed, or the list is longer than it should ever
+      # be, this fails and the next step doesn't run.
+      - name: What doesn't belong in the bucket's iso/ folder (nothing is removed yet)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          bin/agentv-iso-publish stale | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove them, one by one
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          bin/agentv-iso-publish clean | tee -a "$GITHUB_STEP_SUMMARY"
