@@ -225,3 +225,12 @@ pin_off() {
   [[ -n $grant ]] || return 0
   ssh_guest "curl -fsS --max-time 5 -X DELETE -H 'X-AgenTV-Grant: $grant' http://127.0.0.1:3000/api/pin" >/dev/null 2>&1 || true
 }
+
+# For a check's EXIT trap: pin_off, then the checks' own cleanup, which
+# still sees how the check ended.
+pin_off_then_cleanup() {
+  local status=$?
+  pin_off "$1"
+  (exit "$status")
+  cleanup
+}

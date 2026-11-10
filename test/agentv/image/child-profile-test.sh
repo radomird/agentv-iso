@@ -26,7 +26,7 @@ site=http://127.0.0.1:8769
 work=/tmp/agentv-profile-check
 PIN=4826
 # The PIN comes off again however the check ends.
-trap 'status=$?; pin_off "$PIN"; (exit "$status"); cleanup' EXIT
+trap 'pin_off_then_cleanup "$PIN"' EXIT
 
 # The service: who's watching, and a page for each profile.
 ssh_guest "mkdir -p $work/site/as && cat >$work/site/index.html" <<'HTML'

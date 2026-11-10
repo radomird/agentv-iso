@@ -18,7 +18,7 @@ start_vm_from_base
 wait_for_ssh 300 failure-pin-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-pin-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 # The PIN this check sets comes off again however the check ends.
-trap 'status=$?; pin_off 4826; (exit "$status"); cleanup' EXIT
+trap 'pin_off_then_cleanup 4826' EXIT
 
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 5

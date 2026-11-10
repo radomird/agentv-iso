@@ -18,7 +18,7 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 
 PIN=2468
 # The PIN comes off again however the check ends.
-trap 'status=$?; pin_off "$PIN"; (exit "$status"); cleanup' EXIT
+trap 'pin_off_then_cleanup "$PIN"' EXIT
 CHECK=/var/lib/agentv-check
 
 # until_json <url path> <jq filter> <seconds>: until the filter on what the
