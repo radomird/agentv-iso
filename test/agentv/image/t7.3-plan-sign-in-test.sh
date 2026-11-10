@@ -77,8 +77,7 @@ check "setup is on its AI step" jq -e '.setup.step == "ai" and .setup.done == fa
 
 # Claude's plan, with its terms accepted on a paired phone.
 tv_post /api/ai '{"provider": "claude", "path": "plan"}' >"$RUN_DIR/picked.json" 2>&1 || true
-code=$(ssh_guest "curl -fsS -X POST $TV/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "AGENTV_PHONE_URL=$PHONE agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check' "$PHONE")
 ssh_guest "AGENTV_PHONE_URL=$PHONE agentv-phone-call --errors $phone_key POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"plan\"}'" >"$RUN_DIR/accepted.json" 2>&1 || true
 check "Claude's plan is picked, with its terms accepted on the phone" jq -e '.ok == true' "$RUN_DIR/accepted.json"
 

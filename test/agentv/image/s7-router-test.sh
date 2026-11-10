@@ -148,8 +148,7 @@ put_key() {
   ssh_guest "curl -sS --max-time 20 -X PUT -H 'Content-Type: application/json' -d '{\"provider\":\"claude\",\"key\":\"$KEY\"}' http://127.0.0.1:3000/api/key" >"$RUN_DIR/$1.json" 2>&1 || true
 }
 put_key asked
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 ssh_guest "agentv-phone-call $phone_key POST /api/phone/terms '{\"provider\": \"claude\", \"path\": \"key\"}'" >"$RUN_DIR/accepted.json" 2>&1 || true
 put_key stored
 check "a key for claude is kept, as Settings → AI keeps it" jq -e '.set == true and .provider == "claude"' "$RUN_DIR/stored.json"

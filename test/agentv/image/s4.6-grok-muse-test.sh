@@ -22,8 +22,7 @@ wait_tv 240 >/dev/null || { capture_console "failure-grok-muse-no-tv"; check "th
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 sleep 3
 
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 
 # A key as Settings → AI gives it: its provider, the key, and where the

@@ -183,8 +183,7 @@ createServer(async (request, response) => {
 STANDIN
 ssh_guest "nohup node /tmp/router-standin.mjs $ROUTER_PORT >/tmp/router-standin.log 2>&1 </dev/null & disown" || true
 KEY="sk-ant-api03-agentvwhatsnew$(printf '0%.0s' {1..30})"
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone=$(pair_phone 'image check')
 # The key asks for Anthropic's terms first, which an adult accepts on a
 # phone (Q104), then it's kept.
 api PUT /api/key "{\"provider\":\"claude\",\"key\":\"$KEY\"}" provider-key-asked

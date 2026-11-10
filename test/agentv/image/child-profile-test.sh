@@ -25,6 +25,8 @@ id=local.profile-check
 site=http://127.0.0.1:8769
 work=/tmp/agentv-profile-check
 PIN=4826
+# The PIN comes off again however the check ends.
+trap 'status=$?; pin_off "$PIN"; (exit "$status"); cleanup' EXIT
 
 # The service: who's watching, and a page for each profile.
 ssh_guest "mkdir -p $work/site/as && cat >$work/site/index.html" <<'HTML'
@@ -131,5 +133,6 @@ guest "journalctl --user -b --no-pager -u agentv-screen" >"$RUN_DIR/screen.log" 
 check "the screen daemon logs the profile for children opening" grep -q "$id: opened the profile for children" "$RUN_DIR/screen.log"
 guest "agentv screen quit $id" >/dev/null 2>&1 || true
 guest "agentv app remove $id" >/dev/null 2>&1 || true
+pin_off "$PIN"
 stop_vm
 finish

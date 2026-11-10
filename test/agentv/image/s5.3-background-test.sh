@@ -43,8 +43,7 @@ sleep 2
 before=$(brightness home-before)
 
 # A phone on the box's own address pairs, as from the TV's code.
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 
 # The photo, made here, and sent from the phone with its credit.

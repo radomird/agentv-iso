@@ -77,8 +77,7 @@ check "the app's tile says Sign in before it's signed in" test "$(signs_in)" = "
 # A phone, paired on the box's own address.
 address=$(ssh_guest "ip -4 -o addr show scope global | awk '{print \$4}' | cut -d/ -f1 | head -n 1" 2>/dev/null || true)
 phone="http://$address:3001"
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call pair '$code' 'test phone'" 2>/dev/null || true)
+phone_key=$(pair_phone 'test phone' "$phone")
 check "a phone pairs" test -n "$phone_key"
 # on_phone <METHOD> <path> [<json>]: the phone's request, signed and sealed.
 on_phone() {

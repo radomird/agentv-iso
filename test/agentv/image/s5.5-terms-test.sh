@@ -63,8 +63,7 @@ ssh_guest "bash -lc 'mise ls --installed 2>&1'" >"$RUN_DIR/mise-waiting.txt" 2>&
 check "S5.5 and Claude Code still isn't on the box" bash -c "! grep -qi claude '$RUN_DIR/mise-waiting.txt'"
 
 # A phone on the box's own address pairs, hears the terms and accepts them.
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 # phone <path> [<json>]: the phone's request, signed and sealed.
 phone() {

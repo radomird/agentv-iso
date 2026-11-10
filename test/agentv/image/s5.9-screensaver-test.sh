@@ -95,8 +95,7 @@ sleep 2
 check "with no ttfx left" test -z "$(guest 'pgrep -x ttfx' 2>/dev/null)"
 
 # Then a press from a paired phone.
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 log "Leaving the TV alone again"
 took=$(until_screensaver 150) || took=""

@@ -31,8 +31,7 @@ put_key() {
 # a phone on the box's own address is asked to accept them.
 put_key asked
 check "Q104 a key for claude waits for claude's terms for a key" jq -e '.ok == false and .terms.provider == "claude" and .terms.terms[0].id == "anthropic-commercial-terms"' "$RUN_DIR/asked.json"
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 ssh_guest "agentv-phone-call $phone_key GET /api/phone/state" >"$RUN_DIR/phone.json" 2>&1 || true
 check "the phone is asked to accept claude's terms for a key" jq -e '.ai.ask == "terms" and .ai.provider == "claude" and .ai.path == "key"' "$RUN_DIR/phone.json"

@@ -50,8 +50,7 @@ check "the TV's page plays through the box's output" grep -qi "chrom" "$RUN_DIR/
 # getting ready, whose lines tick off with the TV's own sounds. Those aren't
 # the soundtrack's to mute, so both recordings wait for getting ready to
 # settle.
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-phone_key=$(ssh_guest "agentv-phone-call pair '$code' 'image check'" 2>/dev/null || true)
+phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 check "getting ready settles, with the soundtrack still playing" \
   until_json /api/setup '(.setup.ready.update | IN("none", "done", "failed", "skipped")) and (.setup.muted | not)' 120
