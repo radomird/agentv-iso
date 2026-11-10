@@ -69,8 +69,8 @@
 
 <script>
   // The token comes with the page on the TV's own Wi-Fi, or in the address
-  // the TV's code points at on the home network. Without it, this phone can
-  // look but not erase.
+  // the TV's code points at on the home network. Without it, a phone on the
+  // home network sees no disks and can't erase.
   const TOKEN = "{{TOKEN}}" || new URLSearchParams(location.search).get("t") || "";
   const $ = (id) => document.getElementById(id);
   let disks = [];
@@ -147,7 +147,7 @@
   // takes over.
   async function look() {
     try {
-      const response = await fetch("/api/first", { cache: "no-store" });
+      const response = await fetch("/api/first", { cache: "no-store", headers: TOKEN ? { "X-AgenTV-Token": TOKEN } : {} });
       if (response.status === 404 && installing) {
         location.replace("/");
         return;

@@ -159,6 +159,34 @@ class Page(unittest.TestCase):
         self.assertEqual([d["name"] for d in state["disks"]], ["nvme0n1", "sda"])
         self.assertEqual((state["step"], state["selected"]), (1, "/dev/nvme0n1"))
 
+    def test_f11_the_home_network_gets_no_disks_without_the_token(self):
+        # 127.0.0.2 isn't the hotspot's address, so this is the home network.
+        status, state = self.ask_json("GET", "/api/first", host="127.0.0.2", via="127.0.0.2")
+        self.assertEqual(status, 403)
+        self.assertNotIn("disks", state)
+        self.assertNotIn("step", state)
+        self.assertIn("scan the code on the tv", state["error"])
+        status, state = self.ask_json(
+            "GET", "/api/first", host="127.0.0.2", via="127.0.0.2", headers={"X-AgenTV-Token": "x" * 22}
+        )
+        self.assertEqual(status, 403)
+        self.assertNotIn("disks", state)
+
+    def test_f11_the_phone_that_scanned_the_code_still_gets_them_there(self):
+        token = {"X-AgenTV-Token": self.phone.token}
+        status, state = self.ask_json("GET", "/api/first", host="127.0.0.2", via="127.0.0.2", headers=token)
+        self.assertEqual(status, 200)
+        self.assertEqual([d["name"] for d in state["disks"]], ["nvme0n1", "sda"])
+        # And through the install, after the token has erased once.
+        self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda", "token": self.phone.token})
+        (self.run_dir / "screen.json").write_text(json.dumps({"step": 2, "disks": DISKS, "installing": "/dev/sda"}))
+        status, state = self.ask_json("GET", "/api/first", host="127.0.0.2", via="127.0.0.2", headers=token)
+        self.assertEqual((status, state["step"]), (200, 2))
+
+    def test_the_page_sends_its_token_when_it_asks_for_the_disks(self):
+        page = (HERE / "phone.html").read_text()
+        self.assertIn('fetch("/api/first", { cache: "no-store", headers: TOKEN ? { "X-AgenTV-Token": TOKEN } : {} })', page)
+
     def test_erase_and_install_needs_the_token_and_works_once(self):
         ask = self.run_dir / "ask.json"
         status, answer = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda"})

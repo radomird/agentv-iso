@@ -12,8 +12,8 @@ Only the phone that scanned the code can erase a disk. There's one token per
 boot, and "erase and install" needs it. A phone on the hotspot gets it with
 the page, since joining took the password from the TV's code. With no Wi-Fi
 card that can host a network, the code is the box's address on the home
-network with the token in it, and a phone there only gets in with that.
-The token works once.
+network with the token in it, and a phone there only gets in with that: it
+sees no disks without it. The token erases once.
 
 It keeps running through the install, so the phone keeps its page until the
 box restarts. The installed box opens the same network with the same
@@ -315,6 +315,12 @@ def make_handler(phone: Phone):
                 token = phone.token if self.on_hotspot() and not phone.spent else ""
                 self.send(200, page.replace("{{TOKEN}}", token).encode(), "text/html; charset=utf-8")
             elif path == "/api/first":
+                # The disks and the step are for the phone that scanned the
+                # TV's code: one on the hotspot, or one that has the token.
+                # Anything else on the home network gets no list.
+                if not self.on_hotspot() and not phone.check(self.headers.get("X-AgenTV-Token")):
+                    self.json(403, {"ok": False, "error": "scan the code on the tv to set it up from this phone"})
+                    return
                 state = screen()
                 self.json(200, {
                     "step": state.get("step", 1),
