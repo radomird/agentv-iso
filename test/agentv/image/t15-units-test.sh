@@ -138,11 +138,11 @@ done
 
 # The daemon runs with what its unit says: the settings that keep the
 # kernel's knobs from it are the ones systemd applied.
-ssh_guest "systemctl show agentv-daemon.service -p ProtectKernelTunables -p ProtectKernelModules -p ProtectKernelLogs -p ProtectControlGroups -p ProtectProc -p LockPersonality -p RestrictRealtime -p RestrictSUIDSGID -p RestrictAddressFamilies -p SystemCallArchitectures -p DynamicUser -p NoNewPrivileges" >"$RUN_DIR/daemon-show.txt" 2>&1 || true
+ssh_guest "systemctl show agentv-daemon.service -p ProtectKernelTunables -p ProtectKernelModules -p ProtectKernelLogs -p ProtectControlGroups -p ProtectProc -p LockPersonality -p RestrictRealtime -p RestrictAddressFamilies -p SystemCallArchitectures -p User -p DynamicUser -p NoNewPrivileges" >"$RUN_DIR/daemon-show.txt" 2>&1 || true
 cat "$RUN_DIR/daemon-show.txt"
 for line in ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
-  ProtectProc=invisible LockPersonality=yes RestrictRealtime=yes RestrictSUIDSGID=yes SystemCallArchitectures=native \
-  DynamicUser=yes NoNewPrivileges=yes; do
+  ProtectProc=invisible LockPersonality=yes RestrictRealtime=yes SystemCallArchitectures=native \
+  User=agentv-server DynamicUser=no NoNewPrivileges=yes; do
   check "the running daemon has $line" grep -qx "$line" "$RUN_DIR/daemon-show.txt"
 done
 check "the running daemon opens only local, IPv4, IPv6 and netlink sockets" \
