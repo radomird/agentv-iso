@@ -90,9 +90,8 @@ if ! ssh_guest "test -f /usr/share/agentv/launcher/backdrop.ts"; then
   exit 0
 fi
 
-# The switch on, as on an edge box, and video without hardware decoding.
-ssh_sudo "echo edge >/etc/agentv/channel && touch /etc/agentv/video-in-software" >"$RUN_DIR/switch.log" 2>&1 || true
-guest "agentv feature on dynamicbg" >>"$RUN_DIR/switch.log" 2>&1 || true
+# The switch is on, as every box has it, and video without hardware decoding.
+ssh_sudo "touch /etc/agentv/video-in-software" >"$RUN_DIR/switch.log" 2>&1 || true
 check "the daemon says the dynamic backgrounds are on" until_json /api/features '.dynamicbg == true' 10
 check "and that this box plays videos without hardware decoding" until_json /api/backgrounds '.softwareVideo == true' 10
 

@@ -51,7 +51,7 @@ screen_home() {
   [[ $(front '.front.role // ""') == "home" ]] || return 1
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
   capture_console "$1"
-  grep -qi "installed" "$RUN_DIR/$1.txt"
+  grep -qiE "$HOME_TEXT" "$RUN_DIR/$1.txt"
 }
 started=$SECONDS
 until screen_home "success-restart-home" || (( SECONDS - started > 240 )); do sleep 5; done

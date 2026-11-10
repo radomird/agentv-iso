@@ -33,8 +33,8 @@ check "S0.1 the welcome screen is on the TV (daemon /health)" \
 sleep 5
 capture_console "success-S0.1-welcome"
 # TV setup's welcome screen has the code to pair the phone beside its words,
-# so OCR reads it as scattered text too (ocr_finds).
-check "S0.1 the screen shows the welcome page (OCR)" ocr_finds success-S0.1-welcome-ocr "tv setup" 15
+# so OCR reads it as scattered text too (ocr_finds), by its words in tv.sh.
+check "S0.1 the screen shows the welcome page (OCR)" ocr_finds success-S0.1-welcome-ocr "$WELCOME_TEXT" 15
 
 stop_vm
 finish
