@@ -153,6 +153,8 @@ done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
 ssh_guest "sudo cat $DIR/try.json $DIR/try.err" >"$RUN_DIR/try.txt" 2>&1 || true
+# Said here, so a failed run's log has why the test TV didn't come up.
+head -c 3000 "$RUN_DIR/try.txt" | sed 's/^/the test TV said: /' || true
 ssh_guest "sudo cat $DIR/bwrap.txt" >"$RUN_DIR/bwrap.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true

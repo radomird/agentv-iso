@@ -73,11 +73,13 @@ say muse-settings 'echo "{}" >~/.config/muse/settings.json'
 say own-folders 'mkdir -p ~/.grok ~/.codex ~/.gemini-agentv/.gemini && echo x >~/.grok/config.toml && echo x >~/.gemini-agentv/.gemini/settings.json'
 say build-write 'mkdir -p $DIR/work && touch $DIR/work/made'
 
-# The app's own worker, as the contract tests start it: under bubblewrap.
+# The app's own worker, as the contract tests start it: in the sandbox
+# every app's worker starts in (daemon/apps/loader.ts).
 mkdir -p $DIR/work/fixtures/pages
 cp -r /usr/share/agentv/builder/recipes/streaming/template/app $DIR/work/app
 echo $MARK >$DIR/work/fixtures/pages/page.html
-mapfile -t jail < <(node --disable-warning=ExperimentalWarning --input-type=module -e "const { workerJail } = await import('/usr/share/agentv/builder/contract-run.ts'); console.log(workerJail({ app: '$DIR/work/app', build: '$DIR', home: '$HOME_DIR' }).join('\n'))")
+mapfile -t jail < <(node --disable-warning=ExperimentalWarning --input-type=module -e "const { workerJail, systemPaths } = await import('/usr/share/agentv/daemon/apps/loader.ts'); const { realpathSync } = await import('node:fs'); console.log(['bwrap', ...workerJail({ dir: '$DIR/work/app', node: realpathSync(process.execPath), read: [], system: systemPaths() })].join('\n'))")
+[ "\${#jail[@]}" -gt 1 ] || jail=(false)
 printf '%s\n' "\${jail[@]}" >$DIR/jail.txt
 "\${jail[@]}" true >>$DIR/jail.txt 2>&1
 say jail '"\${jail[@]}" true'
@@ -85,7 +87,7 @@ say jail-app '"\${jail[@]}" cat $DIR/work/app/manifest.json'
 say jail-app-write '"\${jail[@]}" touch $DIR/work/app/added'
 say jail-sign-in '"\${jail[@]}" cat $HOME_DIR/.claude/.credentials.json'
 say jail-cli '"\${jail[@]}" test -e $HOME_DIR/.local/bin/claude'
-say jail-home-empty '[ -z "\$("\${jail[@]}" ls -A $HOME_DIR)" ]'
+say jail-home '"\${jail[@]}" test -e $HOME_DIR'
 say jail-page '"\${jail[@]}" cat $DIR/work/fixtures/pages/page.html'
 say jail-way-out '"\${jail[@]}" ls /run/agentv-build-net'
 node --disable-warning=ExperimentalWarning --input-type=module -e "const { forward } = await import('/usr/share/agentv/builder/sandbox/start.ts'); await forward(8080, '/run/agentv-build-net/proxy.sock'); await new Promise(() => {});" &
@@ -96,10 +98,9 @@ say jail-filter '"\${jail[@]}" curl -s -o /dev/null --max-time 10 -x http://127.
 kill \$forwarder
 node --disable-warning=ExperimentalWarning --input-type=module -e "
 const { AppHost } = await import('/usr/share/agentv/daemon/apps/loader.ts');
-const { workerJail } = await import('/usr/share/agentv/builder/contract-run.ts');
 const { readFileSync } = await import('node:fs');
 const app = '$DIR/work/app';
-const host = new AppHost({ dir: app, manifest: JSON.parse(readFileSync(app + '/manifest.json', 'utf8')), wrap: workerJail({ app, build: '$DIR', home: '$HOME_DIR' }) });
+const host = new AppHost({ dir: app, manifest: JSON.parse(readFileSync(app + '/manifest.json', 'utf8')) });
 try { await host.start(); console.log('started'); } catch (error) { console.log('failed: ' + error.message); }
 host.stop();
 " >$DIR/worker.txt 2>&1
@@ -156,7 +157,7 @@ check "H3 the worker sees its own package" said yes jail-app
 check "H3 and can't write it" said no jail-app-write
 check "H3 the plan's sign-in isn't there to it" said no jail-sign-in
 check "H3 nor the CLI" said no jail-cli
-check "H3 the builder's home is an empty folder to it" said yes jail-home-empty
+check "H3 the builder's home isn't there to it at all" said no jail-home
 check "H3 nor a page the build saved" said no jail-page
 check "H3 nor the build's way out" said no jail-way-out
 check "the build itself reaches its filter" said yes filter-outside
