@@ -18,7 +18,7 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 MARK="agentv-plan-$RANDOM$RANDOM"
 TOKEN="sk-ant-oat01-$MARK"
 HOME_DIR=/var/lib/agentv/builder
-DROP=/var/lib/private/agentv/daemon/build-drop
+DROP=/var/lib/agentv/daemon/build-drop
 RUN=/run/agentv-build
 UNIT='agentv-builder-sign-in@claude.service'
 
