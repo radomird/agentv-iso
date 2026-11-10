@@ -34,14 +34,17 @@ check "setup starts on the welcome screen" until_json /api/setup '.setup.step ==
 # On to the AI step with the keyboard: Enter on the welcome screen, then
 # getting ready moves on once it's checked for a newer agentv.
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
-check "getting ready moves on to the next step" until_json /api/setup '.setup.step == "country" or .setup.step == "ai"' 400
-# Where the TV is, on a release that has that step: finished as it stands,
-# so setup goes on to the AI step.
-if [[ $(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -r '.setup.step' 2>/dev/null) == "country" ]]; then
-  ssh_guest "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"step\": \"country\"}' http://127.0.0.1:3000/api/setup/finish" >>"$RUN_DIR/input.log" 2>&1 || true
-fi
+check "getting ready moves on to the next step" until_json /api/setup '.setup.step == "box" or .setup.step == "country" or .setup.step == "ai"' 400
+# Your box and where the TV is, on a release that has those steps: each
+# finished as it stands, so setup goes on to the AI step.
+for step in box country; do
+  if [[ $(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -r '.setup.step' 2>/dev/null) == "$step" ]]; then
+    ssh_guest "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"step\": \"$step\"}' http://127.0.0.1:3000/api/setup/finish" >>"$RUN_DIR/input.log" 2>&1 || true
+    sleep 2
+  fi
+done
 check "then the AI step" until_json /api/setup '.setup.step == "ai"' 60
-check "the AI step is on the TV (OCR)" ocr_finds success-S5.5-pick "which ai do you use|pick one" 30
+check "the AI step is on the TV (OCR)" ocr_finds success-S5.5-pick "pick your ai|which ai do you use|pick one" 30
 capture_console "success-S5.5-pick"
 
 # What mise has before anything's accepted, for the record.
@@ -89,8 +92,10 @@ ssh_guest "curl -fsS http://127.0.0.1:3000/api/ai" >"$RUN_DIR/ai.json" 2>&1 || t
 check "S5.5 once they're accepted, Claude Code arrives on its first run ($(jq -r '"\(.cli.state // "nothing"): \(.cli.version // .cli.error // "")"' "$RUN_DIR/ai.json" 2>/dev/null))" \
   jq -e '.cli.state == "ready" and .cli.cli == "claude"' "$RUN_DIR/ai.json"
 check "and claude runs for the owner" guest "claude --version"
-# A plan signs in at the first build (ADR-040): the TV says it's ready.
-check "the TV says it's ready, with the terms accepted (OCR)" ocr_finds success-S5.5-done "ready\\.|terms accepted" 30
+# With the terms accepted, the AI step goes on to the plan's sign-in, its
+# code to scan on the TV. A release before it signed in at the first build
+# (ADR-040), and said it was ready. OCR reads "sign in" as "sign 1n" too.
+check "the TV goes on to the plan's sign-in, with the terms accepted (OCR)" ocr_finds success-S5.5-done "sign [i1]n to claude|scan to sign in|ready\\.|terms accepted" 30
 capture_console "success-S5.5-done"
 
 stop_vm

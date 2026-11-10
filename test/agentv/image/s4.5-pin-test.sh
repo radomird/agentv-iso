@@ -116,8 +116,8 @@ restart() {
 restart open
 check "ADR-034 after a restart, a profile that doesn't ask for the PIN isn't locked" jq -e '.set == true and .locked == false' <<<"$(pin_status)"
 started=$SECONDS
-until says "success-pin-open" "installed" || (( SECONDS - started > 60 )); do sleep 3; done
-check "ADR-034 and home is there, with no pad (OCR)" says "success-pin-open" "installed"
+until says "success-pin-open" "$HOME_TEXT" || (( SECONDS - started > 60 )); do sleep 3; done
+check "ADR-034 and home is there, with no pad (OCR)" says "success-pin-open" "$HOME_TEXT"
 
 # The owner's profile asks for it now: after a restart the TV is locked,
 # until the PIN.
@@ -132,8 +132,8 @@ guest "agentv input key 4 8 2 6" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 3
 check "the PIN typed with the remote unlocks it" jq -e '.locked == false' <<<"$(pin_status)"
 started=$SECONDS
-until says "success-pin-unlocked" "installed" || (( SECONDS - started > 30 )); do sleep 3; done
-check "and home is back (OCR)" says "success-pin-unlocked" "installed"
+until says "success-pin-unlocked" "$HOME_TEXT" || (( SECONDS - started > 30 )); do sleep 3; done
+check "and home is back (OCR)" says "success-pin-unlocked" "$HOME_TEXT"
 
 ssh_sudo "journalctl -u agentv-daemon --no-pager" >"$RUN_DIR/daemon.log" 2>&1 || true
 # Only what the daemon said, as words: the journal's boot IDs, PIDs and

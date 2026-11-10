@@ -44,19 +44,23 @@ check "the owner's theme hand-over is waiting in their session" test "$(guest "s
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
+# Your box, on a release that has the step.
+setup_post /api/setup/finish '{"step": "box"}' || true
 # Where the TV is (ADR-055), on a release that has the step.
 setup_post /api/setup/finish '{"step": "country"}' || true
 for step in ai people; do setup_post /api/setup/finish "{\"step\": \"$step\"}"; done
 setup_post /api/setup/goal '{"goal": "streaming"}'
 setup_post /api/setup/finish '{"step": "goal"}'
 setup_post /api/setup/finish '{"step": "apps"}'
+# The look for home, on a release that has the step, as it stands.
+setup_post /api/setup/finish '{"step": "look"}' || true
 check "setup is at its look" until_json /api/setup '.setup.step == "theme"' 30
 # Tokyo Night first, then the rest (every theme Omarchy has since ADR-048,
 # three before it). The right arrow goes to the second.
 check "the look offers Tokyo Night first, Gruvbox and Catppuccin Latte among the rest, and the TV has Tokyo Night" \
   until_json /api/themes '.themes[0].id == "tokyo-night" and ([.themes[].id] | index("gruvbox") and index("catppuccin-latte")) and .current == "tokyo-night"' 30
 next=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/themes" 2>/dev/null | jq -r '.themes[1].id // ""')
-check "the look is on the TV (OCR)" ocr_finds success-S5.2-look "pick a look|describe your own" 30
+check "the look is on the TV (OCR)" ocr_finds success-S5.2-look "pick a theme|pick a look|describe your own" 30
 capture_console "success-S5.2-look"
 
 started=$SECONDS
@@ -69,13 +73,14 @@ log "${next:-The second look} from the TV took $(( SECONDS - started )) s, Omarc
 guest "cat ~/.local/state/omarchy/current/theme.name" >"$RUN_DIR/theme-name.txt" 2>&1 || true
 check "and it's Omarchy's theme now" grep -qx "$next" "$RUN_DIR/theme-name.txt"
 capture_console "success-S5.2-picked"
-for key in up enter; do
+# The theme and the background are one screen: down from the themes to the
+# theme's own background, and OK on it finishes setup. The background has a
+# check of its own.
+for key in down enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
 done
-# Continue moves setup on: to its background once that step is there, or
-# home. The background has a check of its own, so it skips it.
-check "continue moves setup on from its look" until_json /api/setup '.setup.done or (.setup.step != "theme")' 30
+check "OK on the theme's own background moves setup on from its look" until_json /api/setup '.setup.done or (.setup.step != "theme")' 30
 guest "agentv setup skip" >>"$RUN_DIR/input.log" 2>&1 || true
 took=$(wait_home 60) || took=""
 check "and home takes over${took:+ (after $took s)}" test -n "$took"

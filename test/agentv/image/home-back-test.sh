@@ -103,7 +103,9 @@ sleep 1
 capture_console "success-home-back-corner"
 corner_text=""
 if [[ -s $RUN_DIR/success-home-back-corner.png ]]; then
-  corner_text=$(magick "$RUN_DIR/success-home-back-corner.png" -gravity northwest -crop 25%x20%+0+0 +repage -colorspace gray -resize 300% png:- 2>/dev/null |
+  # The corner alone, read at 1920 x 1080 even on QEMU's 4K screen: a crop
+  # that takes in the app's page too reads neither.
+  corner_text=$(magick "$RUN_DIR/success-home-back-corner.png" -resize '1920x1080>' -gravity northwest -crop 15%x10%+0+0 +repage -colorspace gray -resize 300% png:- 2>/dev/null |
     tesseract - - --psm 6 2>/dev/null || true)
 fi
 check "S2.16 the pointer in the top left corner shows Home there (OCR: ${corner_text//$'\n'/ })" grep -qi "home" <<<"$corner_text"
