@@ -139,8 +139,20 @@ capture_console "success-S5.10-video"
 key back
 check "Back closes the player" until_tv '(.playing | not)' 15
 
-# A link no app declares: the share browser, on its own profile.
-share link "http://127.0.0.1:8765/?shared=1" >"$RUN_DIR/link.json" 2>&1 || true
+# A link no app declares: the share browser, on its own profile. The TV
+# takes no link to itself, so the page is served from an address that isn't
+# the box's: a network namespace of its own, joined to the box by a pair of
+# virtual devices.
+passwordless_sudo
+ssh_guest "sudo ip netns add share-page && sudo ip link add share-box type veth peer name share-far && sudo ip link set share-far netns share-page && sudo ip addr add 10.213.7.1/30 dev share-box && sudo ip link set share-box up && sudo ip netns exec share-page ip addr add 10.213.7.2/30 dev share-far && sudo ip netns exec share-page ip link set share-far up && sudo ip netns exec share-page ip link set lo up" >"$RUN_DIR/share-page.log" 2>&1 || true
+ssh_guest "cd /tmp/agentv-page && (sudo nohup ip netns exec share-page python3 -m http.server 8765 --bind 10.213.7.2 >/dev/null 2>&1 &)"
+check "a page on another address than the box's answers" ssh_guest "curl -fsS --max-time 5 --retry 5 --retry-connrefused -o /dev/null http://10.213.7.2:8765/"
+share link "http://127.0.0.1:8765/?shared=1" >"$RUN_DIR/own-link.json" 2>&1 || true
+not_taken() {
+  ! jq -e '.share.kind == "link"' "$1" >/dev/null 2>&1
+}
+check "the TV takes no link to itself" not_taken "$RUN_DIR/own-link.json"
+share link "http://10.213.7.2:8765/?shared=1" >"$RUN_DIR/link.json" 2>&1 || true
 check "S5.10 the phone shares a link" jq -e '.share.kind == "link"' "$RUN_DIR/link.json"
 check "S5.10 the TV asks about the link (OCR)" asks success-S5.10-link-notice "link" 30
 key enter
