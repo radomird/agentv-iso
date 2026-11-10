@@ -12,6 +12,11 @@
 # Runs only when the image run names the channel that has the next release
 # (AGENTV_TEST_OMARCHY_CHANNEL, rc until stable serves it), with a newer
 # agentv to update to (AGENTV_TEST_UPDATE_REPO, as S0.5).
+#
+# The release it expects is the one this repo follows (.github/omarchy-release),
+# unless the run names another (AGENTV_TEST_OMARCHY_VERSION, like 4.6.0): the
+# scheduled run that tries Omarchy's release candidates does, since a
+# candidate is ahead of what the fork follows.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -24,7 +29,8 @@ fi
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 release=$(sed -n '1{s/[[:space:]]//g;p;}' "$ROOT/.github/omarchy-release")
-want=${release#v}
+want=${AGENTV_TEST_OMARCHY_VERSION:-${release#v}}
+want=${want#v}
 
 port=$((SSH_PORT + 4))
 (cd "$AGENTV_TEST_UPDATE_REPO" && exec python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1) &

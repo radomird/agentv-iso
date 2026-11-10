@@ -49,6 +49,20 @@ for package in "${packages[@]}"; do
     if [[ -f $file ]]; then ssh_guest "cat >$remote" <"$file"; fi
   done
 done
+# A pull request's run signs its packages with a throwaway key made for the
+# run, never with AgenTV's own (agentv-os's image.yml), and the night's box
+# has never seen that key. So root says it's good, on this run's box only,
+# the way agentv-keyring says so for AgenTV's. The run's own agentv-keyring,
+# one of the packages below, carries it from then on.
+if [[ -n ${AGENTV_TEST_PACKAGE_KEY:-} ]]; then
+  test_key=$(gpg --batch --with-colons --show-keys "$AGENTV_TEST_PACKAGE_KEY" | awk -F: '$1 == "fpr" { print $10; exit }')
+  [[ $test_key =~ ^[0-9A-F]{40}$ ]] || { echo "AGENTV_TEST_PACKAGE_KEY isn't a public key: $AGENTV_TEST_PACKAGE_KEY" >&2; exit 1; }
+  ssh_guest "cat >/tmp/agentv-packages/test-key.asc" <"$AGENTV_TEST_PACKAGE_KEY"
+  ssh_sudo "pacman-key --add /tmp/agentv-packages/test-key.asc && pacman-key --lsign-key $test_key" >"$RUN_DIR/test-key.log" 2>&1 ||
+    { tail -n 20 "$RUN_DIR/test-key.log"; }
+  check "the night's box takes this run's throwaway key for its packages" ssh_sudo "pacman-key --list-keys $test_key"
+fi
+
 # The box's own package lists first, from its mirrors, so a dependency
 # AgenTV's packages have gained since the night, such as esbuild and npm
 # with stage 6, comes from them. Nothing else is upgraded.

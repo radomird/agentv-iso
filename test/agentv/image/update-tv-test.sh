@@ -54,6 +54,7 @@ wait_tv 240 >/dev/null || true
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 ssh_sudo "install -d /etc/agentv && echo http://10.0.2.2:$port >/etc/agentv/repository"
 before=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
+lends=$(ssh_guest "test -x /usr/bin/agentv-sudo-lend && echo yes" 2>/dev/null) || lends=""
 kernel=$(ssh_guest "uname -r")
 boot_id=$(ssh_guest "cat /proc/sys/kernel/random/boot_id")
 
@@ -130,8 +131,39 @@ ocr_screen >"$RUN_DIR/success-update-tv-updating.txt" 2>/dev/null || true
 capture_console "success-update-tv-updating"
 check "S2.12 the TV shows the Updating screen (OCR)" grep -qi "updating to agentv" "$RUN_DIR/success-update-tv-updating.txt"
 
-log "Waiting for the update to finish"
-until_file '.state != "running"' /var/lib/agentv/update/progress.json 2400 || true
+# While it runs, the owner has no more sudo than before: no rule of AgenTV's
+# in /etc/sudoers.d at any moment, and sudo still asks the owner for a
+# password. Looked at every few seconds until the update is done. A box that
+# stops answering, as one that restarts does, isn't taken for either.
+log "Waiting for the update to finish, and watching sudo while it runs"
+: >"$RUN_DIR/sudo-during-update.txt"
+looks=0
+started=$SECONDS
+while (( SECONDS - started < 2400 )); do
+  state=$(ssh_guest "cat /var/lib/agentv/update/progress.json 2>/dev/null" | jq -r .state 2>/dev/null) || state=""
+  [[ $state == "running" ]] || break
+  # One line a look: the rules of AgenTV's there are, then whether sudo let
+  # the owner through without a password.
+  if seen=$(ssh_guest "ls /etc/sudoers.d 2>/dev/null | grep -c '^99-agentv-' ; if sudo -n true 2>/dev/null; then echo open; else echo asks; fi" 2>/dev/null | paste -sd' ' -) && [[ -n $seen ]]; then
+    echo "$seen" >>"$RUN_DIR/sudo-during-update.txt"
+    looks=$(( looks + 1 ))
+  fi
+  sleep 3
+done
+# The Nightly's edge leg runs this on edge's last build, which may be from
+# before the update stopped writing a rule (it has no agentv-sudo-lend), so
+# on such a box this waits.
+if [[ $lends == "yes" ]]; then
+  check "the update ran long enough to look at sudo while it did ($looks looks)" test "$looks" -ge 3
+  # shellcheck disable=SC2016 # the single quotes hold the command bash runs
+  check "H1 no sudo rule of AgenTV's is in /etc/sudoers.d at any point of an update from the TV" \
+    bash -c '! grep -qv "^0 " "$1"' _ "$RUN_DIR/sudo-during-update.txt"
+  # shellcheck disable=SC2016
+  check "H1 sudo asks the owner for a password all through an update from the TV" \
+    bash -c '! grep -q "open" "$1"' _ "$RUN_DIR/sudo-during-update.txt"
+else
+  log "This agentv still writes a sudo rule for an update; H1's checks wait for the next one"
+fi
 ssh_guest "cat /var/lib/agentv/update/progress.json" >"$RUN_DIR/progress.json" 2>&1 || true
 check "S2.12 the update finishes ($(jq -r '"\(.state): \(.detail)"' "$RUN_DIR/progress.json" 2>/dev/null))" \
   jq -e '.state == "done" or .state == "restarting"' "$RUN_DIR/progress.json"
@@ -156,10 +188,14 @@ fi
 
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 check "S2.12 the box is on agentv $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
-# AgenTV's own grant (99-agentv-update-<owner>) from 0.2 on, and the one
-# named like Omarchy's before it.
-check "the owner's sudo goes back to asking for a password" \
-  ssh_sudo "! ls /etc/sudoers.d/99-agentv-update-* /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
+# Nothing of AgenTV's (99-agentv-update-<owner>, which earlier versions
+# wrote for the update) or named like Omarchy's own grant, which the ones
+# before those used.
+check "no sudo rule is left after an update from the TV" \
+  ssh_sudo "! ls /etc/sudoers.d/99-agentv-* /etc/sudoers.d/99-omarchy-nopasswd-* 2>/dev/null | grep -q ."
+check "and sudo still asks the owner for a password" ssh_guest "! sudo -n true"
+check "AgenTV's migrations ran in the update from the TV" \
+  ssh_guest "grep -qE 'AgenTV migration|No AgenTV migrations to run' /var/lib/agentv/update/update.log"
 # Omarchy's update ends by restarting its shell in the session that's
 # running; the TV session stops it again.
 check "after an update from the TV, Omarchy's shell isn't on the TV: no bar, no process (ADR-031)" no_omarchy_shell 30

@@ -65,6 +65,15 @@ home_post() {
   ssh_live_root "curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Content-Type: application/json' -d '$1' http://10.0.2.15/api/first/install" 2>/dev/null || true
 }
 check "T1.4 erase and install from the home network without the token is refused" test "$(home_post '{"disk": "/dev/vda"}')" = 403
+# F11: the disks are for the phone that scanned the code, not the whole
+# home network.
+home_first() {
+  ssh_live_root "curl -s --max-time 10 $1 http://10.0.2.15/api/first" 2>/dev/null || true
+}
+check "F11 the home network gets no disk list without the token" \
+  jq -e '.ok == false and (has("disks") | not)' <<<"$(home_first "")"
+check "F11 and the phone with the token from the code gets it" \
+  jq -e '.step == 1 and (.disks | map(.path) | index("/dev/vda") != null)' <<<"$(home_first "-H 'X-AgenTV-Token: $token'")"
 
 # A Wi-Fi card that can host a network: two simulated radios, the box's and
 # the phone's.
