@@ -42,8 +42,9 @@ ROOT_HELPERS=(agentv-firstboot agentv-update-check agentv-update-tv agentv-updat
   agentv-wake agentv-app-package@ agentv-boot-splash-release)
 # A unit's own ceiling, when its class's is too loose or too tight for it.
 # The daemon forks app workers and reads the GPU, so it keeps more than the
-# router does. It scored 6.3.
-declare -A CEILING=([agentv-daemon]=6.5)
+# router does. It scored 6.3. Fetching a provider's CLI needs the whole
+# network and a home it writes, and scored 4.8.
+declare -A CEILING=([agentv-daemon]=6.5 [agentv-builder-cli@]=5.0)
 
 start_vm_from_base
 wait_for_ssh 300 failure-t15-units-ssh-timeout || exit 1

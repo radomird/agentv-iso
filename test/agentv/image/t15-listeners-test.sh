@@ -72,6 +72,8 @@ loopback() {
 # Docker's containers.
 allowed() {
   local proto=$1 addr=$2 port=$3 name=$4
+  # ss names a process by its main thread, and Node's is "node-MainThread".
+  [[ $name == node* ]] && name=node
   case "$proto $port $name" in
     "tcp 3001 node" | "tcp 3002 node") return 0 ;; # the daemon: phones, and the captive page
     "tcp 22 sshd") return 0 ;; # this test's harness
