@@ -57,6 +57,18 @@ shot() {
   screendump "$RUN_DIR/$1.ppm"
 }
 
+# Home's clock changes as a minute turns, so two frames meant to be the same
+# aren't taken across one: this waits while the minute is about to turn or
+# just has.
+clear_of_minute() {
+  local s
+  s=$(( 10#$(date +%S) ))
+  while (( s >= 55 || s < 3 )); do
+    sleep 1
+    s=$(( 10#$(date +%S) ))
+  done
+}
+
 # The theme set as the owner, with Omarchy's own command.
 theme_set() {
   guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarchy-theme-set $1" >>"$RUN_DIR/theme-set.log" 2>&1 || true
@@ -128,6 +140,7 @@ check "T6.2 and it moves (frames 0.4 s apart differ by ${steps% }, out of 1; $mo
 
 # It ends on its still, and stays there.
 sleep 10
+clear_of_minute
 shot still-1
 sleep 1.5
 shot still-2
@@ -146,6 +159,7 @@ off=$(backgrounds '.theme.introDue')
 check "and its background has an intro" test -n "$(current_intro)"
 check "T6.2 with the intros off, home shows the still instead, and says why" \
   until_json /api/backgrounds ".theme.introShown == {\"due\": \"$off\", \"how\": \"still\", \"why\": \"intros-off\"}" 30
+clear_of_minute
 shot off-1
 sleep 1.5
 shot off-2
