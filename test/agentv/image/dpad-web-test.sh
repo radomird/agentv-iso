@@ -32,13 +32,13 @@ sleep 3
 code=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones" 2>/dev/null | jq -r '.pairing.code // empty' 2>/dev/null || true)
 address=$(ssh_guest "ip -4 -o addr show scope global | awk '{print \$4}' | cut -d/ -f1 | head -n 1" 2>/dev/null || true)
 phone="http://$address:3001"
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\":\"$code\",\"name\":\"test phone\"}' $phone/api/phone/pair" 2>/dev/null | jq -r '.token // empty' 2>/dev/null || true)
-check "a phone pairs" test -n "$token"
+phone_key=$(ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call pair '$code' 'test phone'" 2>/dev/null || true)
+check "a phone pairs" test -n "$phone_key"
 
 # press <key>: the phone's d-pad, through the daemon, as the web companion
 # sends it.
 press() {
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '{\"key\":\"$1\"}' $phone/api/phone/remote" >>"$RUN_DIR/remote.log" 2>&1 || true
+  ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call $phone_key POST /api/phone/remote '{\"key\":\"$1\"}'" >>"$RUN_DIR/remote.log" 2>&1 || true
   sleep 0.7
 }
 

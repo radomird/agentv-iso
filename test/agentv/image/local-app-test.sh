@@ -18,6 +18,8 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 start_vm_from_base
 wait_for_ssh 300 failure-local-app-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-local-app-no-tv"; check "the TV session came up" false; stop_vm; finish; }
+# The PIN this check sets comes off again however the check ends.
+trap 'pin_off_then_cleanup 4826' EXIT
 passwordless_sudo
 
 guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
@@ -196,5 +198,6 @@ check "its folder is gone" ssh_guest "test ! -e /var/lib/agentv/apps/$id"
 check "ADR-039 and the TV's Apps drop it within 10 s" gone 10
 
 ssh_guest "journalctl -b --no-pager -u agentv-daemon" >"$RUN_DIR/daemon.log" 2>&1 || true
+pin_off 4826
 stop_vm
 finish

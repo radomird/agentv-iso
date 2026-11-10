@@ -5,6 +5,10 @@
 # phone on the box's own address pairs with the code the TV shows, and its
 # d-pad and typed text reach the home screen through the screen daemon and
 # the virtual input device. Settings → Phones shows the code and its QR code.
+#
+# The phone signs and seals what it sends, so the box's own agentv-phone-call
+# stands in for it. A request with no signature, or with only a token as
+# phones once sent, gets nothing.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -44,7 +48,7 @@ pairing=$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones" 2>/dev/null || 
 code=$(jq -r '.pairing.code // empty' <<<"$pairing")
 check "the TV shows a code to pair with" test -n "$code"
 own_address() {
-  [[ $(jq -r '.pairing.url // empty' <<<"$pairing") == "http://$address:3001/?code=$code" ]]
+  [[ $(jq -r '.pairing.url // empty' <<<"$pairing") == "http://$address:3001/" ]]
 }
 check "and its address is the box's own on the network" own_address
 qr() {
@@ -72,9 +76,36 @@ not_tv() {
   [[ $(ssh_guest "curl -s -o /dev/null -w '%{http_code}' $phone/api/home" 2>/dev/null) != "200" ]]
 }
 check "and nothing of the TV's own is" not_tv
-paired=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\":\"$code\",\"name\":\"test phone\"}' $phone/api/phone/pair" 2>/dev/null || true)
-token=$(jq -r '.token // empty' <<<"$paired")
-check "the phone pairs with the code" test -n "$token"
+# The code sent as it is, the way phones once paired, is a wrong try and
+# pairs nothing.
+old_pair() {
+  [[ $(ssh_guest "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{\"code\":\"$code\",\"name\":\"old phone\"}' $phone/api/phone/pair" 2>/dev/null) == "403" ]]
+}
+check "the code sent in the clear pairs nothing" old_pair
+phone_key=$(ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call pair '$code' 'test phone'" 2>/dev/null || true)
+check "the phone pairs with the code" test -n "$phone_key"
+key_file() {
+  [[ $(ssh_guest "stat -c %a $phone_key" 2>/dev/null) == "600" ]]
+}
+check "and keeps a key of its own" key_file
+signed_state() {
+  [[ $(ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call $phone_key GET /api/phone/state" 2>/dev/null | jq -r '.phone.name // empty') == "test phone" ]]
+}
+check "a request it signs is answered" signed_state
+# Without a signature there's no answer, token or not.
+unsigned() {
+  local header=""
+  [[ -n ${1:-} ]] && header="-H 'Authorization: Bearer $1'"
+  [[ $(ssh_guest "curl -s -o /dev/null -w '%{http_code}' $header $phone/api/phone/state" 2>/dev/null) == "401" ]]
+}
+check "a request with no signature is refused" unsigned
+check "and so is one with only a token" unsigned "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"
+# What's kept on the box is the phone's key, in a file only the daemon reads.
+stored() {
+  [[ $(ssh_sudo "stat -L -c %a /var/lib/agentv/daemon/phones.json" 2>/dev/null) == "600" ]] &&
+    ssh_sudo "cat /var/lib/agentv/daemon/phones.json" 2>/dev/null | jq -e '.phones | length > 0 and all(.[]; (.key | type == "string") and (has("token") | not))' >/dev/null
+}
+check "the box keeps the phone's key, and no token, in a file only the daemon reads" stored
 sleep 2
 check "Settings → Phones lists it" jq -e '.phones | map(.name) | index("test phone") != null' <<<"$(ssh_guest "curl -fsS http://127.0.0.1:3000/api/phones")"
 
@@ -85,7 +116,7 @@ guest "agentv screen keys 8" >"$RUN_DIR/keys.json" 2>&1 &
 keys=$!
 sleep 2
 for body in '{"key":"down"}' '{"key":"right"}' '{"text":"tv"}'; do
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' -d '$body' $phone/api/phone/remote" >>"$RUN_DIR/remote.log" 2>&1 || true
+  ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call $phone_key POST /api/phone/remote '$body'" >>"$RUN_DIR/remote.log" 2>&1 || true
   sleep 0.5
 done
 wait "$keys" || true

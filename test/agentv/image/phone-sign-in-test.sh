@@ -77,23 +77,25 @@ check "the app's tile says Sign in before it's signed in" test "$(signs_in)" = "
 # A phone, paired on the box's own address.
 address=$(ssh_guest "ip -4 -o addr show scope global | awk '{print \$4}' | cut -d/ -f1 | head -n 1" 2>/dev/null || true)
 phone="http://$address:3001"
-code=$(ssh_guest "curl -fsS -X POST http://127.0.0.1:3000/api/phones/pair" 2>/dev/null | jq -r '.pairing.code // empty')
-token=$(ssh_guest "curl -fsS -H 'Content-Type: application/json' -d '{\"code\":\"$code\",\"name\":\"test phone\"}' $phone/api/phone/pair" 2>/dev/null | jq -r '.token // empty')
-check "a phone pairs" test -n "$token"
+phone_key=$(pair_phone 'test phone' "$phone")
+check "a phone pairs" test -n "$phone_key"
+# on_phone <METHOD> <path> [<json>]: the phone's request, signed and sealed.
 on_phone() {
-  ssh_guest "curl -fsS -H 'Authorization: Bearer $token' -H 'Content-Type: application/json' $*"
+  local body=""
+  [[ -n ${3:-} ]] && body=" '$3'"
+  ssh_guest "AGENTV_PHONE_URL=$phone agentv-phone-call $phone_key $1 $2$body"
 }
 
 # S4.7: a tile moved on the phone, the built-in weather's, is where the
 # daemon keeps it.
-on_phone "-X PUT -d '{\"layout\":[{\"id\":\"agentv.weather\",\"x\":3,\"y\":2,\"size\":\"s\"}]}' $phone/api/phone/layout" >"$RUN_DIR/layout.json" 2>&1 || true
+on_phone PUT /api/phone/layout '{"layout":[{"id":"agentv.weather","x":3,"y":2,"size":"s"}]}' >"$RUN_DIR/layout.json" 2>&1 || true
 moved() {
   [[ $(ssh_guest "curl -fsS http://127.0.0.1:3000/api/home" 2>/dev/null | jq -c '[.layout[] | select(.id == "agentv.weather") | [.x, .y]]') == "[[3,2]]" ]]
 }
 check "S4.7 a tile moved on the phone is moved on home" moved
 
 no_fields() {
-  [[ $(on_phone "$phone/api/phone/state" 2>/dev/null | jq -c '.signIn') == "null" ]]
+  [[ $(on_phone GET /api/phone/state 2>/dev/null | jq -c '.signIn') == "null" ]]
 }
 check "with nothing signing in, the phone offers no fields" no_fields
 
@@ -110,12 +112,12 @@ done
 check "the app took its page to the site's sign-in form" test "$up" = 1
 sleep 3
 fields() {
-  [[ $(on_phone "$phone/api/phone/state" 2>/dev/null | jq -r '.signIn.name // empty') == "Sign-in check" ]]
+  [[ $(on_phone GET /api/phone/state 2>/dev/null | jq -r '.signIn.name // empty') == "Sign-in check" ]]
 }
 check "S4.9 the daemon hears the sign-in screen is up, and offers the phone its fields" fields
 
 PASSWORD="hunter2-image-check"
-on_phone "-d '{\"username\":\"ana@example.org\",\"password\":\"$PASSWORD\"}' $phone/api/phone/sign-in" >"$RUN_DIR/sent.json" 2>&1 || true
+on_phone POST /api/phone/sign-in "{\"username\":\"ana@example.org\",\"password\":\"$PASSWORD\"}" >"$RUN_DIR/sent.json" 2>&1 || true
 check "the phone's name and password go to the TV" jq -e '.ok == true' "$RUN_DIR/sent.json"
 done_at=""
 for second in $(seq 1 30); do
