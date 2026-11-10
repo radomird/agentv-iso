@@ -187,7 +187,12 @@ ocr_finds() {
       } >"$RUN_DIR/$1.txt"
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
-    (( SECONDS - started < $3 )) || return 1
+    if (( SECONDS - started >= $3 )); then
+      # What it read instead, so a failed run's log says what was on the TV.
+      echo "ocr_finds: no \"$2\" in $3 s. The last read:" >&2
+      grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -40 >&2 || true
+      return 1
+    fi
     sleep 1
   done
 }
