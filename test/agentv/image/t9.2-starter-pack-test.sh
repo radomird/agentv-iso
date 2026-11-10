@@ -10,7 +10,7 @@
 # one. T9.2 wants six there, and until they're all in it, the check says how
 # many there are. Then it runs the whole setup with a test index of six
 # stand-in streaming apps with made-up names, signed with a key made for
-# this run alone. Their sites are stand-ins the box serves itself, so no
+# this run alone. Their sites are stand-ins served on the box, so no
 # service's site is ever asked for anything.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
@@ -20,7 +20,11 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 
 CHECK=/var/lib/agentv-check
 PORT=8193
-SITE="http://127.0.0.1:$PORT"
+# An app never reaches the box itself, so the sites answer on an address
+# that isn't the box's: a network namespace of its own, joined to the box by
+# a pair of virtual devices.
+SITE_AT=10.213.9.2
+SITE="http://$SITE_AT:$PORT"
 APPS=(kite harbour lantern paper reel tide)
 COLOURS=("#7aa2f7" "#bb9af7" "#ff9e64" "#9ece6a" "#e0af68" "#2ac3de")
 
@@ -116,7 +120,7 @@ createServer(async (request, response) => {
   } catch {
     response.writeHead(404).end();
   }
-}).listen(Number(process.argv[2]), "127.0.0.1");
+}).listen(Number(process.argv[2]), process.argv[3]);
 SERVE
 
 GNUPGHOME=$(mktemp -d /tmp/agentv-gpg.XXXXXX)
@@ -126,8 +130,9 @@ gpg --batch --armor --export >"$work/keyring.asc"
 tar -C "$work" -czf "$work/check.tgz" repo sites keyring.asc
 ssh_guest "cat >/tmp/agentv-check.tgz" <"$work/check.tgz"
 ssh_sudo "install -d -m 755 $CHECK && tar -xzf /tmp/agentv-check.tgz -C $CHECK && chown -R root:root $CHECK && chmod -R a+rX $CHECK" >"$RUN_DIR/check-setup.log" 2>&1 || true
-ssh_sudo "systemd-run --unit agentv-check-sites --property DynamicUser=yes /usr/bin/node $CHECK/sites/serve.mjs $PORT" >>"$RUN_DIR/check-setup.log" 2>&1 || true
-check "the stand-in sites answer on the box" ssh_guest "curl -fsS $SITE/kite/ | grep -q 'a stand-in site'"
+ssh_guest "sudo ip netns add check-sites && sudo ip link add sites-box type veth peer name sites-far && sudo ip link set sites-far netns check-sites && sudo ip addr add 10.213.9.1/30 dev sites-box && sudo ip link set sites-box up && sudo ip netns exec check-sites ip addr add $SITE_AT/30 dev sites-far && sudo ip netns exec check-sites ip link set sites-far up && sudo ip netns exec check-sites ip link set lo up" >>"$RUN_DIR/check-setup.log" 2>&1 || true
+ssh_sudo "systemd-run --unit agentv-check-sites --property DynamicUser=yes --property NetworkNamespacePath=/run/netns/check-sites /usr/bin/node $CHECK/sites/serve.mjs $PORT $SITE_AT" >>"$RUN_DIR/check-setup.log" 2>&1 || true
+check "the stand-in sites answer on the box" ssh_guest "curl -fsS --max-time 5 --retry 5 --retry-connrefused $SITE/kite/ | grep -q 'a stand-in site'"
 
 ssh_sudo "git -C $CHECK/repo init -q && git -C $CHECK/repo add -A && git -C $CHECK/repo -c user.name='AgenTV image check' -c user.email=check@agentv.invalid commit -qm 'Six stand-in streaming apps'" >>"$RUN_DIR/check-setup.log" 2>&1 || true
 commit=$(ssh_sudo "git -C $CHECK/repo rev-parse HEAD" 2>/dev/null | tr -d '\r' | tail -n 1)

@@ -33,7 +33,7 @@ tile() {
 # Weather's worker: the Node that runs worker.ts for its package. Bubblewrap
 # has the same words on its own command line, so the name decides.
 worker_pid() {
-  ssh_guest "for pid in \$(pgrep -f 'daemon/apps/worker.ts .*agentv.weather' || true); do [ \"\$(cat /proc/\$pid/comm 2>/dev/null)\" = node ] && echo \$pid; done | tail -n 1"
+  ssh_guest "for pid in \$(pgrep -f 'daemon/apps/worker.ts .*agentv.weather' || true); do case \"\$(cat /proc/\$pid/comm 2>/dev/null)\" in node* | MainThread) echo \$pid ;; esac; done | tail -n 1"
 }
 
 tile weather >"$RUN_DIR/weather-s.json"
