@@ -78,7 +78,10 @@ check "the build ran and saved a page" ssh_guest "sudo grep -q $MARK $DIR/work/f
 check "a build's folder is the builder's and its group's, closed to everyone else" is "$DIR" agentv-builder:agentv-builder:750
 check "a page a build saved is closed to everyone else" is "$DIR/work/fixtures/pages/page.html" agentv-builder:agentv-builder:640
 check "and so are the folders it made" is "$DIR/work/fixtures" agentv-builder:agentv-builder:750
-ssh_guest "sudo find $DIR -perm /007 -print" >"$RUN_DIR/build-open.txt" 2>&1 || true
+# A link's own mode is always 777 and means nothing, so links are left out.
+ssh_guest "sudo find $DIR ! -type l -perm /007 -printf '%m %u:%g %p\n'" >"$RUN_DIR/build-open.txt" 2>&1 || true
+# Said here, so a failed run's log names what was open.
+[[ ! -s $RUN_DIR/build-open.txt ]] || sed 's/^/open to others: /' "$RUN_DIR/build-open.txt"
 check "nothing in the build is open to other users" test ! -s "$RUN_DIR/build-open.txt"
 check "the person's account can't read the saved page" cannot "cat $DIR/work/fixtures/pages/page.html"
 check "nor list the build" cannot "ls $DIR"
