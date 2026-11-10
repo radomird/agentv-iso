@@ -62,10 +62,7 @@ passwordless_sudo
 
 # --- The switch --------------------------------------------------------------
 
-# Switches turn on on edge only. Nothing updates during this check, so the
-# box goes to edge by its channel file alone.
-ssh_sudo "echo edge >/etc/agentv/channel"
-guest "agentv feature on starter" >"$RUN_DIR/feature.log" 2>&1 || true
+# The starter pack's switch is on, as every box has it.
 check "the starter pack's switch is on" until_json /api/features '.starter == true' 10
 
 # --- The published index -------------------------------------------------------

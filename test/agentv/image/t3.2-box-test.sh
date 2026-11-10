@@ -53,10 +53,7 @@ check "agentv box readings prints what it read" jq -e '.gpus | length >= 1' "$RU
 
 # --- Setup's box step, with its switch on ------------------------------------
 
-# Switches turn on on edge only. Nothing updates during this check, so the
-# box goes to edge by its channel file alone.
-ssh_sudo "echo edge >/etc/agentv/channel"
-ssh_guest "bash -lc 'agentv feature on boxcheck' </dev/null" >"$RUN_DIR/feature.log" 2>&1 || true
+# The box check's switch is on, as every box has it.
 check "the box check's switch is on" until_json /api/features '.boxcheck == true' 10
 
 setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
