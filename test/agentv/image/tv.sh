@@ -200,3 +200,37 @@ no_omarchy_shell() {
 passwordless_sudo() {
   ssh_sudo "printf '%s\n' '$GUEST_USER ALL=(ALL:ALL) NOPASSWD: ALL' 'Defaults:$GUEST_USER !authenticate' >/etc/sudoers.d/zzz-agentv-test && chmod 440 /etc/sudoers.d/zzz-agentv-test"
 }
+
+# pair_phone [<name>] [<phone port's address>]: pairs a phone and prints the
+# path of its key file on the box, for agentv-phone-call. The box shows a new
+# code for it, as Settings → Phones does. Once a PIN is set that takes the
+# PIN: a check that set one gives it in PHONE_PIN. With a PIN set and none
+# given, it says so in the log and prints nothing.
+pair_phone() {
+  local env=""
+  [[ -n ${2:-} ]] && env+="AGENTV_PHONE_URL=$2 "
+  [[ -n ${PHONE_PIN:-} ]] && env+="AGENTV_PIN=$PHONE_PIN "
+  if ! ssh_guest "${env}agentv-phone-call pair-new '${1:-image check}'" 2>"$RUN_DIR/pair-phone.log"; then
+    log "No phone paired: $(tr '\n' ' ' <"$RUN_DIR/pair-phone.log")" >&2
+  fi
+}
+
+# pin_off <pin>: takes the adult PIN off again, so a check that set one
+# leaves the box as it found it. Each check runs on a disk of its own, so
+# this is only for a box someone keeps and runs checks on by hand.
+pin_off() {
+  vm_running || return 0
+  local grant
+  grant=$(ssh_guest "curl -fsS --max-time 5 -H 'Content-Type: application/json' -d '{\"pin\":\"$1\"}' http://127.0.0.1:3000/api/pin/check" 2>/dev/null | jq -r '.grant // empty' 2>/dev/null || true)
+  [[ -n $grant ]] || return 0
+  ssh_guest "curl -fsS --max-time 5 -X DELETE -H 'X-AgenTV-Grant: $grant' http://127.0.0.1:3000/api/pin" >/dev/null 2>&1 || true
+}
+
+# For a check's EXIT trap: pin_off, then the checks' own cleanup, which
+# still sees how the check ended.
+pin_off_then_cleanup() {
+  local status=$?
+  pin_off "$1"
+  (exit "$status")
+  cleanup
+}

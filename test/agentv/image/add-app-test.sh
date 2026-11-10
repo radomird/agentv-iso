@@ -17,6 +17,8 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 PIN=2468
+# The PIN comes off again however the check ends.
+trap 'pin_off_then_cleanup "$PIN"' EXIT
 CHECK=/var/lib/agentv-check
 
 # until_json <url path> <jq filter> <seconds>: until the filter on what the
@@ -209,5 +211,6 @@ sleep 3
 ocr_finds success-add-app-child-add "." 5 || true
 check "and asking for it goes home instead (OCR)" bash -c "! grep -Eqi 'add an app|stand-in game' '$RUN_DIR/success-add-app-child-add.txt'"
 
+pin_off "$PIN"
 stop_vm
 finish
