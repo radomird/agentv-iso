@@ -166,6 +166,9 @@ screen_shows_welcome() {
 # first, where the readings are tuned: tesseract misses text drawn that big.
 # What it read last is in $RUN_DIR/<name>.txt, and the screenshot in
 # $RUN_DIR/.ocr.ppm.
+# The script's own output, for what a failed read says.
+exec {OCR_LOG_FD}>&2
+
 ocr_finds() {
   local started=$SECONDS shot="$RUN_DIR/.ocr.ppm" sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
 
@@ -190,11 +193,11 @@ ocr_finds() {
     if (( SECONDS - started >= $3 )); then
       # What it read instead, so a failed run's log says what was on the TV.
       # check sends this function's own output nowhere, so it goes to the
-      # script's.
+      # script's, kept open below.
       {
         echo "ocr_finds: no \"$2\" in $3 s. The last read:"
         grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -40
-      } >"/proc/$$/fd/2" 2>/dev/null || true
+      } >&"$OCR_LOG_FD" 2>/dev/null || true
       return 1
     fi
     sleep 1
