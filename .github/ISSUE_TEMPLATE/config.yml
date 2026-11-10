@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A security problem
+    url: https://github.com/radomird/agentv-iso/security/advisories/new
+    about: Please tell me privately first, not in a public issue.
+  - name: Something on Omarchy's desktop
+    url: https://github.com/omacom/omarchy/issues
+    about: A problem on the Linux desktop that isn't AgenTV's goes to Omarchy.
