@@ -13,6 +13,13 @@
 #   - after the box has been awake for the hour again, it sleeps again, and a
 #     key on the keyboard wakes it.
 # The kernel's own log says each suspend went in and came out.
+#
+# QEMU's virtio-gpu doesn't come back from S3. The guest kernel's driver has
+# no resume, so after a wake its first change to the screen waits for ever in
+# the driver, and Hyprland waits behind it and stops answering. A real GPU's
+# driver brings its display back, so on a real box this doesn't happen. The
+# check tells that case apart by where the stuck task waits, says so, and
+# leaves what needs the screen after the wake to the real box.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -96,6 +103,53 @@ power_button() {
   fi
 }
 
+# A task waiting in the VM's display driver, stuck since the wake: its state,
+# where it waits, its pid and name. Nothing when there's none. As root: the
+# kernel shows where a task waits only to its owner and to root, and the one
+# that's stuck is the kernel's own.
+vm_display_stuck() {
+  # shellcheck disable=SC2016 # runs on the box
+  local script='ps -eo stat=,wchan:40=,pid=,comm= | awk "\$1 ~ /D/ && \$2 ~ /^virtio_gpu/"'
+  ssh_quick 20 "echo $GUEST_PASSWORD | sudo -S -p '' bash -c $(printf %q "$script")" 2>/dev/null || true
+}
+
+# Whether Hyprland answers within 5 s.
+hyprland_answers() {
+  # shellcheck disable=SC2016 # expands on the box
+  ssh_quick 20 'HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "/run/user/$(id -u)/hypr" | head -n 1) timeout 5 hyprctl version' >/dev/null 2>&1
+}
+
+# For the artifacts: Hyprland's process and where its threads wait, any task
+# stuck in the kernel, core dumps, and the kernel since the first suspend.
+after_wake() {
+  # shellcheck disable=SC2016 # runs on the box
+  local script='ps -eo pid,ppid,stat,wchan:32,etimes,comm | grep -E "Hyprland|start-hyprland|agentv-session|Xwayland"
+for pid in $(pgrep -x Hyprland); do
+  for t in /proc/$pid/task/*; do
+    echo "-- $(cat $t/comm) $(basename $t): state $(cut -d" " -f3 $t/stat), waits in $(cat $t/wchan)"
+    cat $t/stack 2>&1 | head -n 12
+  done
+done
+echo "-- tasks stuck in the kernel"
+ps -eo pid,stat,wchan:40,comm | awk "\$2 ~ /D/"
+echo "-- core dumps"
+coredumpctl list --no-pager 2>&1 | tail -n 5
+echo "-- the kernel since the first suspend"
+journalctl -k -b --no-pager -o short-monotonic | sed -n "/PM: suspend entry/,\$p"'
+  ssh_quick 40 "echo $GUEST_PASSWORD | sudo -S -p '' bash -c $(printf %q "$script")" >"$RUN_DIR/$1.txt" 2>&1 || true
+}
+
+# Whether QEMU says the box is in S3 within <seconds>. A box that stopped
+# answering without getting there is still on its way down.
+reached_s3() {
+  local started=$SECONDS
+  while (( SECONDS - started < $1 )); do
+    [[ $(vm_status) == "suspended" ]] && return 0
+    sleep 2
+  done
+  return 1
+}
+
 guest "agentv screen sleep-after 120" >"$RUN_DIR/screen.log" 2>&1 || true
 
 # Sleep off, the TV off: the apps close after 2 minutes, home waits on its
@@ -159,8 +213,21 @@ settled() { heard_wake && [[ $(last_output) == "the TV's output is off" ]]; }
 waited=$SECONDS
 until heard_wake || (( SECONDS - waited > 45 )); do sleep 3; done
 check "the screen daemon heard the box wake" heard_wake
-until settled || (( SECONDS - waited > 75 )); do sleep 3; done
-check "and with the TV still off, the output goes off again" settled
+until settled || [[ -n $(vm_display_stuck) ]] || (( SECONDS - waited > 75 )); do sleep 3; done
+# The daemon's turn of the output off can be what gets stuck, just after it
+# says so.
+sleep 5
+screen_log >"$RUN_DIR/screen-journal-1.log"
+stuck=$(vm_display_stuck)
+after_wake after-wake
+if [[ -n $stuck ]]; then
+  log "The VM's display driver stopped at the wake, as virtio-gpu does after S3 ($(xargs <<<"$stuck")). Hyprland waits behind it, so the screen after a wake is a real box's to show"
+  since_wake >"$RUN_DIR/screen-since-wake.log"
+  check "the screen daemon saw to the TV's output after the wake" grep -q "the TV's output" "$RUN_DIR/screen-since-wake.log"
+else
+  check "and with the TV still off, the output goes off again" settled
+  check "and Hyprland still answers" hyprland_answers
+fi
 check "T13.2 the power button wakes it to the ambient screen" test "$(last_ambient)" = "the ambient screen"
 screen_status >"$RUN_DIR/status-woken.json"
 log "agentv screen status after the wake: $(head -c 300 "$RUN_DIR/status-woken.json" | tr '\n' ' ')"
@@ -171,10 +238,20 @@ guest "agentv screen sleep-after 120" >>"$RUN_DIR/screen.log" 2>&1 || true
 if how=$(asleep 240); then
   log "The box went to sleep again: $how"
   check "after the hour awake, it sleeps again" true
+  asleep_again=1
 else
   check "after the hour awake, it sleeps again" false
 fi
 sleep 10
+# With the VM's display driver stuck, the box can stop on its way into S3 and
+# never get there, so nothing can wake it. That's the VM's too.
+if [[ -n $stuck && -n ${asleep_again:-} ]] && grep -q '\[deep\]' "$RUN_DIR/power-states.txt" && ! reached_s3 30; then
+  capture_console "vm-display-stuck-second-sleep" || true
+  log "The box stopped answering on its way into its second sleep and never got to S3, with the VM's display driver stuck since the wake. A real box's second sleep and wake are for it to show"
+  stop_vm
+  finish
+  exit 0
+fi
 press shift
 wait_for_ssh 180 failure-sleep-key-ssh-timeout || { check "a key wakes the box" false; stop_vm; finish; }
 sleep 5
