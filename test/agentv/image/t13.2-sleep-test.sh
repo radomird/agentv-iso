@@ -65,7 +65,8 @@ fi
 ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.txt" 2>&1 || true
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
-ssh_guest "lspci -vv -d 1af4:1050" >"$RUN_DIR/gpu.txt" 2>&1 || true
+# As root: lspci shows nobody else a device's capabilities.
+ssh_sudo "lspci -vv -d 1af4:1050" >"$RUN_DIR/gpu.txt" 2>&1 || true
 check "the VM's GPU keeps its state across a sleep" grep -q "NoSoftRst+" "$RUN_DIR/gpu.txt"
 
 # SSH that gives up after <seconds>: a suspended box takes the connection
