@@ -7,6 +7,10 @@
 # password, Save address or card, Translate or notification bubble. The
 # screen is read the way S1.1 reads notices, the top larger, and all of it.
 # The page's own words are German, so English ones are Chromium's.
+#
+# Home's Chromium has password fields of its own, so the same goes there: a
+# key typed into Settings → New this week and saved gets no Save password
+# bubble either.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -39,9 +43,10 @@ wait_front() {
 
 # prompts <name>: what the screen shows now, read for Chromium's own words,
 # the top fifth larger and then all of it, each as it is and inverted.
-# Prints the words it found.
+# Prints the words it found. prompts <name> <words> looks for those words
+# alone, on a page whose own words are English.
 prompts() {
-  local shot="$RUN_DIR/$1.png" words='save password|update password|password manager|save address|save card|autofill|translate|notification|allow|block|never'
+  local shot="$RUN_DIR/$1.png" words=${2:-'save password|update password|password manager|save address|save card|autofill|translate|notification|allow|block|never'}
   capture_console "$1"
   [[ -s $shot ]] || return 0
   {
@@ -110,7 +115,34 @@ check "the services' Chromium is still in front" wait_front web 5
 check "S1.7 the services' profile has password saving, autofill, translate and notifications off" \
   ssh_sudo "jq -e '.credentials_enable_service == false and .credentials_enable_autosignin == false and .autofill.profile_enabled == false and .autofill.credit_card_enabled == false and .translate.enabled == false and .profile.default_content_setting_values.notifications == 2' /var/lib/agentv/chromium/Default/Preferences >/dev/null"
 
+# Home's own password fields. Settings → New this week takes a key: typed
+# the same way, then saved, which takes the field off the page. That's when
+# a Chromium that saves passwords offers to. The key is a stand-in in the
+# shape of a real one, and home's words are English, so only the bubble's
+# own words count.
+guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
+check "home is back in front" wait_front home 30
+guest "agentv screen settings tmdb" >>"$RUN_DIR/screen.log" 2>&1 || true
+sleep 2
+guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
+sleep 1
+guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
+check "home's page for the key is up (OCR)" ocr_finds "success-S1.7-home-key" "add a tmdb key|paste the key" 30
+key="51a7$(printf '%014x%014x' "$RANDOM$RANDOM" "$RANDOM$RANDOM")"
+printf '%s' "$key" | ssh_guest "bash -lc 'agentv input text -'" >>"$RUN_DIR/input.log" 2>&1 || true
+sleep 1
+guest "agentv input key down" >>"$RUN_DIR/input.log" 2>&1 || true
+guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
+sleep 6
+found=$(prompts "success-S1.7-home-saved" 'save password|update password|password manager')
+check "the key typed on home was kept, so its field went off the page" ssh_guest "jq -e '.set == true' /etc/agentv/tmdb.json >/dev/null"
+check "S1.7 after a key is saved on home, no Save password bubble (saw: ${found:-nothing})" test -z "$found"
+check "S1.7 home's profile has password saving, autofill, translate and notifications off" \
+  ssh_sudo "jq -e '.credentials_enable_service == false and .credentials_enable_autosignin == false and .autofill.profile_enabled == false and .autofill.credit_card_enabled == false and .translate.enabled == false and .profile.default_content_setting_values.notifications == 2' /var/lib/agentv/chromium-home/Default/Preferences >/dev/null"
+guest "agentv selftest S1.7" >"$RUN_DIR/selftest.log" 2>&1 || true
+check "S1.7 the TV's own check passes for both Chromiums" bash -c "grep -q \"^pass S1.7 the services' Chromium\" '$RUN_DIR/selftest.log' && grep -q \"^pass S1.7 home's Chromium\" '$RUN_DIR/selftest.log' && ! grep -q '^fail' '$RUN_DIR/selftest.log'"
+
 guest "journalctl --user -b --no-pager -u agentv-screen -u agentv-input" >"$RUN_DIR/tv-session.log" 2>&1 || true
-check "S1.7 nothing the keyboard typed is in the TV session's log" bash -c "! grep -q 'S17-kennwort' '$RUN_DIR/tv-session.log'"
+check "S1.7 nothing the keyboard typed is in the TV session's log" bash -c "! grep -q -e 'S17-kennwort' -e '$key' '$RUN_DIR/tv-session.log'"
 stop_vm
 finish
