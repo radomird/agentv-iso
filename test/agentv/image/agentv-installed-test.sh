@@ -46,6 +46,13 @@ fi
 trusted=$(ssh_guest "cut -d: -f1 /usr/share/pacman/keyrings/agentv-trusted | paste -sd' '" 2>/dev/null || true)
 check "AgenTV's keyring trusts the keys it should, and no other (it has: ${trusted:-none})" test "$trusted" = "$expected"
 check "agentv runs" ssh_guest "agentv version"
+# AgenTV's repository takes its package list only with the signature. A box
+# straight from the ISO has no list yet, and one that has refreshed has both.
+# A list alone would make pacman refuse every install that doesn't refresh.
+check "AgenTV's package list is never on the box without its signature" \
+  ssh_guest "[[ ! -e /var/lib/pacman/sync/agentv.db || -s /var/lib/pacman/sync/agentv.db.sig ]]"
+check "pacman reads its package lists without an error about AgenTV's" \
+  ssh_guest "! pacman -Si agentv 2>&1 | grep -qi 'signature\|not valid'"
 check "nothing of AgenTV's is in Omarchy's folder" \
   ssh_guest "! pacman -Ql agentv | grep -q ' /usr/share/omarchy/'"
 
