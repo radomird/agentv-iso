@@ -96,7 +96,66 @@ power_button() {
   fi
 }
 
+# What Hyprland is doing, into the run's folder: which instances there are,
+# each thread's state and where it waits in the kernel, how long hyprctl
+# takes to answer, the kernel's log and Hyprland's own.
+hypr_look() {
+  ssh_quick 60 "echo $GUEST_PASSWORD | sudo -S -p '' bash /tmp/t13-2-look.sh" >"$RUN_DIR/hyprland-$1.txt" 2>&1 || true
+}
+look_start() {
+  ssh_guest "cat >/tmp/t13-2-look.sh" <<'LOOK'
+date '+%T.%N'
+uid=$(id -u "${SUDO_USER:-1000}")
+run=/run/user/$uid
+echo "== instances"
+ls -la --time-style=full-iso "$run/hypr/" 2>&1
+for pid in $(pgrep -x Hyprland; pgrep -x start-hyprland); do
+  echo "== pid $pid"
+  ps -L -o pid,tid,lstart,stat,pcpu,wchan:40,comm -p "$pid"
+  for task in /proc/$pid/task/*; do
+    echo "-- $(cat "$task/comm") ${task##*/} $(awk '{print $3}' "$task/stat")"
+    cat "$task/stack" 2>&1
+  done
+done
+echo "== hyprctl"
+for sig in $(ls -t "$run/hypr/" 2>/dev/null); do
+  started=$(date +%s.%N)
+  sudo -u "#$uid" XDG_RUNTIME_DIR="$run" HYPRLAND_INSTANCE_SIGNATURE="$sig" timeout 8 hyprctl -j monitors 2>&1 | head -c 3000
+  echo "-- $sig: $(echo "$(date +%s.%N) - $started" | bc 2>/dev/null) s"
+done
+echo "== coredumps"
+coredumpctl list --no-pager 2>&1 | tail -n 10
+echo "== kernel"
+journalctl -k -b --no-pager | tail -n 200
+echo "== hyprland.log"
+for log in "$run"/hypr/*/hyprland.log; do echo "-- $log"; tail -n 300 "$log"; done
+LOOK
+}
+
+# Asks Hyprland for its monitors once a second and says how long the answer
+# took, in the journal, so the moment it stops answering has a time.
+probe_start() {
+  ssh_guest "cat >/tmp/t13-2-probe.sh" <<'PROBE'
+#!/bin/bash
+while :; do
+  sig=$(ls -t "$XDG_RUNTIME_DIR/hypr" | head -n 1)
+  started=$(date +%s%N)
+  out=$(HYPRLAND_INSTANCE_SIGNATURE=$sig timeout 8 hyprctl -j monitors 2>&1)
+  rc=$?
+  echo "rc=$rc $(( ($(date +%s%N) - started) / 1000000 )) ms ${sig:0:12} $(jq -c '[.[] | {name, id, dpmsStatus, disabled, width, height}]' <<<"$out" 2>&1 | head -c 300)"
+  sleep 1
+done
+PROBE
+  guest "systemd-run --user --unit=t13-2-probe bash /tmp/t13-2-probe.sh" >>"$RUN_DIR/screen.log" 2>&1 || true
+  # Hyprland's own log, which is quiet unless asked.
+  guest_hyprctl "eval 'hl.config({ debug = { disable_logs = false } })'" >>"$RUN_DIR/screen.log" 2>&1 || true
+}
+probe_log() { ssh_quick 30 "journalctl --user -b --no-pager -o short-precise -u t13-2-probe" >"$RUN_DIR/hyprland-probe.log" 2>/dev/null || true; }
+
 guest "agentv screen sleep-after 120" >"$RUN_DIR/screen.log" 2>&1 || true
+look_start
+probe_start
+hypr_look before
 
 # Sleep off, the TV off: the apps close after 2 minutes, home waits on its
 # ambient screen, the output goes off, and the box stays up.
@@ -142,6 +201,7 @@ wait_for_ssh 180 failure-sleep-wake-ssh-timeout || { check "the power button wak
 # it's longer until then.
 guest "agentv screen sleep-after 900" >>"$RUN_DIR/screen.log" 2>&1 || true
 sleep 5
+hypr_look woke
 check "the kernel went into a suspend and came out of it" test "$(entries)-$(exits)" = "1-1"
 # The screen daemon notices at its next look, within 15 s, then looks for the
 # TV for 10 s. A pointer that moves as the box wakes can end the ambient
@@ -164,6 +224,11 @@ check "and with the TV still off, the output goes off again" settled
 check "T13.2 the power button wakes it to the ambient screen" test "$(last_ambient)" = "the ambient screen"
 screen_status >"$RUN_DIR/status-woken.json"
 log "agentv screen status after the wake: $(head -c 300 "$RUN_DIR/status-woken.json" | tr '\n' ' ')"
+hypr_look settled
+probe_log
+sleep 30
+hypr_look later
+probe_log
 # Back to the shortened hour: awake longer than that by now, it sleeps again.
 guest "agentv screen sleep-after 120" >>"$RUN_DIR/screen.log" 2>&1 || true
 
@@ -178,6 +243,8 @@ sleep 10
 press shift
 wait_for_ssh 180 failure-sleep-key-ssh-timeout || { check "a key wakes the box" false; stop_vm; finish; }
 sleep 5
+hypr_look woke-again
+probe_log
 check "T13.2 a key on the keyboard wakes it" test "$(entries)-$(exits)" = "2-2"
 
 settings '{"sleepWhenOff":false}'
