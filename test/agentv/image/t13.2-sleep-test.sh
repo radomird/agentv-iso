@@ -43,6 +43,7 @@ eval "${vm/-device virtio-vga/$GPU_KEEPS_STATE}"
 qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$RUN_DIR/run.qcow2" >/dev/null
 if [[ $FIRMWARE == "uefi" ]]; then
   cp "$BASE_OVMF" "$RUN_DIR/OVMF_VARS.4m.fd"
+  # shellcheck disable=SC2034 # start_vm in base-test.sh reads it
   ACTIVE_OVMF="$RUN_DIR/OVMF_VARS.4m.fd"
 fi
 start_vm_gpu_keeps_state "$RUN_DIR/run.qcow2" "$RUN_DIR/serial.log"
