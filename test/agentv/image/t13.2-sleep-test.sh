@@ -39,6 +39,15 @@ ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.tx
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
 
+# The VM sleeps the way a box without S3 does: suspend to idle. QEMU resets
+# its devices on a wake from S3, and virtio's GPU stops taking commands after
+# that, so the kernel's next change to the display waits for good and takes
+# Hyprland with it. A real GPU keeps its state across S3. AgenTV asks logind
+# for the same suspend either way.
+ssh_sudo "echo s2idle >/sys/power/mem_sleep" || true
+ssh_guest "cat /sys/power/mem_sleep" >"$RUN_DIR/mem-sleep.txt" 2>&1 || true
+check "the VM suspends to idle" grep -q '\[s2idle\]' "$RUN_DIR/mem-sleep.txt"
+
 # SSH that gives up after <seconds>: a suspended box takes the connection
 # and never answers, which ConnectTimeout alone doesn't cover. timeout can't
 # run a shell function, so this is ssh itself, as ssh_guest runs it.
@@ -131,7 +140,7 @@ echo "== virtio's GPU"
 uname -r
 pacman -Q hyprland aquamarine linux 2>&1
 for dev in /sys/bus/virtio/devices/*; do echo "$dev $(cat "$dev/device" "$dev/status" 2>/dev/null | tr '\n' ' ')"; done
-for file in /sys/kernel/debug/dri/*/virtio-gpu-* /sys/kernel/debug/dri/*/state; do echo "-- $file"; cat "$file" 2>&1 | head -n 60; done
+for file in /sys/kernel/debug/dri/0000*/virtio-gpu-*; do echo "-- $file"; cat "$file" 2>&1 | head -n 60; done
 echo "== hyprctl"
 for sig in $(ls -t "$run/hypr/" 2>/dev/null); do
   started=$(date +%s.%N)
