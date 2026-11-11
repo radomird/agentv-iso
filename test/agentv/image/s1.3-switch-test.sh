@@ -6,6 +6,13 @@
 # agentv desktop and agentv tv over SSH. The desktop counts as up once its
 # bar is on the screen, the TV once the welcome page has been drawn again
 # with the home screen in front.
+#
+# And Omarchy's Bluetooth pairing agent, which says yes to every pairing,
+# isn't left running on the TV after a visit to the desktop. It starts with
+# the desktop and nothing of Omarchy's stops it when the desktop ends, so the
+# TV session stops it as it starts: on the TV only Settings pairs, and only
+# game controllers. The VM has no Bluetooth, so here the unit runs a sleep in
+# the agent's place; starting and stopping it is the real thing.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
@@ -15,6 +22,10 @@ base_image_ready || { echo "No base image; run ./test/integration first" >&2; ex
 start_vm_from_base
 wait_for_ssh 300 failure-S1.3-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-S1.3-no-tv"; check "the TV session came up" false; stop_vm; finish; }
+
+# Omarchy's bt-agent.service, able to run in a VM with no Bluetooth.
+guest "mkdir -p ~/.config/systemd/user/bt-agent.service.d && printf '[Unit]\nConditionPathIsDirectory=\n[Service]\nExecCondition=\nExecStart=\nExecStart=/usr/bin/sleep infinity\n' >~/.config/systemd/user/bt-agent.service.d/vm.conf && systemctl --user daemon-reload" >>"$RUN_DIR/switch.log" 2>&1 || true
+check "Omarchy ships its Bluetooth pairing agent as bt-agent.service" guest "systemctl --user cat bt-agent.service | grep -q bt-agent"
 
 count() {
   jq -r '.welcome_shown_count // 0' <<<"$(health)" 2>/dev/null || echo 0
@@ -39,6 +50,9 @@ switch() {
     check "S1.3 the TV to Omarchy's desktop with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
     check "it's Omarchy's own desktop: its shell is running" ssh_guest "pgrep -f '$OMARCHY_SHELL' >/dev/null"
+    # Whether or not the desktop has enabled it yet, it's running there now.
+    guest "systemctl --user start bt-agent.service" >>"$RUN_DIR/switch.log" 2>&1 || true
+    check "on the desktop, Omarchy's Bluetooth pairing agent runs" guest "systemctl --user is-active --quiet bt-agent.service"
   else
     took=$(wait_tv 60 "$seen") || took=""
     capture_console "success-S1.3-$how-tv"
@@ -50,6 +64,7 @@ switch() {
     check "S1.3 Omarchy's desktop back to the TV with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
     check "back on the TV, nothing of Omarchy's desktop is left" ssh_guest "! pgrep -f '$OMARCHY_SHELL' >/dev/null"
+    check "back on the TV, Omarchy's Bluetooth pairing agent isn't running" guest "! systemctl --user is-active --quiet bt-agent.service"
   fi
 }
 
