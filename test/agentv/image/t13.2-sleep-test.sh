@@ -104,9 +104,13 @@ power_button() {
 }
 
 # A task waiting in the VM's display driver, stuck since the wake: its state,
-# where it waits, its pid and name. Nothing when there's none.
+# where it waits, its pid and name. Nothing when there's none. As root: the
+# kernel shows where a task waits only to its owner and to root, and the one
+# that's stuck is the kernel's own.
 vm_display_stuck() {
-  ssh_quick 20 "ps -eo stat=,wchan:40=,pid=,comm= | awk '\$1 ~ /D/ && \$2 ~ /^virtio_gpu/'" 2>/dev/null || true
+  # shellcheck disable=SC2016 # runs on the box
+  local script='ps -eo stat=,wchan:40=,pid=,comm= | awk "\$1 ~ /D/ && \$2 ~ /^virtio_gpu/"'
+  ssh_quick 20 "echo $GUEST_PASSWORD | sudo -S -p '' bash -c $(printf %q "$script")" 2>/dev/null || true
 }
 
 # Whether Hyprland answers within 5 s.
