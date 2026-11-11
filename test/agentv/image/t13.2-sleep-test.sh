@@ -99,20 +99,8 @@ power_button() {
 # What Hyprland is doing, into the run's folder: which instances there are,
 # each thread's state and where it waits in the kernel, how long hyprctl
 # takes to answer, the kernel's log and Hyprland's own.
-hmp() { qmp "\"human-monitor-command\", \"arguments\": {\"command-line\": \"$1\"}" | jq -r 'select(.return | type == "string") | .return' 2>/dev/null || true; }
 hypr_look() {
-  {
-    qemu-system-x86_64 --version | head -n 1
-    hmp "info virtio"
-    local path
-    path=$(hmp "info virtio" | grep -o '^/machine[^ ]*' | while read -r one; do hmp "info virtio-status $one" | grep -q 'virtio-gpu' && echo "$one"; done | head -n 1)
-    echo "virtio's GPU is at ${path:-?}"
-    if [[ -n $path ]]; then
-      hmp "info virtio-status $path"
-      hmp "info virtio-queue-status $path 0"
-      hmp "info virtio-queue-status $path 1"
-    fi
-  } >"$RUN_DIR/qemu-$1.txt" 2>&1 || true
+  qemu-system-x86_64 --version | head -n 1 >"$RUN_DIR/qemu-version.txt" 2>&1 || true
   ssh_quick 60 "echo $GUEST_PASSWORD | sudo -S -p '' bash /tmp/t13-2-look.sh" >"$RUN_DIR/hyprland-$1.txt" 2>&1 || true
 }
 look_start() {
