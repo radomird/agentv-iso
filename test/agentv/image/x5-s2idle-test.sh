@@ -22,14 +22,15 @@ try() {
   return 1
 }
 rtc() { :; }
-try "a key" press shift ||
-  try_next=1
-if [[ -n ${try_next:-} ]]; then
-  # Whatever wakes it now, so the next one gets a turn.
-  press ret; qmp '"system_powerdown"' >/dev/null; back 60 || { qmp '"system_reset"' >/dev/null; wait_for_ssh 300 failure-x3-reset || exit 1; qsudo 30 "echo s2idle >/sys/power/mem_sleep"; }
-fi
-try "the power button" qmp '"system_powerdown"' || true
+qsudo 15 "echo enabled >/sys/bus/serio/devices/serio0/power/wakeup; echo 1 >/sys/power/pm_debug_messages" || true
+# With the output off, as the sleep check has it.
+dark() { quick 15 "bash -lc 'HYPRLAND_INSTANCE_SIGNATURE=\$(ls -t \$XDG_RUNTIME_DIR/hypr | head -n 1) hyprctl dispatch \"hl.dsp.dpms({ action = \\\"disable\\\" })\"'" >>"$RUN_DIR/dark.log" 2>&1 || true; }
+try "a key, the output on," press shift || { qmp '"system_powerdown"' >/dev/null; back 60 || true; }
+dark; sleep 3
+try "the power button, the output off," qmp '"system_powerdown"' || { qmp '"system_powerdown"' >/dev/null; back 60 || true; }
+dark; sleep 3
+try "a key, the output off," press shift || { qmp '"system_powerdown"' >/dev/null; back 60 || true; }
 back 90 || true
-qsudo 60 "journalctl -b --no-pager -k | grep -i 'PM:\|s2idle\|wake' | tail -n 60; journalctl -b --no-pager -u systemd-logind | tail -n 30" >"$RUN_DIR/after.txt" 2>&1 || true
+qsudo 60 "journalctl -b --no-pager -k | tail -n 400; journalctl -b --no-pager -u systemd-logind | tail -n 30" >"$RUN_DIR/after.txt" 2>&1 || true
 stop_vm
 finish

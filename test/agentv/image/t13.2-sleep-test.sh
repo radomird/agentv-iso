@@ -50,6 +50,9 @@ fi
 ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.txt" 2>&1 || true
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
+if [[ -n ${T13_S2IDLE:-} ]]; then
+  ssh_sudo "echo s2idle >/sys/power/mem_sleep; echo enabled >/sys/bus/serio/devices/serio0/power/wakeup; echo 1 >/sys/power/pm_debug_messages" || true
+fi
 
 # SSH that gives up after <seconds>: a suspended box takes the connection
 # and never answers, which ConnectTimeout alone doesn't cover. timeout can't
@@ -223,6 +226,16 @@ sleep 10
 
 # The power button wakes it, to the ambient screen.
 power_button
+if [[ -n ${T13_S2IDLE:-} ]] && ! wait_for_ssh 60 trial-first-wake; then
+  log "TRIAL: no wake after the first press; pressing again, then a key, then a reset"
+  qmp '"system_powerdown"' >/dev/null
+  wait_for_ssh 40 trial-second-wake || { press shift; wait_for_ssh 40 trial-key-wake; } || {
+    qmp '"system_reset"' >/dev/null
+    wait_for_ssh 300 trial-reset || true
+    ssh_sudo "journalctl -b -1 --no-pager | tail -n 400" >"$RUN_DIR/trial-last-boot.log" 2>&1 || true
+    check "the power button wakes the box" false; stop_vm; finish
+  }
+fi
 wait_for_ssh 180 failure-sleep-wake-ssh-timeout || { check "the power button wakes the box" false; stop_vm; finish; }
 # The shortened hour would put it back to sleep while the check looks, so
 # it's longer until then.
