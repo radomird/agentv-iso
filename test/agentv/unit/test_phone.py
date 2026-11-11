@@ -121,8 +121,11 @@ class Page(unittest.TestCase):
         self.server.server_close()
         phone_side.RUN, phone_side.ADDRESS, phone_side.PORT = self.saved
 
-    def ask(self, method, path, body=None, host="127.0.0.1", headers=None, via="127.0.0.1"):
-        connection = http.client.HTTPConnection(via, self.port, timeout=5)
+    def ask(self, method, path, body=None, host="127.0.0.1", headers=None, via="127.0.0.1", source=None):
+        # "source" is the phone's own address, when it matters which it is.
+        connection = http.client.HTTPConnection(
+            via, self.port, timeout=5, source_address=(source, 0) if source else None
+        )
         payload = json.dumps(body).encode() if body is not None else None
         connection.request(method, path, body=payload, headers={"Host": host, **(headers or {})})
         response = connection.getresponse()
@@ -146,6 +149,43 @@ class Page(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn(self.phone.token, page)
         self.assertIn('const TOKEN = ""', page)
+
+    def test_a_phone_with_an_address_from_outside_the_hotspot_isnt_on_it(self):
+        # It asks the hotspot's address, but its own address (127.0.1.1) isn't
+        # in the hotspot's network (127.0.0.0/24 here): the home network.
+        status, _, page = self.ask("GET", "/", source="127.0.1.1")
+        self.assertEqual(status, 200)
+        self.assertNotIn(self.phone.token, page)
+        self.assertIn('const TOKEN = ""', page)
+        status, state = self.ask_json("GET", "/api/first", source="127.0.1.1")
+        self.assertEqual(status, 403)
+        self.assertNotIn("disks", state)
+        status, location, _ = self.ask("GET", "/generate_204", host="connectivitycheck.gstatic.com", source="127.0.1.1")
+        self.assertEqual((status, location), (404, None))
+        # With the token from the TV's code it still gets the disks.
+        status, state = self.ask_json(
+            "GET", "/api/first", source="127.0.1.1", headers={"X-AgenTV-Token": self.phone.token}
+        )
+        self.assertEqual(status, 200)
+
+    def test_a_phone_with_an_address_the_hotspot_gave_is_on_it(self):
+        status, _, page = self.ask("GET", "/", source="127.0.0.9")
+        self.assertEqual(status, 200)
+        self.assertIn(f'const TOKEN = "{self.phone.token}"', page)
+        status, state = self.ask_json("GET", "/api/first", source="127.0.0.9")
+        self.assertEqual(status, 200)
+        self.assertEqual([d["name"] for d in state["disks"]], ["nvme0n1", "sda"])
+
+    def test_which_addresses_are_the_hotspots(self):
+        saved = phone_side.ADDRESS
+        phone_side.ADDRESS = "10.42.0.1"
+        try:
+            for address in ("10.42.0.10", "10.42.0.250", "::ffff:10.42.0.77"):
+                self.assertTrue(phone_side.in_hotspot_network(address), address)
+            for address in ("10.42.1.10", "192.168.1.20", "::ffff:192.168.1.20", "fe80::1", "", None, "phone"):
+                self.assertFalse(phone_side.in_hotspot_network(address), address)
+        finally:
+            phone_side.ADDRESS = saved
 
     def test_every_other_name_on_the_hotspot_goes_to_the_page(self):
         status, location, _ = self.ask("GET", "/hotspot-detect.html", host="captive.apple.com")
