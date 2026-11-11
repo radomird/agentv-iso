@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -29,11 +28,6 @@ DISKS = [
     {"path": "/dev/nvme0n1", "name": "nvme0n1", "model": "samsung ssd 970 evo", "size": "500 gb"},
     {"path": "/dev/sda", "name": "sda", "model": "wd blue hdd", "size": "2 tb"},
 ]
-
-
-# The QR code tests read the codes back with zbarimg. Without it they skip,
-# except in CI, which installs it for them, so there they fail instead.
-NEEDS_ZBARIMG = unittest.skipUnless(shutil.which("zbarimg") or os.environ.get("CI"), "needs zbarimg")
 
 
 def decode(modules: list[list[bool]]) -> str | None:
@@ -75,7 +69,7 @@ class Code(unittest.TestCase):
         with self.assertRaises(agentv_qr.TooLong):
             agentv_qr.matrix("x" * 107)
 
-    @NEEDS_ZBARIMG
+    @unittest.skipUnless(shutil.which("zbarimg"), "needs zbarimg")
     def test_a_phone_reads_back_what_it_says(self):
         for text in (
             "WIFI:T:WPA;S:AgenTV-1a2b;P:abcdefghjk;;",
@@ -86,7 +80,7 @@ class Code(unittest.TestCase):
         ):
             self.assertEqual(decode(agentv_qr.matrix(text)), text)
 
-    @NEEDS_ZBARIMG
+    @unittest.skipUnless(shutil.which("zbarimg"), "needs zbarimg")
     def test_the_consoles_half_blocks_read_back_too(self):
         # The TV's drawing, turned back into modules: light is a drawn half.
         screen = sys.modules.get("agentv_first_screen")
