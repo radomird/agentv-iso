@@ -1,5 +1,6 @@
 #!/bin/bash
 # TRIAL: what wakes the VM from suspend to idle.
+( sleep 840; echo "TRIAL: out of time" >&2; pkill -TERM -P $$ ssh; kill -TERM $$ ) &
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)/test/integration.d/base-test.sh"
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 base_image_ready || exit 1
