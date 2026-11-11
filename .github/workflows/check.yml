@@ -55,11 +55,16 @@ jobs:
 
       # AgenTV's own unit tests: the USB stick's first screen, the phone's
       # way through it and what it hands the installed box. Python's own
-      # unittest, in seconds, and zbarimg to read the QR codes back.
+      # unittest, in seconds, and zbarimg to read the QR codes back, kept in
+      # the cache so the job doesn't need Ubuntu's mirror each run.
+      - name: zbarimg, for the QR code tests
+        uses: ./.github/actions/debs
+        with:
+          packages: zbar-tools
+          command: zbarimg
+          name: zbar
       - name: AgenTV's unit tests
-        run: |
-          type -P zbarimg >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq zbar-tools; }
-          test/agentv/unit/run -v
+        run: test/agentv/unit/run -v
 
   report:
     name: "Which acceptance checks passed"
