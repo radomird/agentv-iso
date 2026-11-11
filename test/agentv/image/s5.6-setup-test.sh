@@ -66,7 +66,10 @@ fi
 guest "agentv input key enter" >"$RUN_DIR/input.log" 2>&1 || true
 check "Enter on the welcome screen carries on with the keyboard, to getting ready" until_setup '.setup.step == "ready" and .setup.keyboard' 60
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
-  check "getting ready is on the TV (OCR)" ocr_finds success-S5.6-getting-ready "getting ready" 30
+  # The update can restart the TV session seconds after this, and the
+  # headline types itself in first, so the screenshots are taken before any
+  # is read.
+  check "getting ready is on the TV (OCR)" ocr_finds_soon success-S5.6-getting-ready "getting ready" 6
 else
   # With nothing newer, getting ready moves on by itself in a few seconds,
   # which can be before OCR reads it: then the step after it is on the TV,
