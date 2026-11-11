@@ -36,6 +36,9 @@
 #       Checks the ISO against <dir>'s checksum, uploads the ISO and what's
 #       in <dir>, asks the bucket for each file's size and compares, and
 #       then moves <channel>.json to the new ISO.
+#       The ISO <channel>.json points at is never replaced: the same ISO
+#       again keeps its bytes and only gets its checksum and signature
+#       again, and a different ISO under that name is refused.
 #   stale <channel>
 #       Prints what clean would remove, one key a line, and removes nothing.
 #   clean <channel>
@@ -153,7 +156,7 @@ same_size() {
 }
 
 upload() {
-  local channel=$1 iso=$2 dir=$3 hash file version item
+  local channel=$1 iso=$2 dir=$3 hash file version item live
   local -a sums files
   channel_ok "$channel"
   : "${ISO_URL:?set ISO_URL to the public address of the bucket}"
@@ -179,6 +182,29 @@ upload() {
   version=${file#agentv-}
   version=${version%-x86_64.iso}
 
+  # Is this the ISO people are downloading right now? Then its bytes stay
+  # as they are: a download under way, and the checksum people have, both
+  # count on them. The same ISO again only gets what describes it (a
+  # signature it went out without, say). Other bytes under the live name
+  # are refused.
+  live=""
+  if aws s3api get-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$channel.json" "$WORK/live.json" \
+    >/dev/null 2>"$WORK/live.err"; then
+    if [[ $(jq -r 'if type == "object" then .file else "" end' "$WORK/live.json" 2>/dev/null || true) == "$file" ]]; then
+      live=$(jq -r '.sha256 | strings' "$WORK/live.json")
+      if [[ $live != "$hash" ]]; then
+        echo "agentv-iso-publish: $file is the $channel ISO people download now, with sha256 ${live:-(none)}, and this one's is $hash. A published ISO isn't replaced under the same name, so nothing is uploaded. Publish this one as a new version." >&2
+        exit 1
+      fi
+    fi
+  elif ! grep -qE 'NoSuchKey|\(404\)' "$WORK/live.err"; then
+    # No file yet is a first publish. Anything else, and it isn't known
+    # which ISO is live.
+    cat "$WORK/live.err" >&2
+    echo "agentv-iso-publish: couldn't read the bucket's $PREFIX$channel.json, so nothing is uploaded" >&2
+    exit 1
+  fi
+
   # The ISO first, then what describes it. With no signature this time, one
   # an earlier publish left under this name goes: it isn't this checksum's.
   files=("$iso:$file" "$dir/$file.sha256:$file.sha256")
@@ -186,9 +212,16 @@ upload() {
     files+=("$dir/$file.sha256.sig:$file.sha256.sig")
   fi
   for item in "${files[@]}"; do
+    # The live ISO is in the bucket already, whole. The size check below
+    # stops the publish if it isn't.
+    if [[ -n $live && ${item##*:} == "$file" ]]; then
+      echo "$file is the $channel ISO already, with the same sha256, so it isn't uploaded again." >&2
+      continue
+    fi
     aws s3 cp --endpoint-url "$endpoint" --only-show-errors "${item%%:*}" "s3://$R2_BUCKET/$PREFIX${item##*:}" >&2
   done
-  if [[ ! -s $dir/$file.sha256.sig ]]; then
+  # The live ISO's signature is this checksum's too, so it stays.
+  if [[ ! -s $dir/$file.sha256.sig && -z $live ]]; then
     aws s3api delete-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$file.sha256.sig" >&2
   fi
 
