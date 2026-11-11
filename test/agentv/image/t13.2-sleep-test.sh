@@ -96,6 +96,69 @@ power_button() {
   fi
 }
 
+# Diagnostics, throwaway: what Hyprland is doing. Its process and state, where
+# its threads wait in the kernel, whether its socket is there and answers,
+# the end of its own log, core dumps, and the kernel since the first suspend.
+hyprland_state() {
+  local out="$RUN_DIR/hyprland-$1.txt" user root
+  user='run=/run/user/$(id -u)
+echo "-- processes"
+ps -eo pid,ppid,stat,wchan:32,etimes,comm | grep -E "Hyprland|start-hyprland|agentv-session|uwsm|Xwayland"
+for d in "$run"/hypr/*/; do
+  sig=$(basename "$d")
+  echo "-- instance $sig"
+  ls -la "$d"
+  s=$(date +%s%N)
+  HYPRLAND_INSTANCE_SIGNATURE=$sig timeout 4 hyprctl version >/dev/null 2>/tmp/hyprctl.err
+  rc=$?
+  echo "hyprctl version: exit $rc after $(( ($(date +%s%N) - s) / 1000000 )) ms: $(head -c 200 /tmp/hyprctl.err)"
+  if (( rc == 0 )); then HYPRLAND_INSTANCE_SIGNATURE=$sig timeout 4 hyprctl monitors 2>&1 | head -n 40; fi
+  echo "-- the end of its log"
+  tail -n 150 "$d/hyprland.log" 2>&1
+done
+echo "-- the DRM devices"
+ls -la /dev/dri/ /sys/class/drm/ 2>&1
+for c in /sys/class/drm/card*-*; do echo "$c $(cat $c/status 2>/dev/null) $(cat $c/enabled 2>/dev/null) $(cat $c/dpms 2>/dev/null)"; done'
+  root='echo "-- where Hyprland waits in the kernel"
+for pid in $(pgrep -x Hyprland) $(pgrep -x start-hyprland); do
+  for t in /proc/$pid/task/*; do
+    echo "task $pid/$(basename $t) $(cat $t/comm) state $(cut -d" " -f3 $t/stat) wchan $(cat $t/wchan)"
+    cat $t/stack 2>&1 | head -n 30
+  done
+done
+echo "-- blocked tasks (D state)"
+ps -eo pid,stat,wchan:32,comm | awk "\$2 ~ /D/"
+echo "-- core dumps"
+coredumpctl list --no-pager 2>&1 | tail -n 10
+echo "-- the kernel since the first suspend"
+journalctl -k -b --no-pager -o short-monotonic | sed -n "/PM: suspend entry/,\$p" | grep -v "Registered nosave" | tail -n 200
+echo "-- the session and the login manager"
+journalctl -b --no-pager -o short-monotonic -t agentv-session -t sddm -t greetd -t uwsm 2>&1 | tail -n 30
+echo "-- the kernel version and the GPU driver"
+uname -a
+lspci -k 2>/dev/null | grep -A3 -i vga
+cat /sys/power/mem_sleep'
+  {
+    echo "== $1 at $(date -u +%T)"
+    ssh_quick 40 "bash -c $(printf %q "$user")"
+    ssh_quick 40 "echo $GUEST_PASSWORD | sudo -S -p '' bash -c $(printf %q "$root")"
+  } >"$out" 2>&1 || true
+}
+
+# Every 2 s for 60 s: whether hyprctl answers, and how fast.
+hyprland_probe() {
+  local probe='sig=$(ls -t /run/user/$(id -u)/hypr | head -n 1)
+for i in $(seq 30); do
+  s=$(date +%s%N)
+  HYPRLAND_INSTANCE_SIGNATURE=$sig timeout 3 hyprctl version >/dev/null 2>&1
+  echo "$(date -u +%T.%N | cut -c1-12) exit $? in $(( ($(date +%s%N) - s) / 1000000 )) ms"
+  sleep 2
+done'
+  ssh_quick 90 "bash -c $(printf %q "$probe")" >"$RUN_DIR/hyprland-probe-$1.txt" 2>&1 || true
+}
+
+qemu-system-x86_64 --version >"$RUN_DIR/qemu-version.txt" 2>&1 || true
+hyprland_state before
 guest "agentv screen sleep-after 120" >"$RUN_DIR/screen.log" 2>&1 || true
 
 # Sleep off, the TV off: the apps close after 2 minutes, home waits on its
@@ -138,6 +201,8 @@ sleep 10
 # The power button wakes it, to the ambient screen.
 power_button
 wait_for_ssh 180 failure-sleep-wake-ssh-timeout || { check "the power button wakes the box" false; stop_vm; finish; }
+hyprland_probe woke &
+hyprland_state woke
 # The shortened hour would put it back to sleep while the check looks, so
 # it's longer until then.
 guest "agentv screen sleep-after 900" >>"$RUN_DIR/screen.log" 2>&1 || true
@@ -164,6 +229,11 @@ check "and with the TV still off, the output goes off again" settled
 check "T13.2 the power button wakes it to the ambient screen" test "$(last_ambient)" = "the ambient screen"
 screen_status >"$RUN_DIR/status-woken.json"
 log "agentv screen status after the wake: $(head -c 300 "$RUN_DIR/status-woken.json" | tr '\n' ' ')"
+hyprland_state woken
+wait
+log "Waiting 150 s for the kernel's word on blocked tasks"
+sleep 150
+hyprland_state later
 # Back to the shortened hour: awake longer than that by now, it sleeps again.
 guest "agentv screen sleep-after 120" >>"$RUN_DIR/screen.log" 2>&1 || true
 
@@ -177,6 +247,7 @@ fi
 sleep 10
 press shift
 wait_for_ssh 180 failure-sleep-key-ssh-timeout || { check "a key wakes the box" false; stop_vm; finish; }
+hyprland_state woke-again
 sleep 5
 check "T13.2 a key on the keyboard wakes it" test "$(entries)-$(exits)" = "2-2"
 
