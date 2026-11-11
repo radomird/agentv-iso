@@ -59,6 +59,10 @@ snapshots_before=$(snapshots)
 # OMARCHY_UPDATE_LOGGED skips Omarchy's script(1) wrapper, as upstream's test
 # does, so the update has no terminal: its questions, such as the reboot one,
 # report and move on instead of waiting for an answer.
+# A box from before AgenTV's package list needed its signature can hold the
+# list alone, which pacman now refuses. This one is put in that state, and
+# the update has to get through it and leave the list with its signature.
+ssh_sudo "[[ -e /var/lib/pacman/sync/agentv.db ]] || bsdtar -czf /var/lib/pacman/sync/agentv.db -T /dev/null; rm -f /var/lib/pacman/sync/agentv.db.sig" || true
 update="timeout 2400 env OMARCHY_UPDATE_LOGGED=1 agentv update -y --untested"
 ssh_guest "bash -lc $(printf %q "$update") </dev/null" >"$RUN_DIR/agentv-update.log" 2>&1 || true
 tail -n 30 "$RUN_DIR/agentv-update.log"
@@ -66,6 +70,9 @@ tail -n 30 "$RUN_DIR/agentv-update.log"
 after=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
 check "S0.5 agentv update moved agentv to $AGENTV_TEST_UPDATE_VERSION (was $before, now $after)" \
   test "$after" = "$AGENTV_TEST_UPDATE_VERSION"
+check "the update left AgenTV's package list with its signature, from a box that held the list alone" \
+  ssh_guest "[[ -s /var/lib/pacman/sync/agentv.db && -s /var/lib/pacman/sync/agentv.db.sig ]]"
+check "and pacman reads it without fetching again: it finds agentv in it" ssh_guest "pacman -Si agentv >/dev/null"
 snapshots_after=$(snapshots)
 check "S0.5 Omarchy's update took a snapshot first (snapshots: $snapshots_before before, $snapshots_after after)" \
   test "$snapshots_after" -gt "$snapshots_before"

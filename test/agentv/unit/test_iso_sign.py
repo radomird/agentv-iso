@@ -38,8 +38,8 @@ class IsoSign(unittest.TestCase):
             }
         self.pinned = self.work / "key-fingerprint"
         self.pinned.write_text(self.keys["agentv"]["fingerprint"] + "\n")
-        self.sum = self.work / "agentv-stable.iso.sha256"
-        self.sum.write_text(f"{'a' * 64}  agentv-stable.iso\n")
+        self.sum = self.work / "agentv-1.0.0-x86_64.iso.sha256"
+        self.sum.write_text(f"{'a' * 64}  agentv-1.0.0-x86_64.iso\n")
         self.sig = Path(f"{self.sum}.sig")
 
     def tearDown(self):
@@ -136,6 +136,15 @@ class WhoGetsTheKeys(unittest.TestCase):
             self.assertNotIn("secrets.", publish[name])
             self.assertNotIn("environment:", publish[name])
 
+    def test_the_morning_publishes_only_a_scheduled_nights_iso(self):
+        # A nightly run started by hand can check with an agentv-iso branch
+        # that isn't merged, so its ISO is never picked up on its own.
+        which = jobs("publish-iso.yml")["which"]
+        asked = re.findall(r"workflows/nightly\.yml/runs\?(\S+?)\"", which)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("event=schedule", asked[0].split("&"))
+        self.assertIn("branch=agentv", asked[0].split("&"))
+
     def test_the_workflow_that_builds_the_iso_has_no_keys(self):
         # It runs for pull requests and tags, on their own code.
         text = "\n".join(line for line in (WORKFLOWS / "iso.yml").read_text().splitlines() if not line.lstrip().startswith("#"))
@@ -143,6 +152,14 @@ class WhoGetsTheKeys(unittest.TestCase):
         self.assertNotIn("secrets: inherit", text)
         self.assertNotIn("environment:", text)
         self.assertNotIn("agentv-iso-publish", text)
+
+    def test_the_signing_job_signs_the_checksum_under_the_isos_own_name(self):
+        publish = jobs("publish-iso.yml")
+        self.assertIn('bin/agentv-iso-sign "names/$NAME.iso.sha256"', publish["sign"])
+        self.assertIn("NAME: ${{ needs.which.outputs.name }}", publish["sign"])
+        # Nothing goes by a channel's name any more.
+        for text in publish.values():
+            self.assertNotIn("agentv-$CHANNEL", text)
 
     def test_the_dry_run_is_a_step_of_its_own_before_the_removal(self):
         publish = jobs("publish-iso.yml")["publish"]
@@ -155,8 +172,9 @@ class WhoGetsTheKeys(unittest.TestCase):
         self.assertIn("- name:", between)
         # A pipe to the summary mustn't hide a failed listing.
         lines = [line.strip() for line in publish.splitlines()]
+        # Only the channel just published is cleaned.
         for command in ("stale", "clean"):
-            at = next(i for i, line in enumerate(lines) if line.startswith(f"bin/agentv-iso-publish {command} |"))
+            at = next(i for i, line in enumerate(lines) if line.startswith(f'bin/agentv-iso-publish {command} "$CHANNEL" |'))
             self.assertEqual(lines[at - 1], "set -o pipefail")
 
 if __name__ == "__main__":
