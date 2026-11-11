@@ -143,6 +143,7 @@ for stack in /proc/[0-9]*/stack; do
   fi
 done
 echo "== virtio's GPU"
+lspci -vv -d 1af4:1050 2>&1 | grep -i 'express\|PME\|Status: D\|NoSoftRst\|^[0-9a-f]'
 uname -r
 pacman -Q hyprland aquamarine linux 2>&1
 for dev in /sys/bus/virtio/devices/*; do echo "$dev $(cat "$dev/device" "$dev/status" 2>/dev/null | tr '\n' ' ')"; done
