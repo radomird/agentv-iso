@@ -334,9 +334,14 @@ check "which lists the new Wi-Fi, and says it's after setup and wants the PIN" j
 settings_there=$(phone_curl "-o /dev/null -w '%{http_code}' http://10.42.0.1/api/network")
 check "and nothing of Settings' own ($settings_there)" test "$settings_there" = 404
 
-# With the phone on it, the watch leaves the hotspot open past its wait.
-sleep 50
-check "with the phone on it, the hotspot stays open" hotspot_on
+# With someone using its page, the watch leaves the hotspot open past its
+# wait. A phone that's only joined doesn't hold it open, so this one keeps
+# asking for the page.
+for _ in 1 2 3 4 5; do
+  sleep 10
+  phone_curl "-o /dev/null http://10.42.0.1/"
+done
+check "with someone using its page, the hotspot stays open" hotspot_on
 check "and the phone is still on it" associated
 
 # page_join [<pin>]: the page's join, with the passwords from a file.
