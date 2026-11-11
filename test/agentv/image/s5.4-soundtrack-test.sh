@@ -54,6 +54,26 @@ phone_key=$(pair_phone 'image check')
 check "a phone pairs" test -n "$phone_key"
 check "getting ready settles, with the soundtrack still playing" \
   until_json /api/setup '(.setup.ready.update | IN("none", "done", "failed", "skipped")) and (.setup.muted | not)' 120
+
+# When getting ready found an update, which it does when edge has moved on
+# since the ISO was built, AgenTV's services restart on it. Getting ready
+# says done once the daemon answers on the new version, and the TV session
+# restarts after that, so its page goes and comes back with the soundtrack
+# starting again. Both recordings wait for the update to finish and the
+# player to be back.
+update_finished() {
+  local started=$SECONDS
+  while (( SECONDS - started < $1 )); do
+    [[ $(ssh_guest "cat /var/lib/agentv/update/progress.json 2>/dev/null" | jq -r '.state' 2>/dev/null) =~ ^(done|failed)$ ]] && return 0
+    sleep 3
+  done
+  return 1
+}
+if [[ $(ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/api/setup" 2>/dev/null | jq -r '.setup.ready.update' 2>/dev/null) == "done" ]]; then
+  log "Getting ready installed an update, so the recordings wait for the TV to be back on it"
+  update_finished 300 || log "The update didn't say it had finished in 300 s"
+  ocr_finds success-S5.4-player-again "setup soundtrack|m to mute" 60 || true
+fi
 sleep 3
 playing=$(loudness playing)
 check "S5.4 the soundtrack can be heard on the box's output (loudness $playing)" awk -v l="$playing" 'BEGIN { exit !(l > 0.005) }'
