@@ -66,6 +66,7 @@ t2.1-boot 420
 t2.2-boot-menu 180
 t13.2-sleep 480
 t15-sudoers 150
+t16-guide-home 78
 t16.2-tv-off-game 420
 t17.2-weather-start 240
 tested-packages 5

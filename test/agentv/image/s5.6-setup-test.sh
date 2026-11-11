@@ -77,6 +77,9 @@ else
   # step on one before that.
   check "getting ready is on the TV, or the step it moved on to (OCR)" ocr_finds success-S5.6-getting-ready "getting ready|your box|where is this tv|which ai do you use" 30
 fi
+# Said here, so a failed run's log has what the TV showed in its place.
+grep -Eqi "getting ready" "$RUN_DIR/success-S5.6-getting-ready.txt" 2>/dev/null ||
+  { tr -s '\n ' <"$RUN_DIR/success-S5.6-getting-ready.txt" 2>/dev/null | head -c 1500 | sed 's/^/the TV read: /'; echo; } || true
 capture_console "success-S5.6-getting-ready"
 
 if [[ -n ${AGENTV_TEST_UPDATE_REPO:-} ]]; then
