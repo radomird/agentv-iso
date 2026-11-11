@@ -120,9 +120,12 @@ check "S1.7 the services' profile has password saving, autofill, translate and n
 # a Chromium that saves passwords offers to. The key is a stand-in in the
 # shape of a real one, and home's words are English, so only the bubble's
 # own words count.
+guest "agentv setup skip" >"$RUN_DIR/setup.log" 2>&1 || true
 guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "home is back in front" wait_front home 30
-guest "agentv screen settings tmdb" >>"$RUN_DIR/screen.log" 2>&1 || true
+sleep 5
+guest "agentv screen settings tmdb" >"$RUN_DIR/settings.json" 2>&1 || true
+check "Settings opens at New this week" jq -e '.ok == true' "$RUN_DIR/settings.json"
 sleep 2
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 1
