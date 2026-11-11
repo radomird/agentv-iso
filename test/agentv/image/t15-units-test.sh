@@ -38,7 +38,7 @@ SANDBOXED=(agentv-daemon agentv-router agentv-router-cli agentv-build-net agentv
   agentv-builder@ agentv-builder-cli@ agentv-builder-sign-in@)
 KEPT_IN=(agentv-build agentv-key agentv-setup-apps agentv-zone agentv-password@)
 ROOT_HELPERS=(agentv-firstboot agentv-update-check agentv-update-tv agentv-update-after agentv-go-back
-  agentv-go-back-cleanup agentv-hotspot agentv-hotspot-boot agentv-hotspot-drop agentv-share agentv-shares
+  agentv-go-back-cleanup agentv-hotspot agentv-hotspot-boot agentv-hotspot-drop agentv-hotspot-watch agentv-share agentv-shares
   agentv-wake agentv-app-package@ agentv-boot-splash-release)
 # A unit's own ceiling, when its class's is too loose or too tight for it.
 # The daemon forks app workers and reads the GPU, so it keeps more than the
