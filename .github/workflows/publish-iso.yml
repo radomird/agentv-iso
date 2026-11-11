@@ -118,10 +118,11 @@ jobs:
             schedule)
               # The edge ISO agentv-os's newest finished nightly run kept. A
               # night with a failed check keeps none: its last job takes the
-              # ISO back.
+              # ISO back. Only a run the schedule started counts: one started
+              # by hand can check with an agentv-iso branch that isn't merged.
               channel=edge
               repo=agentv-os
-              run=$(gh api "repos/$OWNER/agentv-os/actions/workflows/nightly.yml/runs?branch=agentv&status=completed&per_page=1" \
+              run=$(gh api "repos/$OWNER/agentv-os/actions/workflows/nightly.yml/runs?branch=agentv&event=schedule&status=completed&per_page=1" \
                 --jq '.workflow_runs[0].id // empty')
               [[ -n $run ]] || skip "Nothing is published: agentv-os has no finished nightly run."
               name=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/artifacts?per_page=100" --paginate \

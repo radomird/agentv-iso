@@ -136,6 +136,15 @@ class WhoGetsTheKeys(unittest.TestCase):
             self.assertNotIn("secrets.", publish[name])
             self.assertNotIn("environment:", publish[name])
 
+    def test_the_morning_publishes_only_a_scheduled_nights_iso(self):
+        # A nightly run started by hand can check with an agentv-iso branch
+        # that isn't merged, so its ISO is never picked up on its own.
+        which = jobs("publish-iso.yml")["which"]
+        asked = re.findall(r"workflows/nightly\.yml/runs\?(\S+?)\"", which)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("event=schedule", asked[0].split("&"))
+        self.assertIn("branch=agentv", asked[0].split("&"))
+
     def test_the_workflow_that_builds_the_iso_has_no_keys(self):
         # It runs for pull requests and tags, on their own code.
         text = "\n".join(line for line in (WORKFLOWS / "iso.yml").read_text().splitlines() if not line.lstrip().startswith("#"))
