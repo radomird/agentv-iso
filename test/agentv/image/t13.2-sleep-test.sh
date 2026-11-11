@@ -19,7 +19,19 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
-start_vm_from_base
+# TRIAL: the VM with another display device than upstream's virtio-vga.
+if [[ -n ${T13_GPU:-} ]]; then
+  body=$(declare -f start_vm)
+  [[ $body == *"-device virtio-vga"* ]] || { echo "start_vm has no virtio-vga to swap" >&2; exit 1; }
+  body=${body/start_vm/start_vm_gpu}
+  eval "${body/-device virtio-vga/$T13_GPU}"
+  qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$RUN_DIR/run.qcow2" >/dev/null
+  cp "$BASE_OVMF" "$RUN_DIR/OVMF_VARS.4m.fd"
+  ACTIVE_OVMF="$RUN_DIR/OVMF_VARS.4m.fd"
+  start_vm_gpu "$RUN_DIR/run.qcow2" "$RUN_DIR/serial.log"
+else
+  start_vm_from_base
+fi
 wait_for_ssh 300 failure-sleep-ssh-timeout || exit 1
 wait_tv 240 >/dev/null || { capture_console "failure-sleep-no-tv"; check "the TV session came up" false; stop_vm; finish; }
 
@@ -38,15 +50,6 @@ fi
 ssh_guest "cat /sys/power/state /sys/power/mem_sleep" >"$RUN_DIR/power-states.txt" 2>&1 || true
 log "The kernel offers: $(tr '\n' ' ' <"$RUN_DIR/power-states.txt")"
 check "the kernel offers suspend to RAM" grep -qw mem "$RUN_DIR/power-states.txt"
-
-# The VM sleeps the way a box without S3 does: suspend to idle. QEMU resets
-# its devices on a wake from S3, and virtio's GPU stops taking commands after
-# that, so the kernel's next change to the display waits for good and takes
-# Hyprland with it. A real GPU keeps its state across S3. AgenTV asks logind
-# for the same suspend either way.
-ssh_sudo "echo s2idle >/sys/power/mem_sleep" || true
-ssh_guest "cat /sys/power/mem_sleep" >"$RUN_DIR/mem-sleep.txt" 2>&1 || true
-check "the VM suspends to idle" grep -q '\[s2idle\]' "$RUN_DIR/mem-sleep.txt"
 
 # SSH that gives up after <seconds>: a suspended box takes the connection
 # and never answers, which ConnectTimeout alone doesn't cover. timeout can't
