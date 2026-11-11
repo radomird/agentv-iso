@@ -120,8 +120,19 @@ INFO
 (cd "$pkg" && repo-add -q agentv-check.db.tar.gz agentv-stand-in-game-1.0-1-any.pkg.tar.zst)
 grep -q '^\[agentv-check\]' /etc/pacman.conf || printf '\n[agentv-check]\nSigLevel = Optional TrustAll\nServer = file:///var/lib/agentv-check/pkg\n' >>/etc/pacman.conf
 install -m 644 "$pkg/agentv-check.db.tar.gz" /var/lib/pacman/sync/agentv-check.db
-# A box that's been updated has every repository's package list; this
-# throwaway one gets empty ones in their place, fetching nothing.
+# A box that's been updated has every repository's package list, and one
+# straight from the ISO has none. So this one fetches them, as its first
+# update would. An empty list in a real one's place isn't enough: AgenTV's
+# repository takes a list only with its signature, and nothing here can
+# sign one. An empty one still stands in for a repository that didn't
+# answer and takes an unsigned list.
+missing=0
+for repo in $(pacman-conf --repo-list); do
+  [[ -f /var/lib/pacman/sync/$repo.db ]] || missing=1
+done
+if (( missing )); then
+  pacman -Sy || true
+fi
 for repo in $(pacman-conf --repo-list); do
   [[ -f /var/lib/pacman/sync/$repo.db ]] || bsdtar -czf "/var/lib/pacman/sync/$repo.db" -T /dev/null
 done
