@@ -46,10 +46,16 @@ SESSION_BLACK_S = 2.0
 # The same, when the session's first frame is at another resolution than the
 # splash's. The TV session starts at the TV's kept mode (its size), which
 # can differ from the one the kernel and the splash run at, and then the
-# screen changes resolution, as a TV does when its input does: 1.9 to 2.3 s
-# in the VM, from QEMU's 1280 x 800 to 1920 x 1080. Booting at the kept
-# mode would take it away (Q274).
-SESSION_RESIZE_S = 3.5
+# screen changes resolution, as a TV does when its input does. Q274 keeps
+# that black for 1.0, and booting at the kept mode would take it away. It
+# counts only when it's already at the session's size: Hyprland has set its
+# mode and hasn't drawn yet. Black at the splash's size is the splash going
+# early, whatever its length. In the VM, from QEMU's 1280 x 800 to
+# 1920 x 1080, it took 0.7 to 3.8 s over 40 boots in the first day of runs
+# with the sizes on (2026-11-10 and 11), longer when the runner was busy.
+# The 3.5 s it had then failed four boots that had nothing else wrong.
+# T2.3 times it on a real TV.
+SESSION_RESIZE_S = 5.0
 # A word, for the text rule: three letters or more. OCR reads a picture's
 # edges as one or two letters at times, never as a word.
 WORD = re.compile(r"[A-Za-z]{3,}")
@@ -322,7 +328,8 @@ def analyse(args):
             now = size(os.path.join(args.out, since_splash[k]["file"]))
             if was and now and was != now:
                 resized = f"{was} to {now}"
-                allowed = SESSION_RESIZE_S
+                at_session_size = all(size(os.path.join(args.out, f["file"])) == now for f in stretch)
+                allowed = SESSION_RESIZE_S if at_session_size else 0
         if k < len(since_splash) and since_splash[k]["kind"] in ("background", "splash") and sum(seconds(f) for f in stretch) <= allowed:
             session_black = stretch
     verdict = {
