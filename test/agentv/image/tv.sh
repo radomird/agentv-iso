@@ -169,43 +169,80 @@ screen_shows_welcome() {
 # The script's own output, for what a failed read says.
 exec {OCR_LOG_FD}>&2
 
+# One screenshot, read five ways (the whole screen twice, then its right,
+# bottom and top parts enlarged), into the text file named second.
+ocr_read() {
+  local shot=$1 sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
+
+  : >"$2"
+  [[ -s $shot ]] || return 1
+  magick "$shot" -resize '1920x1080>' "$sized" 2>/dev/null || return 1
+  magick "$sized" -colorspace gray -negate -resize 150% "$prepped" 2>/dev/null || return 1
+  {
+    tesseract "$prepped" - --psm 6 2>/dev/null
+    tesseract "$prepped" - --psm 11 2>/dev/null
+    magick "$sized" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
+      tesseract "$right" - --psm 6 2>/dev/null
+    magick "$sized" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
+      tesseract "$bottom" - --psm 6 2>/dev/null
+    magick "$sized" -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 200% "$top" 2>/dev/null &&
+      tesseract "$top" - --psm 6 2>/dev/null
+  } >"$2"
+  return 0
+}
+
+# What a failed read saw, so the run's log says what was on the TV. check
+# sends a function's own output nowhere, so it goes to the script's, kept
+# open below.
+ocr_missed() {
+  {
+    echo "$1 The first read:"
+    grep -v '^[[:space:]]*$' "$2" 2>/dev/null | head -25
+    echo "the last read:"
+    grep -v '^[[:space:]]*$' "$3" 2>/dev/null | head -25
+  } 1>&"$OCR_LOG_FD" 2>/dev/null || true
+}
+
 ocr_finds() {
-  local started=$SECONDS reads=0 shot="$RUN_DIR/.ocr.ppm" sized="$RUN_DIR/.ocr-sized.png" prepped="$RUN_DIR/.ocr.png" right="$RUN_DIR/.ocr-right.png" bottom="$RUN_DIR/.ocr-bottom.png" top="$RUN_DIR/.ocr-top.png"
+  local started=$SECONDS reads=0 shot="$RUN_DIR/.ocr.ppm"
 
   while true; do
-    : >"$RUN_DIR/$1.txt"
     rm -f "$shot"
     screendump "$shot"
-    if [[ -s $shot ]] && magick "$shot" -resize '1920x1080>' "$sized" 2>/dev/null &&
-      magick "$sized" -colorspace gray -negate -resize 150% "$prepped" 2>/dev/null; then
-      {
-        tesseract "$prepped" - --psm 6 2>/dev/null
-        tesseract "$prepped" - --psm 11 2>/dev/null
-        magick "$sized" -gravity east -crop 62%x100%+0+0 +repage -colorspace gray -negate -resize 200% "$right" 2>/dev/null &&
-          tesseract "$right" - --psm 6 2>/dev/null
-        magick "$sized" -gravity south -crop 100%x30%+0+0 +repage -colorspace gray -negate -resize 200% "$bottom" 2>/dev/null &&
-          tesseract "$bottom" - --psm 6 2>/dev/null
-        magick "$sized" -gravity north -crop 100%x20%+0+0 +repage -colorspace gray -negate -resize 200% "$top" 2>/dev/null &&
-          tesseract "$top" - --psm 6 2>/dev/null
-      } >"$RUN_DIR/$1.txt"
+    if ocr_read "$shot" "$RUN_DIR/$1.txt"; then
       grep -Eqi "$2" "$RUN_DIR/$1.txt" && return 0
     fi
     reads=$((reads + 1))
     (( reads > 1 )) || cp -f "$RUN_DIR/$1.txt" "$RUN_DIR/$1.first.txt" 2>/dev/null || true
     if (( SECONDS - started >= $3 )); then
-      # What it read instead, so a failed run's log says what was on the TV.
-      # check sends this function's own output nowhere, so it goes to the
-      # script's, kept open below.
-      {
-        echo "ocr_finds: no \"$2\" in $3 s, in $reads reads. The first read:"
-        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.first.txt" 2>/dev/null | head -25
-        echo "ocr_finds: the last read:"
-        grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -25
-      } 1>&"$OCR_LOG_FD" 2>/dev/null || true
+      ocr_missed "ocr_finds: no \"$2\" in $3 s, in $reads reads." "$RUN_DIR/$1.first.txt" "$RUN_DIR/$1.txt"
       return 1
     fi
     sleep 1
   done
+}
+
+# The same, for a screen that's only up for a few seconds: ocr_finds_soon
+# name pattern shots. One read takes about 10 s here, so a screen that comes
+# and goes inside that is missed by reading as it goes. This takes the
+# screenshots first, 2 s apart, and reads them afterwards.
+ocr_finds_soon() {
+  local i
+
+  for (( i = 1; i <= $3; i++ )); do
+    rm -f "$RUN_DIR/.ocr-soon-$i.ppm"
+    screendump "$RUN_DIR/.ocr-soon-$i.ppm"
+    (( i == $3 )) || sleep 2
+  done
+  for (( i = 1; i <= $3; i++ )); do
+    ocr_read "$RUN_DIR/.ocr-soon-$i.ppm" "$RUN_DIR/$1.$i.txt" || continue
+    if grep -Eqi "$2" "$RUN_DIR/$1.$i.txt"; then
+      cp -f "$RUN_DIR/$1.$i.txt" "$RUN_DIR/$1.txt"
+      return 0
+    fi
+  done
+  ocr_missed "ocr_finds_soon: no \"$2\" in $3 screenshots 2 s apart." "$RUN_DIR/$1.1.txt" "$RUN_DIR/$1.$3.txt"
+  return 1
 }
 
 # print_screen <screenshot>: prints it as a PNG in base64, in 16 greys, for
