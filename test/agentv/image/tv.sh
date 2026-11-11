@@ -201,7 +201,7 @@ ocr_finds() {
         grep -v '^[[:space:]]*$' "$RUN_DIR/$1.first.txt" 2>/dev/null | head -25
         echo "ocr_finds: the last read:"
         grep -v '^[[:space:]]*$' "$RUN_DIR/$1.txt" 2>/dev/null | head -25
-      } >&"$OCR_LOG_FD" 2>/dev/null || true
+      } 1>&"$OCR_LOG_FD" 2>/dev/null || true
       return 1
     fi
     sleep 1
