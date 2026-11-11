@@ -4,11 +4,13 @@
 # T16.2). agentv screen tv off stands in for the TV's power, which a VM
 # can't switch. Three things are open: an ordinary web app, Steam's stand-in
 # in its stand-in gamescope (as S3.5 has them), and a stand-in for a game
-# made on this TV, which is a page on home whose category is games.
+# made on this TV, which is a page on home whose category is games. A fourth
+# waits behind home: the same page under another name, which isn't a game.
 #   - With the game in front and the TV off for the 2 minutes, the web app
 #     closes, Steam and the game stay open, home shows no ambient screen over
 #     the game, and the output goes off. The TV back on, the game is on the
-#     screen, the same page it was.
+#     screen, the same page it was. The page that isn't a game was closed:
+#     opened again, it's a new page.
 #   - With Steam in front, it stays in front through the same, and the game
 #     stays open behind home.
 # The game keeps a token it makes as its page loads and counts on a timer,
@@ -21,6 +23,7 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/tv.sh"
 base_image_ready || { echo "No base image; run ./test/integration first" >&2; exit 1; }
 
 GAME=local.standin
+NOTES=local.notes
 
 start_vm_from_base
 wait_for_ssh 300 failure-t16.2-ssh-timeout || exit 1
@@ -48,9 +51,26 @@ until_status() {
   return 1
 }
 
-# What the game kept under a key, as the daemon on the box has it.
+# What an app kept under a key, as the daemon on the box has it.
+kept_of() {
+  ssh_guest "curl -fsS --max-time 5 -H 'Content-Type: application/json' -d '{\"app\":\"$1\",\"call\":\"storage.get\",\"args\":[\"$2\"]}' http://127.0.0.1:3000/api/kit" 2>/dev/null | jq -r '.value // ""' 2>/dev/null || true
+}
+
+# What the game kept.
 kept() {
-  ssh_guest "curl -fsS --max-time 5 -H 'Content-Type: application/json' -d '{\"app\":\"$GAME\",\"call\":\"storage.get\",\"args\":[\"$1\"]}' http://127.0.0.1:3000/api/kit" 2>/dev/null | jq -r '.value // ""' 2>/dev/null || true
+  kept_of "$GAME" "$1"
+}
+
+# until_page <app> <token> <seconds>: until the app's page is another one
+# than the token's, which a page that loads again is.
+until_page() {
+  local started=$SECONDS now
+  while (( SECONDS - started < $3 )); do
+    now=$(kept_of "$1" token)
+    [[ -n $now && $now != "$2" ]] && return 0
+    sleep 1
+  done
+  return 1
 }
 
 until_kept() {
@@ -185,6 +205,10 @@ on_home() {
 }
 check "home has the stand-in game, as a game" on_home
 
+# The same page as an app that isn't a game.
+ssh_guest "rm -rf /tmp/notes && cp -r /tmp/standin /tmp/notes && sed -i -e 's/local.standin/local.notes/' -e 's/\"Standin\"/\"Notes\"/' -e 's/\"games\"/\"utility\"/' /tmp/notes/manifest.json"
+ssh_sudo "agentv app install --local /tmp/notes --yes" >"$RUN_DIR/install-notes.log" 2>&1 || true
+
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "the ordinary app opens in front" wait_front web 60
 guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
@@ -194,6 +218,11 @@ check "Steam's stand-in opens in front, in its gamescope" wait_front steam 90
 check "and it runs" steam_running
 guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "home is in front again" wait_front home 10
+guest "agentv screen app $NOTES" >"$RUN_DIR/open-notes.log" 2>&1 || true
+check "the page app that isn't a game opens on home" until_page "$NOTES" "" 30
+notes=$(kept_of "$NOTES" token)
+log "The other page is $notes"
+guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
 guest "agentv screen app $GAME" >"$RUN_DIR/open.log" 2>&1 || true
 check "the game opens the way its tile would, on home" grep -q '"ok": *true' "$RUN_DIR/open.log"
 check "and its page runs" until_kept token 30
@@ -224,6 +253,14 @@ capture_console "success-t16.2-back"
 check "the ambient screen never came" test "$(front '.ambient')" = "false"
 check "the game is still the same page" test "$(kept token)" = "$token"
 
+# The page app that isn't a game closed with the others: its tile opens a
+# new page, where one left open would come back as it was.
+check "the page app that isn't a game is still the page it was, until it's opened" test "$(kept_of "$NOTES" token)" = "$notes"
+guest "agentv screen home" >>"$RUN_DIR/screen.log" 2>&1 || true
+guest "agentv screen app $NOTES" >>"$RUN_DIR/open-notes.log" 2>&1 || true
+check "the page app that isn't a game was closed: opened again, it's a new page" until_page "$NOTES" "$notes" 30
+check "and the game beside it is still the same page" test "$(kept token)" = "$token"
+
 # --- The TV goes off with Steam in front ----------------------------------------
 
 guest "agentv screen open $page" >>"$RUN_DIR/screen.log" 2>&1 || true
@@ -246,6 +283,7 @@ capture_console "success-t16.2-steam"
 # Nothing of the stand-ins is left behind.
 guest "agentv screen quit agentv.steam" >>"$RUN_DIR/screen.log" 2>&1 || true
 ssh_sudo "agentv app remove $GAME" >"$RUN_DIR/remove.log" 2>&1 || true
+ssh_sudo "agentv app remove $NOTES" >>"$RUN_DIR/remove.log" 2>&1 || true
 
 guest "journalctl --user -b --no-pager -u agentv-screen -u agentv-toast" >"$RUN_DIR/t16.2.log" 2>&1 || true
 stop_vm
