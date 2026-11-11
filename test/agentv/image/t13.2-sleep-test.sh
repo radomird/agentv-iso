@@ -99,7 +99,20 @@ power_button() {
 # What Hyprland is doing, into the run's folder: which instances there are,
 # each thread's state and where it waits in the kernel, how long hyprctl
 # takes to answer, the kernel's log and Hyprland's own.
+hmp() { qmp "\"human-monitor-command\", \"arguments\": {\"command-line\": \"$1\"}" | jq -r 'select(.return | type == "string") | .return' 2>/dev/null || true; }
 hypr_look() {
+  {
+    qemu-system-x86_64 --version | head -n 1
+    hmp "info virtio"
+    local path
+    path=$(hmp "info virtio" | grep -o '^/machine[^ ]*' | while read -r one; do hmp "info virtio-status $one" | grep -q 'virtio-gpu' && echo "$one"; done | head -n 1)
+    echo "virtio's GPU is at ${path:-?}"
+    if [[ -n $path ]]; then
+      hmp "info virtio-status $path"
+      hmp "info virtio-queue-status $path 0"
+      hmp "info virtio-queue-status $path 1"
+    fi
+  } >"$RUN_DIR/qemu-$1.txt" 2>&1 || true
   ssh_quick 60 "echo $GUEST_PASSWORD | sudo -S -p '' bash /tmp/t13-2-look.sh" >"$RUN_DIR/hyprland-$1.txt" 2>&1 || true
 }
 look_start() {
@@ -117,6 +130,20 @@ for pid in $(pgrep -x Hyprland; pgrep -x start-hyprland); do
     cat "$task/stack" 2>&1
   done
 done
+echo "== kernel threads in the display's code"
+for stack in /proc/[0-9]*/stack; do
+  if grep -q 'virtio\|drm_' "$stack" 2>/dev/null; then
+    pid=${stack#/proc/}; pid=${pid%/stack}
+    [[ -d /proc/$pid/task/$pid && $(cat "/proc/$pid/comm") != Hyprland ]] || continue
+    echo "-- $(cat "/proc/$pid/comm") $pid"
+    cat "$stack"
+  fi
+done
+echo "== virtio's GPU"
+uname -r
+pacman -Q hyprland aquamarine linux 2>&1
+for dev in /sys/bus/virtio/devices/*; do echo "$dev $(cat "$dev/device" "$dev/status" 2>/dev/null | tr '\n' ' ')"; done
+for file in /sys/kernel/debug/dri/*/virtio-gpu-* /sys/kernel/debug/dri/*/state; do echo "-- $file"; cat "$file" 2>&1 | head -n 60; done
 echo "== hyprctl"
 for sig in $(ls -t "$run/hypr/" 2>/dev/null); do
   started=$(date +%s.%N)
