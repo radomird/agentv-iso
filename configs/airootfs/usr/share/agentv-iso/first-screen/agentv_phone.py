@@ -87,6 +87,16 @@ def in_hotspot_network(address: object) -> bool:
     return peer in network
 
 
+def dhcp_range() -> str:
+    """The addresses dnsmasq hands to phones, with the netmask, from the hotspot's own network."""
+    network = ipaddress.ip_network(f"{ADDRESS}/{PREFIX}", strict=False)
+    first, last = network.network_address + 1, network.broadcast_address - 1
+    # Room at both ends in a network that has it: 10.42.0.10 to 10.42.0.250.
+    if network.num_addresses >= 256:
+        first, last = network.network_address + 10, network.broadcast_address - 5
+    return f"{first},{last},{network.netmask}"
+
+
 def write_json(path: Path, value: object, mode: int = 0o600) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.next")
@@ -206,7 +216,7 @@ class Hotspot:
             [
                 "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--no-poll",
                 f"--interface={device}", "--except-interface=lo", "--bind-interfaces",
-                "--dhcp-range=10.42.0.10,10.42.0.250,255.255.255.0,10m", "--dhcp-authoritative",
+                f"--dhcp-range={dhcp_range()},10m", "--dhcp-authoritative",
                 f"--dhcp-option=option:router,{ADDRESS}", f"--dhcp-option=option:dns-server,{ADDRESS}",
                 f"--dhcp-option=114,http://{ADDRESS}/",
                 f"--address=/#/{ADDRESS}", f"--dhcp-leasefile={leases}", "--log-facility=-", "--log-dhcp",
