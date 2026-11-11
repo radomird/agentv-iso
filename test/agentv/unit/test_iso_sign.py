@@ -145,6 +145,46 @@ class WhoGetsTheKeys(unittest.TestCase):
         self.assertIn("event=schedule", asked[0].split("&"))
         self.assertIn("branch=agentv", asked[0].split("&"))
 
+    def test_the_morning_asks_whether_the_nights_leg_passed(self):
+        # A night that failed or was cancelled can still have its ISO, when
+        # the job that takes it back didn't run or didn't find it.
+        which = jobs("publish-iso.yml")["which"]
+        found = which.index("kept no edge ISO")
+        asked = which.index("bin/agentv-iso-passed edge")
+        published = which.index("iso/edge.json")
+        self.assertLess(found, asked)
+        self.assertLess(asked, published)
+        self.assertIn("/jobs?filter=latest", which)
+
+    def passed(self, *rows, leg="edge"):
+        lines = "".join('{"name": "%s", "status": "%s", "conclusion": %s}\n' % (name, status, f'"{conclusion}"' if conclusion else "null") for name, status, conclusion in rows)
+        return subprocess.run([str(ROOT / "bin" / "agentv-iso-passed"), leg], input=lines.encode(), capture_output=True, check=False)
+
+    def test_a_leg_passed_only_when_every_job_of_it_did(self):
+        edge = "Install and test edge / "
+        box = (edge + "Get the box ready", "completed", "success")
+        one_job = (edge + "Build the ISO, install it, boot it, check it", "completed", "skipped")
+        part = (edge + "Check it, part 3 of 4", "completed", "success")
+        last = (edge + "Which image checks passed", "completed", "success")
+        other = ("Install and test stable / Build the ISO, install it, boot it, check it", "completed", "failure")
+        # In parts, and as the one job. Another leg's failure isn't this one's.
+        self.assertEqual(self.passed(box, one_job, part, last, other).returncode, 0)
+        self.assertEqual(self.passed((edge + "Build the ISO, install it, boot it, check it", "completed", "success"), other).returncode, 0)
+        # A failed check, with or without the last job having run.
+        failed = (edge + "Check it, part 3 of 4", "completed", "failure")
+        self.assertEqual(self.passed(box, failed, (edge + "Which image checks passed", "completed", "failure")).returncode, 1)
+        self.assertEqual(self.passed(box, failed).returncode, 1)
+        # Cancelled, still running, or stopped before its last job.
+        self.assertEqual(self.passed(box, (edge + "Check it, part 3 of 4", "completed", "cancelled")).returncode, 1)
+        self.assertEqual(self.passed(box, part, (edge + "Which image checks passed", "in_progress", "")).returncode, 1)
+        self.assertEqual(self.passed(box, part).returncode, 1)
+        self.assertEqual(self.passed(box, part, (edge + "Which image checks passed", "completed", "skipped")).returncode, 1)
+        # No such leg, and an answer that isn't a list of jobs.
+        self.assertEqual(self.passed(other).returncode, 1)
+        self.assertEqual(self.passed().returncode, 1)
+        wrong = subprocess.run([str(ROOT / "bin" / "agentv-iso-passed"), "edge"], input=b'{"message": "Not Found"}\n', capture_output=True, check=False)
+        self.assertEqual(wrong.returncode, 1)
+
     def test_the_workflow_that_builds_the_iso_has_no_keys(self):
         # It runs for pull requests and tags, on their own code.
         text = "\n".join(line for line in (WORKFLOWS / "iso.yml").read_text().splitlines() if not line.lstrip().startswith("#"))

@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# agentv:summary=Say whether one leg of a nightly run passed every check
+# agentv:args=<packages>   (the run's jobs, as GitHub's API lists them, on stdin)
+
+# The morning's publish takes the edge ISO a nightly run kept. That run's
+# last job takes the ISO back when a check failed, but a run that was
+# cancelled, or whose last job never ran, still has it. So the publish asks
+# this too, and it doesn't lean on that last job having cleaned up: the leg
+# that made the ISO has to have finished, with nothing failed or cancelled,
+# and its own last job has to have passed.
+#
+# A nightly run has a leg for each channel's packages, named
+# "Install and test <packages>", and each leg's jobs carry that name before
+# a slash. A leg ends in "Which image checks passed" when its checks ran in
+# parts, or is the one job "Build the ISO, install it, boot it, check it"
+# when they didn't.
+#
+#   gh api "repos/<owner>/agentv-os/actions/runs/<run>/jobs?filter=latest&per_page=100" \
+#     --paginate --jq '.jobs[]' | agentv-iso-passed edge
+#
+# Exits 0 when the leg passed, and 1 with the reason when it didn't or when
+# what it was handed isn't a list of jobs.
+
+set -euo pipefail
+
+packages=${1:?usage: agentv-iso-passed <packages> <jobs.json}
+[[ $packages =~ ^[a-z]+$ ]] || { echo "agentv-iso-passed: '$packages' isn't a channel's name" >&2; exit 1; }
+leg="Install and test $packages / "
+
+no() {
+  echo "The $packages leg didn't pass: $*"
+  exit 1
+}
+
+jobs=$(jq -cs --arg leg "$leg" '
+  if all(.[]; type == "object" and (.name | type) == "string") then
+    [.[] | select(.name | startswith($leg)) | {name: .name[($leg | length):], status: (.status // ""), conclusion: (.conclusion // "")}]
+  else
+    error("not a list of jobs")
+  end' 2>/dev/null) || no "what the run answered isn't a list of its jobs"
+
+(( $(jq 'length' <<<"$jobs") > 0 )) || no "the run has no job of that leg"
+
+unfinished=$(jq -r '[.[] | select(.status != "completed") | .name] | join(", ")' <<<"$jobs")
+[[ -z $unfinished ]] || no "these jobs haven't finished: $unfinished"
+
+bad=$(jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped") | "\(.name) (\(.conclusion))"] | join(", ")' <<<"$jobs")
+[[ -z $bad ]] || no "$bad"
+
+last=$(jq -r '[.[] | select(.conclusion == "success" and (.name == "Which image checks passed" or .name == "Build the ISO, install it, boot it, check it")) | .name] | length' <<<"$jobs")
+(( last > 0 )) || no "its last job, the one that says every check passed, didn't run"
+
+echo "The $packages leg passed every check."

@@ -81,6 +81,12 @@ jobs:
       run-id: ${{ steps.which.outputs.run-id }}
       name: ${{ steps.which.outputs.name }}
     steps:
+      # The default branch's own script, which says whether a nightly's leg
+      # passed. No secrets here, and nothing of the run being published.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: bin
+          persist-credentials: false
       - name: Decide, and say why
         id: which
         env:
@@ -120,8 +126,9 @@ jobs:
             schedule)
               # The edge ISO agentv-os's newest finished nightly run kept. A
               # night with a failed check keeps none: its last job takes the
-              # ISO back. Only a run the schedule started counts: one started
-              # by hand can check with an agentv-iso branch that isn't merged.
+              # ISO back, and the leg is asked about below as well. Only a run
+              # the schedule started counts: one started by hand can check
+              # with an agentv-iso branch that isn't merged.
               channel=edge
               repo=agentv-os
               run=$(gh api "repos/$OWNER/agentv-os/actions/workflows/nightly.yml/runs?branch=agentv&event=schedule&status=completed&per_page=1" \
@@ -130,6 +137,11 @@ jobs:
               name=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/artifacts?per_page=100" --paginate \
                 --jq '.artifacts[] | select(.expired == false and (.name | test("^agentv-(edge-[0-9.]+-[0-9a-f]{7}|[0-9]+[.][0-9]+[.][0-9]+[.]r[0-9]+[.]g[0-9a-f]+)-x86_64$"))) | .name' | head -n 1)
               [[ -n $name ]] || skip "Nothing is published: agentv-os's newest nightly run ($run) kept no edge ISO."
+              # The second lock, which doesn't lean on that last job: a run
+              # that was cancelled, or never got as far as taking its ISO
+              # back, still has one. The edge leg has to have passed.
+              passed=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/jobs?filter=latest&per_page=100" --paginate --jq '.jobs[]' | bin/agentv-iso-passed edge) ||
+                skip "Nothing is published from agentv-os's newest nightly run ($run), though it kept an edge ISO. ${passed:-Its jobs couldn't be read.}"
               # Published already?
               version=${name#agentv-}
               version=${version%-x86_64}
