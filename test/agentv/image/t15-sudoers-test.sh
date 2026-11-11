@@ -49,10 +49,15 @@ ssh_sudo "useradd -m -G wheel t15admin" >"$RUN_DIR/useradd.log" 2>&1 || true
 ssh_guest "cat >/tmp/t15-polkit.sh" <<'SH'
 # may <user> <unit> [<verb>]: polkit lets a process of theirs through unasked.
 may() {
-  local pid status
+  local pid="" status runner
   runuser -u "$1" -- sleep 30 &
-  sleep 1
-  pid=$(pgrep -u "$1" -n -x sleep)
+  runner=$!
+  # The sleep runuser started, once it's there: on a busy box that can take
+  # longer than a second, and the account may have a sleep of its own.
+  for _ in $(seq 1 50); do
+    pid=$(pgrep -P "$runner" -x sleep) && break
+    sleep 0.2
+  done
   pkcheck --action-id org.freedesktop.systemd1.manage-units --process "$pid" --detail unit "$2" --detail verb "${3:-start}" >/dev/null 2>&1
   status=$?
   kill "$pid" 2>/dev/null

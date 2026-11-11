@@ -135,6 +135,9 @@ agentv.onBack(function () { return false; });
 requestAnimationFrame(function () { draw(); agentv.ready(); });
 APP
 printf 'MIT\n' >$DIR/work/app/LICENSE
+# Chromium by itself first, with what it says kept: when the test TV doesn't
+# come up, this is where the reason is.
+{ id; ls -la \$HOME \$HOME/.config \$HOME/.local 2>&1; grep " /var/lib/agentv/builder" /proc/self/mountinfo | awk '{print \$5, \$6}'; timeout 40 /usr/bin/chromium --headless=new --no-first-run --disable-dev-shm-usage --user-data-dir=$DIR/chromium-alone --dump-dom about:blank; echo "chromium ended with \$?"; } >$DIR/chromium-alone.txt 2>&1
 node --disable-warning=ExperimentalWarning --input-type=module -e "const { tryApp } = await import('/usr/share/agentv/builder/gates/testtv.ts'); const r = await tryApp({ app: '$DIR/work/app', tests: [], checks: true, root: '/usr/share/agentv', chromium: '/usr/bin/chromium', storage: '$DIR/try-storage', shot: '$DIR/shot.png' }); console.log(JSON.stringify(r));" >$DIR/try.json 2>$DIR/try.err
 say testtv-ready 'jq -e .ready $DIR/try.json'
 say testtv-checks 'jq -e "(.problems | length) == 0" $DIR/try.json'
@@ -153,6 +156,10 @@ done
 ssh_guest "cat /run/agentv-build/answer.json" >"$RUN_DIR/answer.json" 2>&1 || true
 ssh_guest "sudo cat $DIR/probe.out" >"$RUN_DIR/probe.txt" 2>&1 || true
 ssh_guest "sudo cat $DIR/try.json $DIR/try.err" >"$RUN_DIR/try.txt" 2>&1 || true
+# Said here, so a failed run's log has why the test TV didn't come up.
+head -c 3000 "$RUN_DIR/try.txt" | sed 's/^/the test TV said: /' || true
+ssh_guest "sudo cat $DIR/chromium-alone.txt" >"$RUN_DIR/chromium-alone.txt" 2>&1 || true
+head -c 6000 "$RUN_DIR/chromium-alone.txt" | sed 's/^/Chromium alone said: /' || true
 ssh_guest "sudo cat $DIR/bwrap.txt" >"$RUN_DIR/bwrap.txt" 2>&1 || true
 ssh_guest "sudo journalctl -b -u agentv-build.service -u agentv-build-net.service -u '$UNIT' --no-pager" >"$RUN_DIR/builder.log" 2>&1 || true
 ssh_guest "sudo systemd-analyze security '$UNIT'" >"$RUN_DIR/security.txt" 2>&1 || true
