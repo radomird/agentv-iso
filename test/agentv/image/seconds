@@ -25,7 +25,7 @@ s0.7-tested 5
 s1.1-tv-session 248
 s1.3-switch 63
 s1.6-front 69
-s1.7-no-prompts 46
+s1.7-no-prompts 120
 s2.18-restart 58
 s2.18-shutdown 44
 s2.19-volume 47
@@ -52,7 +52,7 @@ s6.5-plan-sign-in 33
 s6.6-page-app 30
 s7-router 45
 s8-country 47
-t17.2-voice 150
+t17.2-voice 180
 s8-whats-new 46
 selftest 80
 setup-apps 38

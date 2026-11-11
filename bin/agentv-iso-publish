@@ -1,41 +1,58 @@
 #!/bin/bash
 
-# agentv:summary=Put an ISO where people download it, under its channel's name
-# agentv:args=names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale | clean
+# agentv:summary=Put an ISO where people download it, under its version's name
+# agentv:args=names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale <channel> | clean <channel>
 
 # AgenTV's ISOs live in a Cloudflare R2 bucket, since an ISO is over GitHub's
-# 2 GiB cap for release files. The bucket's iso/ folder holds three, and
-# only three: the edge build, the latest stable release and the latest
-# release candidate. Each goes by a name that doesn't change with its
-# version, so a link to it keeps working:
+# 2 GiB cap for release files. The bucket's iso/ folder holds one ISO for
+# each channel: the latest stable release, last night's edge build, and the
+# latest release candidate. Each ISO goes by its version, so the file you
+# download says what it is:
 #
-#   iso/agentv-<channel>.iso             the ISO (edge, stable or rc)
-#   iso/agentv-<channel>.iso.sha256      its checksum, which names that file
-#   iso/agentv-<channel>.iso.sha256.sig  the checksum, signed with AgenTV's key
-#   iso/agentv-<channel>.version         which version it is, on one line
+#   iso/agentv-<version>-x86_64.iso             the ISO
+#   iso/agentv-<version>-x86_64.iso.sha256      its checksum, which names that file
+#   iso/agentv-<version>-x86_64.iso.sha256.sig  the checksum, signed with AgenTV's key
+#   iso/<channel>.json                          which ISO the channel is on now
 #
-# Publishing one replaces the one before it. What's left to do is take out
-# what doesn't belong: ISOs published under their version's name before
-# this, and strays.
+# A version says which channel it belongs to:
+#
+#   stable  1.0.0
+#   rc      1.0.0-rc1
+#   edge    0.2.0.r422.g155320d30, the version of the agentv package on it,
+#           which is what "agentv version" prints on a box installed from
+#           it. A build that's only named by its day and commit keeps that
+#           name: edge-2026.11.10-abc1234.
+#
+# <channel>.json is the link that doesn't change. It has the ISO's file
+# name, version, sha256 and address, and it's written last: only once the
+# ISO, its checksum and its signature are in the bucket and checked. If
+# anything before that fails, it still points at the ISO before.
 #
 #   names <channel> <iso.sha256> <dir>
-#       Writes the checksum file and the version note for the published
-#       name into <dir>, from the checksum file a build left beside its ISO
-#       (agentv-1.0.0-x86_64.iso.sha256). Needs no keys. The checksum file
-#       is what gets signed, before the upload.
+#       Checks the checksum file a build left beside its ISO
+#       (agentv-1.0.0-x86_64.iso.sha256) and writes it into <dir>. Needs no
+#       keys. That file is what gets signed, before the upload.
 #   upload <channel> <iso> <dir>
 #       Checks the ISO against <dir>'s checksum, uploads the ISO and what's
-#       in <dir>, then asks the bucket for each file's size and compares.
-#   stale
+#       in <dir>, asks the bucket for each file's size and compares, and
+#       then moves <channel>.json to the new ISO.
+#   stale <channel>
 #       Prints what clean would remove, one key a line, and removes nothing.
-#   clean
+#   clean <channel>
 #       Removes those, one at a time, each by its exact key.
 #
-# stale and clean only ever name a key that is right under iso/, is an ISO,
-# an ISO's checksum, a checksum's signature or a version note, and isn't one
-# of the three sets above. If the bucket can't be listed, if the listing
-# doesn't show the stable ISO, or if more than AGENTV_ISO_STALE_MAX (20)
-# keys would go, nothing is removed.
+# stale and clean take out the ISOs a channel had before, with their
+# checksums and signatures. They only ever name a key that is right under
+# iso/, carries that channel's kind of version (or is one of the channel's
+# files from when they were called agentv-<channel>.iso), and isn't the ISO
+# <channel>.json points at. Another channel's files and anything else in
+# the bucket stay.
+#
+# Nothing is removed unless the listing is whole. The bucket has to say the
+# listing isn't cut short, and the listing has to show what is known to be
+# there: <channel>.json, read straight from the bucket by its key, and the
+# ISO and checksum it names. More than AGENTV_ISO_STALE_MAX (20) keys to
+# remove stops it too.
 #
 # R2 speaks S3, so the AWS CLI on GitHub's runners does the work. The bucket
 # and its keys come from the environment, which CI fills from the repo's
@@ -44,12 +61,15 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: agentv-iso-publish names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale | clean" >&2
+  echo "usage: agentv-iso-publish names <channel> <iso.sha256> <dir> | upload <channel> <iso> <dir> | stale <channel> | clean <channel>" >&2
   exit 2
 }
 
 CHANNELS=(edge stable rc)
 PREFIX=iso/
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 
 channel_ok() {
   local channel
@@ -60,9 +80,19 @@ channel_ok() {
   return 1
 }
 
-# The four keys a channel's ISO goes by.
-channel_keys() {
-  printf '%s\n' "${PREFIX}agentv-$1.iso" "${PREFIX}agentv-$1.iso.sha256" "${PREFIX}agentv-$1.iso.sha256.sig" "${PREFIX}agentv-$1.version"
+# The versions a channel's ISOs carry, as a pattern. No two channels share
+# one, so a file's name says whose it is.
+channel_versions() {
+  case $1 in
+    stable) echo '[0-9]+\.[0-9]+\.[0-9]+' ;;
+    rc) echo '[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+' ;;
+    edge) echo '([0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]{7,40}|edge-([0-9]{4}\.[0-9]{2}\.[0-9]{2}-)?[0-9a-f]{7})' ;;
+  esac
+}
+
+# Is $2 the file name of one of channel $1's ISOs?
+channel_iso() {
+  [[ $2 =~ ^agentv-$(channel_versions "$1")-x86_64\.iso$ ]]
 }
 
 r2() {
@@ -76,9 +106,9 @@ r2() {
   endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
 }
 
-names() {
-  local channel=$1 sum=$2 dir=$3 hash file version
-  channel_ok "$channel"
+# Reads one ISO's checksum file into the caller's $hash and $file, or stops.
+read_sum() {
+  local sum=$1
   [[ -f $sum ]] || { echo "agentv-iso-publish: no checksum file at $sum" >&2; exit 1; }
   # One line, "<sha256>  <name>.iso", as sha256sum writes it.
   [[ $(wc -l <"$sum") == 1 ]] || { echo "agentv-iso-publish: $sum isn't one ISO's checksum" >&2; exit 1; }
@@ -88,105 +118,162 @@ names() {
     echo "agentv-iso-publish: $sum isn't an AgenTV ISO's checksum" >&2
     exit 1
   fi
-  # agentv-1.0.0-x86_64.iso is 1.0.0, agentv-edge-2026.11.10-abc1234-x86_64.iso
-  # is edge-2026.11.10-abc1234.
+}
+
+names() {
+  local channel=$1 sum=$2 dir=$3 hash file version
+  channel_ok "$channel"
+  read_sum "$sum"
+  # agentv-1.0.0-x86_64.iso is 1.0.0.
   version=${file#agentv-}
   version=${version%-x86_64.iso}
+  if ! channel_iso "$channel" "$file"; then
+    echo "agentv-iso-publish: $file isn't a $channel ISO. A stable version looks like 1.0.0, an rc's like 1.0.0-rc1 and edge's like 0.2.0.r422.g155320d30." >&2
+    exit 1
+  fi
   mkdir -p "$dir"
-  printf '%s  agentv-%s.iso\n' "$hash" "$channel" >"$dir/agentv-$channel.iso.sha256"
-  printf '%s\n' "$version" >"$dir/agentv-$channel.version"
-  rm -f "$dir/agentv-$channel.iso.sha256.sig"
-  echo "agentv-$channel.iso is $version, sha256 $hash"
+  printf '%s  %s\n' "$hash" "$file" >"$dir/$file.sha256"
+  # A signature left from an earlier run isn't this checksum's.
+  if [[ -e $dir/$file.sha256.sig ]]; then
+    unlink "$dir/$file.sha256.sig"
+  fi
+  echo "$file is the $channel ISO, version $version, sha256 $hash"
+}
+
+# Stops unless the bucket's copy of $2 is as big as the file at $1.
+same_size() {
+  local size served
+  size=$(stat -c %s "$1")
+  served=$(aws s3api head-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$2" \
+    --query ContentLength --output text)
+  if [[ $served != "$size" ]]; then
+    echo "agentv-iso-publish: the bucket's $PREFIX$2 is $served bytes, expected $size" >&2
+    exit 1
+  fi
 }
 
 upload() {
-  local channel=$1 iso=$2 dir=$3 hash name file size served
+  local channel=$1 iso=$2 dir=$3 hash file version item
+  local -a sums files
   channel_ok "$channel"
   : "${ISO_URL:?set ISO_URL to the public address of the bucket}"
   r2
-  name="agentv-$channel"
-  for file in "$dir/$name.iso.sha256" "$dir/$name.version" "$iso"; do
-    [[ -s $file ]] || { echo "agentv-iso-publish: need $file" >&2; exit 1; }
-  done
-  # The checksum file names the published name, so check the ISO by its
-  # hash before anything leaves.
-  read -r hash _ <"$dir/$name.iso.sha256"
-  if [[ $(sha256sum "$iso" | cut -d' ' -f1) != "$hash" ]]; then
-    echo "agentv-iso-publish: $iso isn't the ISO $dir/$name.iso.sha256 is the checksum of" >&2
+  # <dir> has one checksum file, the one names wrote. It says what the ISO
+  # is called.
+  sums=("$dir"/agentv-*-x86_64.iso.sha256)
+  if (( ${#sums[@]} != 1 )) || [[ ! -s ${sums[0]} ]]; then
+    echo "agentv-iso-publish: need one ISO's checksum file in $dir" >&2
     exit 1
   fi
-
-  # The ISO first, then what describes it. With no signature this time, the
-  # one that went with the ISO before goes: it isn't this checksum's.
-  local -a files=("$iso:$name.iso" "$dir/$name.iso.sha256:$name.iso.sha256")
-  if [[ -s $dir/$name.iso.sha256.sig ]]; then
-    files+=("$dir/$name.iso.sha256.sig:$name.iso.sha256.sig")
+  read_sum "${sums[0]}"
+  if [[ ${sums[0]##*/} != "$file.sha256" ]] || ! channel_iso "$channel" "$file"; then
+    echo "agentv-iso-publish: ${sums[0]} isn't a $channel ISO's checksum" >&2
+    exit 1
   fi
-  files+=("$dir/$name.version:$name.version")
-  for file in "${files[@]}"; do
-    aws s3 cp --endpoint-url "$endpoint" --only-show-errors "${file%%:*}" "s3://$R2_BUCKET/$PREFIX${file##*:}" >&2
+  [[ -s $iso ]] || { echo "agentv-iso-publish: need $iso" >&2; exit 1; }
+  # Check the ISO by its hash before anything leaves.
+  if [[ $(sha256sum "$iso" | cut -d' ' -f1) != "$hash" ]]; then
+    echo "agentv-iso-publish: $iso isn't the ISO $dir/$file.sha256 is the checksum of" >&2
+    exit 1
+  fi
+  version=${file#agentv-}
+  version=${version%-x86_64.iso}
+
+  # The ISO first, then what describes it. With no signature this time, one
+  # an earlier publish left under this name goes: it isn't this checksum's.
+  files=("$iso:$file" "$dir/$file.sha256:$file.sha256")
+  if [[ -s $dir/$file.sha256.sig ]]; then
+    files+=("$dir/$file.sha256.sig:$file.sha256.sig")
+  fi
+  for item in "${files[@]}"; do
+    aws s3 cp --endpoint-url "$endpoint" --only-show-errors "${item%%:*}" "s3://$R2_BUCKET/$PREFIX${item##*:}" >&2
   done
-  if [[ ! -s $dir/$name.iso.sha256.sig ]]; then
-    aws s3api delete-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$name.iso.sha256.sig" >&2
+  if [[ ! -s $dir/$file.sha256.sig ]]; then
+    aws s3api delete-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$file.sha256.sig" >&2
   fi
 
   # What the bucket has now, by size.
-  for file in "${files[@]}"; do
-    size=$(stat -c %s "${file%%:*}")
-    served=$(aws s3api head-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX${file##*:}" \
-      --query ContentLength --output text)
-    if [[ $served != "$size" ]]; then
-      echo "agentv-iso-publish: the bucket's $PREFIX${file##*:} is $served bytes, expected $size" >&2
-      exit 1
-    fi
+  for item in "${files[@]}"; do
+    same_size "${item%%:*}" "${item##*:}"
   done
 
-  echo "${ISO_URL%/}/$PREFIX$name.iso"
+  # The link that doesn't change, last of all. Everything above is in the
+  # bucket at its full size by now. A publish that failed before this line
+  # leaves <channel>.json on the ISO before.
+  jq -n --arg channel "$channel" --arg version "$version" --arg file "$file" --arg sha256 "$hash" \
+    --arg url "${ISO_URL%/}/$PREFIX$file" \
+    '{channel: $channel, version: $version, file: $file, sha256: $sha256, url: $url}' >"$WORK/$channel.json"
+  aws s3 cp --endpoint-url "$endpoint" --only-show-errors "$WORK/$channel.json" "s3://$R2_BUCKET/$PREFIX$channel.json" >&2
+  same_size "$WORK/$channel.json" "$channel.json"
+
+  echo "${ISO_URL%/}/$PREFIX$file"
 }
 
-# Prints the keys that don't belong, one a line. Fails, printing none, when
-# the listing can't be trusted or too many would go.
+# Prints the keys of the ISOs channel $1 had before, one a line. Fails,
+# printing none, when the listing can't be trusted or too many would go.
 stale() {
-  local max=${AGENTV_ISO_STALE_MAX:-20} listing key channel
-  local -a keys keep=() gone=()
+  local channel=$1 max=${AGENTV_ISO_STALE_MAX:-20} listing key name current need
+  local -a keys gone=()
+  channel_ok "$channel" || return 1
   r2
   [[ $max =~ ^[0-9]+$ ]] || { echo "agentv-iso-publish: AGENTV_ISO_STALE_MAX is a number" >&2; return 1; }
 
+  # Which ISO the channel is on, read by its exact key, not from a listing.
+  if ! aws s3api get-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$channel.json" "$WORK/now.json" >/dev/null; then
+    echo "agentv-iso-publish: couldn't read the bucket's $PREFIX$channel.json, so nothing is removed. Publish a $channel ISO first." >&2
+    return 1
+  fi
+  current=$(jq -r 'if type == "object" and (.file | type) == "string" then .file else "" end' "$WORK/now.json" 2>/dev/null || true)
+  if ! channel_iso "$channel" "$current"; then
+    echo "agentv-iso-publish: the bucket's $PREFIX$channel.json doesn't name a $channel ISO, so nothing is removed" >&2
+    return 1
+  fi
+
+  # One page, and the bucket's own word on whether there's more. iso/ holds
+  # a dozen keys, so a listing that needs a second page isn't this folder
+  # as it should be.
   if ! listing=$(aws s3api list-objects-v2 --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --prefix "$PREFIX" \
-    --query 'Contents[].Key' --output json); then
+    --no-paginate --max-keys 1000 --query '{keys: Contents[].Key, truncated: IsTruncated, count: KeyCount}' --output json); then
     echo "agentv-iso-publish: couldn't list the bucket's $PREFIX, so nothing is removed" >&2
     return 1
   fi
-  if ! jq -e 'type == "array" and all(.[]; type == "string")' <<<"$listing" >/dev/null 2>&1; then
+  if ! jq -e 'type == "object" and (.keys | type) == "array" and all(.keys[]; type == "string")' <<<"$listing" >/dev/null 2>&1; then
     echo "agentv-iso-publish: the bucket's listing of $PREFIX isn't a list of keys, so nothing is removed" >&2
     return 1
   fi
-  mapfile -t keys < <(jq -r '.[]' <<<"$listing")
-
-  for channel in "${CHANNELS[@]}"; do
-    mapfile -t -O "${#keep[@]}" keep < <(channel_keys "$channel")
-  done
-  # The stable ISO is always there once the first one is published under its
-  # new name. A listing without it is the wrong bucket, the wrong folder, a
-  # listing gone wrong, or a bucket that still has its latest release only
-  # under its version's name, which must not go before it's published again.
-  local found=0
-  for key in "${keys[@]}"; do
-    [[ $key == "${PREFIX}agentv-stable.iso" ]] && found=1
-  done
-  if (( ! found )); then
-    echo "agentv-iso-publish: the listing of $PREFIX has no agentv-stable.iso, so nothing is removed. Publish the latest release as stable first." >&2
+  if ! jq -e '.truncated == false and (.count == null or .count == (.keys | length))' <<<"$listing" >/dev/null 2>&1; then
+    echo "agentv-iso-publish: the bucket's listing of $PREFIX is cut short, so nothing is removed" >&2
     return 1
   fi
+  mapfile -t keys < <(jq -r '.keys[]' <<<"$listing")
+
+  # A whole listing shows what is known to be there. One that doesn't is
+  # the wrong bucket, the wrong folder or a listing gone wrong.
+  for need in "$channel.json" "$current" "$current.sha256"; do
+    if ! printf '%s\n' "${keys[@]}" | grep -qxF -- "$PREFIX$need"; then
+      echo "agentv-iso-publish: the listing of $PREFIX doesn't show $need, which is there. It isn't whole, so nothing is removed." >&2
+      return 1
+    fi
+  done
 
   for key in "${keys[@]}"; do
     # Right under iso/, a plain name, and nothing else in the bucket.
     [[ $key =~ ^iso/[A-Za-z0-9._-]+$ ]] || continue
-    # An ISO, its checksum, the checksum's signature, or a version note.
-    [[ $key =~ \.iso(\.sha256(\.sig)?)?$ || $key =~ ^iso/agentv-[A-Za-z0-9._-]+\.version$ ]] || continue
-    # Never one of the three sets.
-    printf '%s\n' "${keep[@]}" | grep -qxF -- "$key" && continue
-    gone+=("$key")
+    name=${key#"$PREFIX"}
+    # The version note the channel had under its old name.
+    if [[ $name == "agentv-$channel.version" ]]; then
+      gone+=("$key")
+      continue
+    fi
+    # An ISO, its checksum or the checksum's signature.
+    [[ $name =~ ^(.+\.iso)(\.sha256(\.sig)?)?$ ]] || continue
+    name=${BASH_REMATCH[1]}
+    # Never the one the channel is on.
+    [[ $name != "$current" ]] || continue
+    # This channel's, by its version or by the channel's old name.
+    if channel_iso "$channel" "$name" || [[ $name == "agentv-$channel.iso" ]]; then
+      gone+=("$key")
+    fi
   done
 
   if (( ${#gone[@]} > max )); then
@@ -198,14 +285,14 @@ stale() {
 }
 
 clean() {
-  local list key
+  local channel=$1 list key
   local -a gone
-  r2
-  list=$(stale) || exit 1
+  list=$(stale "$channel") || exit 1
   if [[ -z $list ]]; then
-    echo "Nothing to remove: iso/ has the three ISOs and what goes with them."
+    echo "Nothing to remove: iso/ has one $channel ISO and what goes with it."
     return 0
   fi
+  r2
   mapfile -t gone <<<"$list"
   for key in "${gone[@]}"; do
     # Once more, right before it goes: under iso/, a plain name, no wildcard.
@@ -219,10 +306,10 @@ case ${1:-} in
   names) (( $# == 4 )) || usage; names "$2" "$3" "$4" ;;
   upload) (( $# == 4 )) || usage; upload "$2" "$3" "$4" ;;
   stale)
-    (( $# == 1 )) || usage
-    list=$(stale) || exit 1
+    (( $# == 2 )) || usage
+    list=$(stale "$2") || exit 1
     if [[ -z $list ]]; then
-      echo "Nothing would be removed: iso/ has the three ISOs and what goes with them."
+      echo "Nothing would be removed: iso/ has one $2 ISO and what goes with it."
     else
       echo "These would be removed:"
       while IFS= read -r key; do
@@ -230,6 +317,6 @@ case ${1:-} in
       done <<<"$list"
     fi
     ;;
-  clean) (( $# == 1 )) || usage; clean ;;
+  clean) (( $# == 2 )) || usage; clean "$2" ;;
   *) usage ;;
 esac

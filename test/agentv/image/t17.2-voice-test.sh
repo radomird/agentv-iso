@@ -11,7 +11,8 @@
 #   the daemon's log says which voice, and nothing logs the words.
 # - With none (no agentv-voice installed): the same answer shows and isn't
 #   said, the daemon says so once, Settings has nothing to offer, and
-#   nothing fails.
+#   nothing fails. Then a stand-in for the old voice package goes on, as a
+#   TV from before the update still has it, and the migration takes it off.
 #
 # With a voice it also says a few of the TV's real answers in each voice the
 # package has, times them, and keeps the WAV files with the run's logs, so
@@ -226,6 +227,64 @@ SAMPLES
     ! grep -l "OOV word skipped" "$samples"/*-log.txt 2>/dev/null
   }
   check "the voice skipped no word of the sample answers" none_dropped
+fi
+
+# --- A TV from before, which still has the old voice --------------------------------------
+#
+# On a box that ships no voice, the update leaves the old package behind as
+# one nothing asks for, and a migration takes it off. Here a stand-in for
+# that package goes on the box: the same name and the same files' places,
+# with nothing of Piper in it. Then the migration runs, as an update runs it.
+
+if [[ $kind == "none" ]]; then
+  ssh_guest "bash -s" >"$RUN_DIR/old-voice.log" 2>&1 <<'OLD' || true
+set -euo pipefail
+work=$(mktemp -d)
+mkdir -p "$work/usr/lib/agentv-voice/piper"
+printf '#!/bin/bash\n# A stand-in: the old voice was here.\nexit 1\n' >"$work/usr/lib/agentv-voice/piper/piper"
+chmod 755 "$work/usr/lib/agentv-voice/piper/piper"
+: >"$work/usr/lib/agentv-voice/en_GB-cori-medium.onnx"
+cat >"$work/.PKGINFO" <<INFO
+pkgname = agentv-voice
+pkgbase = agentv-voice
+pkgver = 2023.11.14.2-1
+pkgdesc = A stand-in for the voice package from before
+url = https://github.com
+builddate = 1700000000
+packager = image check
+size = 64
+arch = x86_64
+INFO
+(cd "$work" && bsdtar -cf - .PKGINFO usr | zstd -q >"$work/agentv-voice-2023.11.14.2-1-x86_64.pkg.tar.zst")
+sudo pacman -U --noconfirm "$work/agentv-voice-2023.11.14.2-1-x86_64.pkg.tar.zst"
+OLD
+  cat "$RUN_DIR/old-voice.log"
+  check "a stand-in for the old voice package is on the box, as on a TV from before" ssh_guest "pacman -Q agentv-voice && test -x $VOICE_DIR/piper/piper"
+  voice >"$RUN_DIR/voice-old.json"
+  check "the daemon sees the old voice" jq -e '.own == "ready" and .by == "own"' "$RUN_DIR/voice-old.json"
+
+  # The package has AgenTV's migrations in one folder.
+  migration=$(guest "grep -l 'The TV ships with no voice of its own now' /usr/share/agentv/migrations/*.sh" 2>/dev/null | head -n 1 || true)
+  check "the migration is on the box" test -n "$migration"
+  guest "bash $migration" >"$RUN_DIR/migration.log" 2>&1 || true
+  cat "$RUN_DIR/migration.log"
+  check "T17.2 the migration takes the old voice off: no package, and nothing left in its folder" ssh_guest "! pacman -Q agentv-voice && ! test -e $VOICE_DIR"
+  voice >"$RUN_DIR/voice-after.json"
+  check "T17.2 the daemon has no voice of its own again" jq -e '.own == "missing" and .by == null' "$RUN_DIR/voice-after.json"
+  say_it after
+  check "T17.2 an answer still shows, and isn't said" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/after.json"
+  sleep 3
+  voice >"$RUN_DIR/voice-after-say.json"
+  check "T17.2 no clip is made for it" jq -e '.last == null' "$RUN_DIR/voice-after-say.json"
+  guest "bash $migration" >"$RUN_DIR/migration-again.log" 2>&1 || true
+  check "the migration changes nothing the second time" ssh_guest "! pacman -Q agentv-voice"
+  ssh_sudo "journalctl -b --no-pager -u agentv-daemon -u agentv-router" >"$RUN_DIR/journal-after.log" 2>&1 || true
+  nothing_failed_after() {
+    ! grep -Ei "voice.*(error|failed|didn't start|ENOENT)|unhandled|TypeError" "$RUN_DIR/journal-after.log"
+  }
+  check "T17.2 and nothing errors as the old voice goes" nothing_failed_after
+  ssh_guest "curl -fsS --max-time 5 http://127.0.0.1:3000/health" >"$RUN_DIR/health-after.json" 2>&1 || true
+  check "the daemon is still up" jq -e '.ok == true' "$RUN_DIR/health-after.json"
 fi
 
 ssh_guest "sudo rm -f '${DROPINS:?}/agentv-router.service.d/standin.conf' && sudo systemctl daemon-reload; pkill -f router-standin.mjs" || true

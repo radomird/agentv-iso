@@ -31,6 +31,7 @@ Usage: agentv_phone.py
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -50,6 +51,9 @@ from agentv_qr import wifi  # noqa: E402
 RUN = Path(os.environ.get("AGENTV_FIRST_SCREEN_RUN", "/run/agentv-first-screen"))
 PAGE = HERE / "phone.html"
 ADDRESS = os.environ.get("AGENTV_FIRST_SCREEN_ADDRESS", "10.42.0.1")
+# The hotspot's network is the address with this many bits: what the access
+# point is given, and what a phone's own address is checked against.
+PREFIX = 24
 PORT = int(os.environ.get("AGENTV_FIRST_SCREEN_PORT", "80"))
 NETWORKD = Path(os.environ.get("AGENTV_FIRST_SCREEN_NETWORKD", "/run/systemd/network/10-agentv-first-screen.network"))
 # How often it looks for a Wi-Fi card and the home network again: a card's
@@ -68,6 +72,19 @@ def run(args: list[str], timeout: int = 20) -> str:
 
 def log(text: str) -> None:
     print(f"agentv-phone: {text}", flush=True)
+
+
+def in_hotspot_network(address: object) -> bool:
+    """Whether an address is one the hotspot hands out: inside its network."""
+    try:
+        peer = ipaddress.ip_address(address)
+        network = ipaddress.ip_network(f"{ADDRESS}/{PREFIX}", strict=False)
+    except (TypeError, ValueError):
+        return False
+    # A socket that takes both kinds of address gives an IPv4 one as ::ffff:a.b.c.d.
+    if isinstance(peer, ipaddress.IPv6Address) and peer.ipv4_mapped is not None:
+        peer = peer.ipv4_mapped
+    return peer in network
 
 
 def write_json(path: Path, value: object, mode: int = 0o600) -> None:
@@ -181,7 +198,7 @@ class Hotspot:
             log(run(["iw", "dev"]).strip() or "(nothing)")
             self.stop_supplicant()
             return False
-        run(["ip", "addr", "add", f"{ADDRESS}/24", "dev", device])
+        run(["ip", "addr", "add", f"{ADDRESS}/{PREFIX}", "dev", device])
         leases = RUN / "dnsmasq.leases"
         leases.unlink(missing_ok=True)
         dnsmasq_log = open(RUN / "dnsmasq.log", "a")
@@ -281,7 +298,10 @@ def make_handler(phone: Phone):
             pass
 
         def on_hotspot(self) -> bool:
-            return self.connection.getsockname()[0] == ADDRESS
+            # A phone on the hotspot asks the hotspot's address, from an
+            # address inside the hotspot's network. Both have to hold: the
+            # address it asked isn't enough to say where it is.
+            return self.connection.getsockname()[0] == ADDRESS and in_hotspot_network(self.client_address[0])
 
         def send(self, status: int, body: bytes, kind: str) -> None:
             self.send_response(status)
