@@ -16,8 +16,8 @@ usage() {
 Usage: agentv-check [--ci] [--fetch-base]
 
 Checks that Omarchy's files are untouched, and that everything AgenTV added
-has no em dashes, no secrets, no service automation, no emoji in UI text and
-clean shell. Exits non-zero if anything fails.
+has no em dashes, no secrets, no service automation, no emoji in UI text,
+UI text in AgenTV's voice and clean shell. Exits non-zero if anything fails.
 
   --ci          Treat a missing tool (shellcheck, gitleaks) as a failure
   --fetch-base  Fetch the base from upstream when this clone doesn't have it
@@ -319,6 +319,93 @@ if [[ -n $found ]]; then
   fail "no emoji in UI text" "$found"
 else
   pass "no emoji in UI text"
+fi
+
+# --- UI text in AgenTV's voice ---------------------------------------------
+
+# The words people read on the TV, the phone and the USB stick follow
+# AgenTV's voice (the agentv-copy skill). The parts of it a machine can check
+# are here: none of the words that name how the TV works, and no key in a
+# button's words. ui-text lists the files with words people read, ui-words
+# the words they never say, and ui-words-allowed the few places one is right.
+# A repo without ui-text has no UI, and skips this.
+if [[ -f $POLICY_DIR/ui-text ]]; then
+  policy_lines ui-text >"$WORK/ui-text"
+  policy_lines ui-words >"$WORK/ui-words"
+  policy_lines ui-words-allowed >"$WORK/ui-allowed"
+  # shellcheck disable=SC2016 # the single quotes hold perl, not shell
+  found=$(perl -CSD -e '
+    use strict; use warnings;
+    my ($places, $words, $allowed) = @ARGV;
+    my (@places, @words, @allowed);
+    open(my $fh, "<:encoding(UTF-8)", $places) or die "$places: $!";
+    while (<$fh>) { chomp; my ($prefix, $only) = /^(\S+)(?:\s+only:(.*))?$/ or next; push @places, [$prefix, $only] }
+    open($fh, "<:encoding(UTF-8)", $words) or die "$words: $!";
+    while (<$fh>) { chomp; push @words, qr/$_/i if length }
+    if (open($fh, "<:encoding(UTF-8)", $allowed)) {
+      while (<$fh>) { chomp; my ($prefix, $re) = /^(\S+)\s+(.*)$/ or next; push @allowed, [$prefix, qr/$re/i] }
+    }
+    my $literal = qr/"((?:[^"\\]|\\.)*)"|\x27((?:[^\x27\\]|\\.)*)\x27|`((?:[^`\\]|\\.)*)`/;
+    my $failed = 0;
+    while (my $file = <STDIN>) {
+      chomp $file;
+      my ($place) = grep { index($file, $_->[0]) == 0 } @places;
+      next unless $place;
+      # Test data and tests read words, they do not show them.
+      next if $file =~ m{/(?:fixtures|tests?)/|\.test\.m?[jt]s$};
+      my $only = defined $place->[1] ? qr/$place->[1]/ : undef;
+      my $json = $file =~ /\.json$/;
+      my $html = $file =~ /\.html?$/;
+      open(my $in, "<:encoding(UTF-8)", $file) or do { warn "cannot read $file: $!\n"; $failed = 1; next };
+      my $doc = 0;
+      while (my $line = <$in>) {
+        # A docstring is for whoever reads the code.
+        my $quotes = () = $line =~ /"""|\x27\x27\x27/g;
+        if ($doc || $quotes) { $doc = !$doc if $quotes % 2; next }
+        # Comments, imports and what goes to a log are for whoever reads the code.
+        next if $line =~ m{^\s*(?://|/?\*|\#(?!\s*\S+\s*["\x27`])|<!--|import\s)};
+        next if $line =~ /\bconsole\.\w+\(|\blog\(|\.debug\(|journal/;
+        next if $only && $line !~ $only;
+        # A class name, a data attribute, a test id and a regex are not
+        # words anyone reads.
+        $line =~ s/\b(?:class|id|for|key|action|kind|type)\s*[:=]\s*(?:"[^"]*"|`[^`]*`|\x27[^\x27]*\x27)//g;
+        $line =~ s/"(?:data|aria-hidden)[\w-]*"\s*:\s*(?:"[^"]*"|`[^`]*`)//g;
+        $line =~ s{(?<=[(,=:\[|&!]\s|[(,=:\[|&!])/(?![/*\s])(?:[^/\\\n]|\\.)+/[dgimsuy]*}{ }g;
+        my @text;
+        if ($json) {
+          push @text, $1 while $line =~ /"(?:name|description|label|title|line|note)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        } else {
+          while ($line =~ /$literal/g) { push @text, defined $1 ? $1 : defined $2 ? $2 : $3 }
+          if ($html) { (my $bare = $line) =~ s/<[^>]*>/ /g; $bare =~ s/"[^"]*"//g; push @text, $bare if $bare =~ /\pL{3}/ }
+        }
+        for my $text (@text) {
+          $text =~ s/\$\{[^}]*\}/ ... /g;
+          next unless $text =~ /\pL/;
+          # An address, a path, a selector or a list of class names is not
+          # something people read.
+          next if $text =~ m{^\s*[/.\#\[@]|://|=>} ;
+          next if $text !~ /\p{Lu}/ && $text =~ /\b\pL+-\pL/ && $text !~ /[\x27\x{2019}.,?!:]/;
+          next unless $text =~ /\s/ || $text =~ /^\p{Lu}/;
+          for my $word (@words) {
+            next unless $text =~ $word;
+            next if grep { index($file, $_->[0]) == 0 && $text =~ $_->[1] } @allowed;
+            (my $shown = $text) =~ s/\s+/ /g;
+            print "$file:$.: \"$shown\"\n";
+            last;
+          }
+        }
+      }
+      close $in;
+    }
+    exit $failed;
+  ' "$WORK/ui-text" "$WORK/ui-words" "$WORK/ui-allowed" <"$WORK/scanned" || echo "(the scan of UI text failed)")
+  if [[ -n $found ]]; then
+    fail "UI text is in AgenTV's voice" "$found"
+  else
+    pass "UI text is in AgenTV's voice"
+  fi
+else
+  pass "no UI text here, so nothing to check for its voice"
 fi
 
 # --- App packages pass agentv app validate ----------------------------------
