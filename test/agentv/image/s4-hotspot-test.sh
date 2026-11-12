@@ -227,7 +227,7 @@ check "the phone asks the box to join it" jq -e '.ok == true' <<<"$asked"
 came_back() {
   local _
   for _ in $(seq 1 120); do
-    jq -e --arg ssid "$HOME_SSID" '.on == true and .error == "that password didn'"'"'t work for \($ssid)"' <<<"$(state)" >/dev/null && return 0
+    jq -e --arg ssid "$HOME_SSID" '.on == true and .error == "Wrong password for \($ssid)"' <<<"$(state)" >/dev/null && return 0
     sleep 1
   done
   return 1
@@ -241,7 +241,7 @@ no_file() {
 check "and leaves no connection behind" no_file
 check "the phone joins it again" associated
 told=$(phone_curl "http://10.42.0.1/api/setup/state")
-check "and the captive page hears why" jq -e --arg ssid "$HOME_SSID" '.error == "that password didn'"'"'t work for \($ssid)"' <<<"$told"
+check "and the captive page hears why" jq -e --arg ssid "$HOME_SSID" '.error == "Wrong password for \($ssid)"' <<<"$told"
 
 # The right one.
 join "$HOME_PASSWORD" >"$RUN_DIR/join.json"
