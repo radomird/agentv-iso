@@ -12,6 +12,14 @@ name: ISO
 # merge to agentv doesn't rebuild it: the nightly run in agentv-os builds the
 # edge ISO every night, from this branch.
 #
+# A release tag is agentv-v1.0.0, a candidate's agentv-v1.0.0-rc1, and a 0.x
+# release was v0.2.0 (bin/agentv-iso-tag). A release's ISO carries stable's
+# packages, and a candidate's carries edge's. Either way the run first
+# checks that the package is the one the ISO's name promises
+# (bin/agentv-iso-carries): the release itself, or for a candidate the
+# commit agentv-os tagged with the same name. Any other tag that starts the
+# run fails it, and keeps nothing.
+#
 # The screenshots are always kept. The ISO, about 6.4 GB, is over GitHub's
 # 2 GiB cap for release assets, so a tag or a run by hand keeps it as a
 # workflow artifact. This workflow has no keys and publishes nothing: when a
@@ -20,7 +28,7 @@ name: ISO
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["agentv-v*", "v*"]
   pull_request:
     # ready_for_review: a draft gets no ISO run, so marking it ready is what
     # starts its one full run. labeled: the "image" label asks for one by
@@ -166,18 +174,47 @@ jobs:
       cancel-in-progress: true
     runs-on: ubuntu-26.04
     timeout-minutes: 150
-    env:
-      # A release tag carries stable packages; everything else edge, a
-      # release candidate's tag (v1.0.0-rc1) too.
-      CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-rc') && 'stable') || 'edge' }}
-      # Only an ISO that went through every check is kept.
-      KEEP_ISO: ${{ inputs.checks == '' && (inputs.keep-iso || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || '' }}
           submodules: recursive
           persist-credentials: false
+
+      # A pushed tag is the only push that starts this workflow. It has to
+      # be one of AgenTV's release tags, and it says which packages the ISO
+      # carries: stable's for a release, edge's for a candidate. Every other
+      # run carries the channel it was asked for, edge unless told. Only an
+      # ISO that went through every check is kept: a release tag's always,
+      # another run's when it asks.
+      - name: Which packages, and whether the ISO is kept
+        env:
+          ASKED: ${{ inputs.channel }}
+          KEEP: ${{ inputs.keep-iso }}
+          ONLY: ${{ inputs.checks }}
+        run: |
+          tag=""
+          if [[ $GITHUB_EVENT_NAME == "push" ]]; then
+            tag=$GITHUB_REF_NAME
+            read -r kind version < <(bin/agentv-iso-tag "$tag") || {
+              echo "::error::$tag isn't one of AgenTV's release tags, so no ISO is built for it. A release is agentv-v1.0.0 and a candidate agentv-v1.0.0-rc1."
+              exit 1
+            }
+            channel=edge
+            [[ $kind != "stable" ]] || channel=stable
+            keep=true
+            echo "ISO_VERSION=$version" >>"$GITHUB_ENV"
+            echo "$tag is AgenTV $version, for the $kind channel. Its ISO carries the $channel packages." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            channel=${ASKED:-edge}
+            keep=${KEEP:-false}
+          fi
+          [[ -z $ONLY ]] || keep=false
+          {
+            echo "RELEASE_TAG=$tag"
+            echo "CHANNEL=$channel"
+            echo "KEEP_ISO=$keep"
+          } >>"$GITHUB_ENV"
 
       # The build and the install need about 40 GB. GitHub's runner ships
       # toolchains this job never uses, so make room when it's short.
@@ -196,7 +233,19 @@ jobs:
       - name: Fetch AgenTV's signed packages
         env:
           AGENTV_OWNER: ${{ github.repository_owner }}
-        run: bin/agentv-iso-packages "$CHANNEL"
+        run: |
+          set -o pipefail
+          bin/agentv-iso-packages "$CHANNEL" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Before the long build: a release tag's ISO is named after the tag,
+      # so the package on it has to be the one that name promises.
+      - name: The packages are the ones the tag stands for
+        if: env.RELEASE_TAG != ''
+        env:
+          AGENTV_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -o pipefail
+          bin/agentv-iso-carries "$RELEASE_TAG" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -265,10 +314,13 @@ jobs:
         if: success() && env.KEEP_ISO == 'true'
         id: name
         run: |
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            name="agentv-${GITHUB_REF_NAME#v}-x86_64"
+          # A release tag's own run is named for the tag's version. Any
+          # other run, one started by hand on a tag too, is named for the
+          # commit it built, which isn't always the one it runs on.
+          if [[ -n $RELEASE_TAG ]]; then
+            name="agentv-$ISO_VERSION-x86_64"
           else
-            name="agentv-edge-${GITHUB_SHA::7}-x86_64"
+            name="agentv-edge-$(git rev-parse HEAD | cut -c1-7)-x86_64"
           fi
           mv release/*.iso "release/$name.iso"
           (cd release && sha256sum "$name.iso" >"$name.iso.sha256")
