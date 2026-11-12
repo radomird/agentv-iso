@@ -50,9 +50,17 @@ switch() {
     check "S1.3 the TV to Omarchy's desktop with the $how takes under 10 s (took ${took:-over 60} s)" \
       test "${took:-999}" -lt 10
     check "it's Omarchy's own desktop: its shell is running" ssh_guest "pgrep -f '$OMARCHY_SHELL' >/dev/null"
-    # Whether or not the desktop has enabled it yet, it's running there now.
+    # The agent starts with the desktop once Omarchy's first run there has
+    # enabled it. Where it has, that's checked. Where it hasn't yet, nothing
+    # here can show the desktop starting it, so it's started by hand, and
+    # that's only so the check back on the TV has a running agent to stop.
+    if guest "systemctl --user is-enabled --quiet bt-agent.service" >>"$RUN_DIR/switch.log" 2>&1; then
+      check "on the desktop, Omarchy's Bluetooth pairing agent started with it" guest "systemctl --user is-active --quiet bt-agent.service"
+    else
+      echo "bt-agent.service isn't enabled in this VM yet, so the desktop starting it isn't checked" >>"$RUN_DIR/switch.log"
+    fi
     guest "systemctl --user start bt-agent.service" >>"$RUN_DIR/switch.log" 2>&1 || true
-    check "on the desktop, Omarchy's Bluetooth pairing agent runs" guest "systemctl --user is-active --quiet bt-agent.service"
+    check "before the switch back, the pairing agent is running, so the TV has one to stop" guest "systemctl --user is-active --quiet bt-agent.service"
   else
     took=$(wait_tv 60 "$seen") || took=""
     capture_console "success-S1.3-$how-tv"

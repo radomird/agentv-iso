@@ -119,7 +119,7 @@ say_it() {
   ssh_guest "curl -sS --max-time 60 -H 'Content-Type: application/json' -d '{\"sentence\": \"$1\"}' http://127.0.0.1:3000/api/say" >"$RUN_DIR/$2.json" 2>&1 || true
 }
 say_it "play frozen" no-ai
-check "S7.3 with no AI set up, a sentence does nothing, and the TV says what's missing" jq -e '.said.outcome.kind == "none" and .said.outcome.why == "no-ai" and .said.outcome.say == "set up an ai first: settings → ai"' "$RUN_DIR/no-ai.json"
+check "S7.3 with no AI set up, a sentence does nothing, and the TV says what's missing" jq -e '.said.outcome.kind == "none" and .said.outcome.why == "no-ai" and .said.outcome.say == "Set up AI in Settings first"' "$RUN_DIR/no-ai.json"
 
 # A stand-in for Anthropic's API on the box: it answers the router's
 # brief as the model would, and keeps the key it was sent.
@@ -156,10 +156,10 @@ check "a key for claude is kept, as Settings → AI keeps it" jq -e '.set == tru
 sleep 3
 
 say_it "turn the lights off" unroutable
-check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.route.intent == "none" and .said.outcome.kind == "none" and .said.outcome.why == "unroutable" and .said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/unroutable.json"
+check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.route.intent == "none" and .said.outcome.kind == "none" and .said.outcome.why == "unroutable" and .said.outcome.say == "Didn'"'"'t get that"' "$RUN_DIR/unroutable.json"
 say_it "put on the frozen soundtrack" routed
 check "a sentence that can be routed goes from the phone's words to the provider and back" jq -e '.said.route.intent == "play" and .said.route.query == "Frozen" and .said.route.kind == "album"' "$RUN_DIR/routed.json"
-check "and is looked up in the box's apps, where Music hasn't got it" jq -e '.said.outcome.why == "not-found" and .said.outcome.say == "i couldn'"'"'t find frozen"' "$RUN_DIR/routed.json"
+check "and is looked up in the box's apps, where Music hasn't got it" jq -e '.said.outcome.why == "not-found" and .said.outcome.say == "Couldn'"'"'t find Frozen"' "$RUN_DIR/routed.json"
 check "the key reached the provider, through the router" ssh_guest "grep -qx '$KEY' /tmp/standin-key"
 guest "agentv selftest S7.3" >"$RUN_DIR/selftest.log" 2>&1 || true
 cat "$RUN_DIR/selftest.log"

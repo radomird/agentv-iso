@@ -72,6 +72,14 @@ fi
 phone="http://$address:3001"
 page=$(ssh_guest "curl -fsS $phone/" 2>/dev/null || true)
 check "the phone companion's page is there on the network" grep -q "companion-web/main.ts" <<<"$page"
+# A name and an icon, for a phone's home screen when the remote is added to
+# it: the page names them, and the box serves them.
+home_screen() {
+  grep -q 'rel="manifest" href="/companion-web/manifest.json"' <<<"$page" &&
+    jq -e '.name == "AgenTV" and (.icons | length > 0)' <<<"$(ssh_guest "curl -fsS $phone/companion-web/manifest.json" 2>/dev/null)" >/dev/null &&
+    [[ $(ssh_guest "curl -s -o /dev/null -w '%{content_type}' $phone/companion-web/icon-180.png" 2>/dev/null) == "image/png" ]]
+}
+check "with a name and an icon for a phone's home screen" home_screen
 not_tv() {
   [[ $(ssh_guest "curl -s -o /dev/null -w '%{http_code}' $phone/api/home" 2>/dev/null) != "200" ]]
 }

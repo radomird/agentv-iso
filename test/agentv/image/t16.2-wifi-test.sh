@@ -19,9 +19,11 @@
 #     the hotspot it closes to look, and the box is back on its network by
 #     itself.
 #   - The home Wi-Fi goes for good and another one is there. The hotspot
-#     opens again, the phone joins it and gets the same page setup uses, and
-#     with an adult PIN set the page's join needs it. The network the phone
-#     picks is joined, the hotspot closes, and the password is in no log.
+#     opens again and the phone joins it. A phone that's only joined doesn't
+#     hold it open: it still closes to look. Once the phone opens the page,
+#     the same one setup uses, the hotspot stays open past its wait. With an
+#     adult PIN set the page's join needs it. The network the phone picks is
+#     joined, the hotspot closes, and the password is in no log.
 #
 # The VM's cable is how this check reaches the box, so the watch is told not
 # to count it (AGENTV_HOTSPOT_WATCH_SKIP), which is what that's for.
@@ -327,21 +329,49 @@ ssh_sudo "ip netns exec phone ip addr add $phone_address/24 dev $phone_if" >/dev
 phone_curl() {
   ssh_sudo "ip netns exec phone curl -s --max-time 10 $*" 2>/dev/null || true
 }
-page=$(phone_curl "http://10.42.0.1/")
-check "it gets the page setup uses" grep -q "companion-web/setup.ts" <<<"$page"
+# How many times the watch has closed the hotspot to look for the Wi-Fi the
+# box knows.
+looked_times() {
+  ssh_sudo "journalctl -b --no-pager -u agentv-hotspot-watch.service" 2>/dev/null | grep -c "closes for a moment to look" || true
+}
+looked_since() {
+  (( $(looked_times) > $1 ))
+}
+
+# The phone has joined and asked for nothing, as one does from a pocket.
+# That doesn't hold the hotspot: at its next wait the watch still closes it
+# to look, finds no Wi-Fi it knows, and opens it again.
+looked=$(looked_times)
+before=$FAILURES
+check "a phone that's only joined doesn't hold the hotspot open: it still closes to look" wait_for 90 looked_since "$looked"
+(( FAILURES == before )) || ssh_sudo "journalctl -b --no-pager -u agentv-hotspot-watch.service" | tail -n 20
+check "and with the home Wi-Fi still gone, it opens again" wait_for 90 hotspot_on
+
+# The phone knows the hotspot and goes back on it by itself. With the waits
+# this short the hotspot may close to look once more before it has, so this
+# takes as long as a few of them.
+gets_page() {
+  phone_curl "http://10.42.0.1/" | grep -q "companion-web/setup.ts"
+}
+before=$FAILURES
+check "the phone is back on it by itself, and gets the page setup uses" wait_for 180 gets_page
+(( FAILURES == before )) || { state; ssh_sudo "ip netns exec phone iw dev $phone_if link"; ssh_sudo "journalctl -b --no-pager -u agentv-hotspot-watch.service" | tail -n 20; }
 listed_on_page=$(phone_curl "http://10.42.0.1/api/setup/networks")
 check "which lists the new Wi-Fi, and says it's after setup and wants the PIN" jq -e --arg ssid "$NEW_SSID" '(.networks | map(.ssid) | index($ssid) != null) and .after == true and .pin == true' <<<"$listed_on_page"
 settings_there=$(phone_curl "-o /dev/null -w '%{http_code}' http://10.42.0.1/api/network")
 check "and nothing of Settings' own ($settings_there)" test "$settings_there" = 404
 
 # With someone using its page, the watch leaves the hotspot open past its
-# wait. A phone that's only joined doesn't hold it open, so this one keeps
-# asking for the page.
-for _ in 1 2 3 4 5; do
+# wait, so this phone keeps asking for the page for longer than the wait.
+# Open at the end isn't enough to say so, since a hotspot that closed to
+# look opens again: the watch never closed it at all.
+looked=$(looked_times)
+for _ in 1 2 3 4 5 6; do
   sleep 10
   phone_curl "-o /dev/null http://10.42.0.1/"
 done
-check "with someone using its page, the hotspot stays open" hotspot_on
+check "with someone using its page, the hotspot never closes to look" test "$(looked_times)" = "$looked"
+check "it's open" hotspot_on
 check "and the phone is still on it" associated
 
 # page_join [<pin>]: the page's join, with the passwords from a file.

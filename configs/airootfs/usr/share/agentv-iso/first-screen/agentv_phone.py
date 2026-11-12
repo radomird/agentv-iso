@@ -5,11 +5,11 @@ own Wi-Fi network, AgenTV-<4 characters>, the way the installed box opens its
 setup hotspot: an access point with a random password, addresses from
 dnsmasq, and every name pointing at the box, so a phone that joins opens the
 page on its own. The TV shows a QR code with the network's name and
-password, and the page on the phone lists the disks, with "erase and
+password, and the page on the phone lists the disks, with "Erase and
 install".
 
 Only the phone that scanned the code can erase a disk. There's one token per
-boot, and "erase and install" needs it. A phone on the hotspot gets it with
+boot, and "Erase and install" needs it. A phone on the hotspot gets it with
 the page, since joining took the password from the TV's code. With no Wi-Fi
 card that can host a network, the code is the box's address on the home
 network with the token in it, and a phone there only gets in with that: it
@@ -349,7 +349,7 @@ def make_handler(phone: Phone):
                 # TV's code: one on the hotspot, or one that has the token.
                 # Anything else on the home network gets no list.
                 if not self.on_hotspot() and not phone.check(self.headers.get("X-AgenTV-Token")):
-                    self.json(403, {"ok": False, "error": "scan the code on the tv to set it up from this phone"})
+                    self.json(403, {"ok": False, "error": "Scan the code on your TV to start"})
                     return
                 state = screen()
                 self.json(200, {
@@ -388,14 +388,14 @@ def make_handler(phone: Phone):
                 return
             with phone.lock:
                 if phone.spent or screen().get("step", 1) != 1:
-                    self.json(409, {"ok": False, "error": "it's installing already"})
+                    self.json(409, {"ok": False, "error": "Already installing"})
                     return
                 if not phone.check(body.get("token")):
-                    self.json(403, {"ok": False, "error": "scan the code on the tv to set it up from this phone"})
+                    self.json(403, {"ok": False, "error": "Scan the code on your TV to start"})
                     return
                 disk = body.get("disk")
                 if disk not in disk_paths(screen()):
-                    self.json(400, {"ok": False, "error": "that disk isn't on the tv's list"})
+                    self.json(400, {"ok": False, "error": "Couldn't find that disk"})
                     return
                 if path.endswith("/install"):
                     phone.spent = True

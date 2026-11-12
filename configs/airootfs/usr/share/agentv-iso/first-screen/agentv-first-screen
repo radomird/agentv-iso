@@ -11,7 +11,7 @@ every question.
 A phone can do the same. Next to the disks there's a QR code: the live
 system's own Wi-Fi network, which agentv_phone.py opens in the background,
 or the box's address on the home network when it has no Wi-Fi card that can
-host one. The phone that scans it picks the disk and taps "erase and
+host one. The phone that scans it picks the disk and taps "Erase and
 install", and the install starts the way Enter starts it. The installed box
 gets the network's name and password, and opens the same one after the
 restart, so the phone carries on.
@@ -92,7 +92,7 @@ SELECTED = CSI + "30;44m"  # the background colour on blue
 class Disk:
     path: str  # /dev/nvme0n1
     size: int  # bytes
-    model: str  # "samsung ssd 970 evo", or empty
+    model: str  # "Samsung SSD 970 EVO", or empty
 
     @property
     def name(self) -> str:
@@ -135,7 +135,8 @@ def candidates(exclude: str) -> list[str]:
 
 def model_label(vendor: str, model: str) -> str:
     """Vendor and model the way the configurator's get_disk_info joins them,
-    in lower case, without a bare PCI vendor id (a VM's 0x1af4)."""
+    in the disk's own capitals, without a bare PCI vendor id (a VM's 0x1af4).
+    The phone's page shows it as it is, and the console in lower case."""
     vendor = " ".join((vendor or "").split())
     model = " ".join((model or "").split())
     if re.fullmatch(r"0x[0-9a-fA-F]+", vendor):
@@ -144,7 +145,7 @@ def model_label(vendor: str, model: str) -> str:
         label = model if vendor.lower() in model.lower() else f"{vendor} {model}"
     else:
         label = model or vendor
-    return label.lower()
+    return label
 
 
 def list_disks() -> list[Disk]:
@@ -163,12 +164,12 @@ def list_disks() -> list[Disk]:
 
 
 def size_label(size: int) -> str:
-    """The size the way it's printed on the box: 500 gb, 2 tb, 1.5 tb."""
+    """The size the way it's printed on the box: 500 GB, 2 TB, 1.5 TB."""
     gb = size / 1e9
     if gb >= 1000:
         tb = f"{gb / 1000:.1f}".rstrip("0").rstrip(".")
-        return f"{tb} tb"
-    return f"{round(gb)} gb"
+        return f"{tb} TB"
+    return f"{round(gb)} GB"
 
 
 # --- The answers Omarchy's configurator writes --------------------------------
@@ -388,9 +389,10 @@ def steps_line(step: int) -> str:
 
 
 def disk_row(disk: Disk, selected: bool, width: int, name_width: int) -> str:
-    size = size_label(disk.size)
+    # The console is a terminal, so its words are lower case, a disk's too.
+    size = size_label(disk.size).lower()
     model_width = max(0, width - 3 - name_width - len(size) - 1)
-    model = disk.model[:model_width]
+    model = disk.model.lower()[:model_width]
     text = f"{disk.name:<{name_width}}{model:<{model_width}}{size} "
     if selected:
         return f"{SELECTED} › {text}{RESET}"
@@ -425,7 +427,7 @@ def qr_lines(text: str) -> list[str]:
 def phone_line(phone: dict) -> str:
     """For a console too small for the code: what the code would say."""
     if phone.get("mode") == "hotspot":
-        return f"{GREY}or set it up from your phone: wi-fi {phone['ssid']}, password {phone['password']}{RESET}"
+        return f"{GREY}or set it up from your phone: Wi-Fi {phone['ssid']}, password {phone['password']}{RESET}"
     return f"{GREY}or set it up from your phone: {phone['qr']}{RESET}"
 
 
@@ -435,7 +437,7 @@ def hints(disks: list[Disk]) -> str:
         parts.append(f"{WHITE}enter{RESET} {GREY}install{RESET}")
     if len(disks) > 1:
         parts.append(f"{WHITE}↑ ↓{RESET} {GREY}pick a disk{RESET}")
-    parts.append(f"{WHITE}ctrl+c{RESET} {GREY}omarchy's own installer{RESET}")
+    parts.append(f"{WHITE}ctrl+c{RESET} {GREY}omarchy's installer{RESET}")
     return "   ".join(parts)
 
 
@@ -485,9 +487,9 @@ def render(disks: list[Disk], selected: int, cols: int, rows: int, phone: dict |
                 body.append(blank)
         body += ["", "", f"{RED}everything on it will be erased{RESET}"]
     else:
-        body.append(f"{WHITE}there's no disk to install agentv on{RESET}")
+        body.append(f"{WHITE}no disk found{RESET}")
         body.append("")
-        body.append(f"{GREY}plug one in, and it shows up here{RESET}")
+        body.append(f"{GREY}plug one in and it shows up here{RESET}")
     # The words in place of the code take one of the blank lines above the
     # hints: only a small console shows them, and it has no room to spare.
     body += ["", hints(disks), instead] if instead else ["", "", hints(disks)]
