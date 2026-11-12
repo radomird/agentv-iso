@@ -95,7 +95,7 @@ voice() {
 voice >"$RUN_DIR/voice-new.json"
 before=$(voice | jq -r '.last.clip // 0')
 say_it first
-check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/first.json"
+check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.outcome.say == "Didn'"'"'t get that"' "$RUN_DIR/first.json"
 
 if [[ $kind == "none" ]]; then
   check "T17.2 the daemon says the TV has no voice of its own" jq -e '.own == "missing" and .by == null' "$RUN_DIR/voice-new.json"
