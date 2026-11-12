@@ -5,9 +5,12 @@ name: Publish ISO
 # files. The bucket holds one ISO for each channel, each named by its
 # version, such as agentv-1.0.0-x86_64.iso (bin/agentv-iso-publish):
 #
-#   stable  the latest release, from a tag like v1.0.0
-#   rc      the latest release candidate, from a tag like v1.0.0-rc1
+#   stable  the latest release, from a tag like agentv-v1.0.0
+#   rc      the latest release candidate, from a tag like agentv-v1.0.0-rc1
 #   edge    last night's build, from agentv-os's nightly run
+#
+# bin/agentv-iso-tag has the rule for tags: a 0.x release was v0.2.0, and
+# no other v tag is AgenTV's.
 #
 # Beside them, stable.json, rc.json and edge.json say which ISO each
 # channel is on. Those are the links that don't change. Publishing an ISO
@@ -19,7 +22,18 @@ name: Publish ISO
 # the edge ISO the night's run in agentv-os kept, and publishes it when it's
 # a new one. And by hand, for an ISO one of those two kinds of run kept: a
 # release tag's, or a scheduled night's. Never one from a run started by
-# hand, which can build a branch that isn't merged.
+# hand, which can build a branch that isn't merged. Whichever way it
+# starts, the run that kept the ISO is looked at first
+# (bin/agentv-iso-kept).
+#
+# A channel only moves forward. An ISO older than the one a channel is on
+# is refused, so an old release's run started again can't take stable back.
+# Going back on purpose is a run by hand with "back" ticked.
+#
+# A candidate's ISO gets a pre-release here with its download link, its
+# checksum and how to check a download, made by this workflow when nobody
+# has written one. A release's notes get the same part added. The release
+# itself is written by hand.
 #
 # It always runs from the agentv branch, never from the tag or the branch
 # that built the ISO, so the build never has the bucket's keys or the
@@ -61,6 +75,10 @@ on:
         description: "The kept ISO's name, such as agentv-1.0.0-x86_64"
         type: string
         required: true
+      back:
+        description: "Let this ISO replace a newer one on its channel (going back on purpose)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -118,16 +136,13 @@ jobs:
             workflow_run)
               # The ISO workflow only runs for a push when it's a tag's.
               [[ $TAG_REPO == "$GITHUB_REPOSITORY" ]] || skip "Nothing is published: that run wasn't this repo's."
-              if [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                channel=stable
-              elif [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
-                channel=rc
-              else
-                skip "Nothing is published: \`$TAG\` isn't a release tag (v1.0.0) or a release candidate's (v1.0.0-rc1)."
-              fi
+              # Which channel and version the tag is, by the one rule for
+              # tags (bin/agentv-iso-tag).
+              read -r channel version < <(bin/agentv-iso-tag "$TAG" 2>/dev/null) ||
+                skip "Nothing is published: \`$TAG\` isn't one of AgenTV's release tags (agentv-v1.0.0, or agentv-v1.0.0-rc1 for a candidate)."
               repo=agentv-iso
               run=$TAG_RUN
-              name="agentv-${TAG#v}-x86_64"
+              name="agentv-$version-x86_64"
               ;;
             schedule)
               # The edge ISO agentv-os's newest finished nightly run kept. A
@@ -146,8 +161,10 @@ jobs:
               # The second lock, which doesn't lean on that last job: a run
               # that was cancelled, or never got as far as taking its ISO
               # back, still has one. The edge leg has to have passed.
+              # No apostrophe inside the ${...:-...} below: bash would read
+              # it as the start of a quoted string, and stop this whole step.
               passed=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/jobs?filter=latest&per_page=100" --paginate --jq '.jobs[]' | bin/agentv-iso-passed edge) ||
-                skip "Nothing is published from agentv-os's newest nightly run ($run), though it kept an edge ISO. ${passed:-Its jobs couldn't be read.}"
+                skip "Nothing is published from agentv-os's newest nightly run ($run), though it kept an edge ISO. ${passed:-The jobs of that run could not be read.}"
               # Published already?
               version=${name#agentv-}
               version=${version%-x86_64}
@@ -176,15 +193,16 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           say "Publishing \`$name\` from $repo's run $run as the $channel ISO."
 
-      # A release tag's run, and a run named by hand, are looked at before
-      # anything is fetched, signed or uploaded (bin/agentv-iso-kept): which
-      # repo and workflow made it, what started it and on what, whether it
-      # passed, and whether the ISO's name is the one that run was for. A
-      # release tag's commit has to be on agentv too.
-      # A scheduled night is asked about above, by its edge leg. The script
-      # is in the checkout this job starts with.
+      # Whichever way this started, the run that kept the ISO is looked at
+      # before anything is fetched, signed or uploaded (bin/agentv-iso-kept):
+      # which repo and workflow made it, what started it and on what,
+      # whether it passed, whether the ISO's name is the one that run was
+      # for, and that it's the only ISO the run has. A release tag's commit
+      # has to be on agentv too. A scheduled night was asked about above, by
+      # its edge leg, and is asked here again with the rest. The script is
+      # in the checkout this job starts with.
       - name: Check the run that kept it
-        if: steps.which.outputs.publish == 'true' && github.event_name != 'schedule'
+        if: steps.which.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ steps.which.outputs.channel }}
@@ -377,6 +395,8 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Only a run by hand can say going back to an older ISO is meant.
+          AGENTV_ISO_GO_BACK: ${{ github.event_name == 'workflow_dispatch' && inputs.back && '1' || '' }}
         run: |
           url=$(bin/agentv-iso-publish upload "$CHANNEL" "$RUNNER_TEMP/iso/$NAME.iso" names)
           echo "url=$url" >>"$GITHUB_OUTPUT"
@@ -390,39 +410,56 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
-      # The release's own page here is where people find the stable ISO, so
-      # its notes get the download link. The checksum goes beside it: a
-      # second place for it, one the bucket's keys can't change.
+      # The release's own page here is where people find the ISO, so its
+      # notes get the download link, the checksum and how to check a
+      # download (bin/agentv-iso-notes). The checksum there is a second
+      # place for it, one the bucket's keys can't change. A candidate with
+      # no release yet gets a pre-release made for its tag, which has to
+      # exist. A release with none isn't made here: its notes are written
+      # by hand, and this says what to put in them.
       - name: Put the download link and the checksum in the release's notes
         if: needs.which.outputs.channel != 'edge'
         env:
           GH_TOKEN: ${{ github.token }}
           URL: ${{ steps.upload.outputs.url }}
+          AGENTV_OWNER: ${{ github.repository_owner }}
+          AGENTV_RUN_URL: ${{ github.server_url }}/${{ github.repository_owner }}/${{ needs.which.outputs.repo }}/actions/runs/${{ needs.which.outputs.run-id }}
         run: |
           version=${NAME#agentv-}
           version=${version%-x86_64}
-          read -r hash _ <"names/$NAME.iso.sha256"
-          link="Download the ISO: [$NAME.iso]($URL)"
-          line="SHA-256 of the ISO: \`$hash\`"
-          if ! body=$(gh release view "v$version" -R "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null); then
+          sum="names/$NAME.iso.sha256"
+          # The release goes by its tag: agentv-v1.0.0, or v0.2.0 for a 0.x
+          # release.
+          mapfile -t tags < <(bin/agentv-iso-tag --names "$version")
+          tag=""
+          for name in "${tags[@]}"; do
+            if gh release view "$name" -R "$GITHUB_REPOSITORY" --json body --jq .body >"$RUNNER_TEMP/body.md" 2>/dev/null; then
+              tag=$name
+              break
+            fi
+          done
+          if [[ -z $tag && $CHANNEL == "rc" ]]; then
+            bin/agentv-iso-notes candidate "$sum" "$URL" >"$RUNNER_TEMP/notes.md"
+            gh release create "${tags[0]}" -R "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+              --title "AgenTV $version installer" --notes-file "$RUNNER_TEMP/notes.md"
+            echo "Made the pre-release for ${tags[0]}, with the download link, the checksum and how to check a download." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z $tag ]]; then
             {
-              echo "There's no release for v$version here yet. When there is, put these in its notes:"
+              echo "There's no release for ${tags[0]} here yet. Once there is, run this workflow again by hand for the same ISO, or put this in its notes:"
               echo
-              echo "$link"
-              echo
-              echo "$line"
+              bin/agentv-iso-notes block "$sum" "$URL"
             } | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if grep -qF "$hash" <<<"$body" && grep -qF "$link" <<<"$body"; then
-            echo "The release's notes have the download link and the checksum already."
+          bin/agentv-iso-notes into "$sum" "$URL" "$RUNNER_TEMP/body.md" >"$RUNNER_TEMP/notes.md"
+          if [[ $(<"$RUNNER_TEMP/body.md") == "$(<"$RUNNER_TEMP/notes.md")" ]]; then
+            echo "$tag's release notes have the download link and the checksum already."
             exit 0
           fi
-          # The ones from an earlier publish of this version go.
-          body=$(grep -v -e '^Download the ISO: ' -e '^SHA-256 of the ISO: ' <<<"$body" || true)
-          printf '%s\n\n%s\n\n%s\n' "$body" "$link" "$line" >"$RUNNER_TEMP/notes.md"
-          gh release edit "v$version" -R "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
-          echo "The download link and the checksum are in v$version's release notes." | tee -a "$GITHUB_STEP_SUMMARY"
+          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "The download link and the checksum are in $tag's release notes." | tee -a "$GITHUB_STEP_SUMMARY"
 
       # What the next step would remove: the ISO this channel had before,
       # and nothing removed yet. If the bucket's listing isn't whole, or the

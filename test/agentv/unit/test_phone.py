@@ -26,8 +26,8 @@ import agentv_phone as phone_side  # noqa: E402
 import agentv_qr  # noqa: E402
 
 DISKS = [
-    {"path": "/dev/nvme0n1", "name": "nvme0n1", "model": "samsung ssd 970 evo", "size": "500 gb"},
-    {"path": "/dev/sda", "name": "sda", "model": "wd blue hdd", "size": "2 tb"},
+    {"path": "/dev/nvme0n1", "name": "nvme0n1", "model": "Samsung SSD 970 EVO", "size": "500 GB"},
+    {"path": "/dev/sda", "name": "sda", "model": "WD Blue HDD", "size": "2 TB"},
 ]
 
 
@@ -142,7 +142,7 @@ class Page(unittest.TestCase):
         status, _, page = self.ask("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn(f'const TOKEN = "{self.phone.token}"', page)
-        self.assertIn("erase and install", page)
+        self.assertIn("Erase and install", page)
 
     def test_a_phone_on_the_home_network_gets_it_without(self):
         # 127.0.0.2 reaches the same server, but isn't the hotspot's address.
@@ -250,7 +250,7 @@ class Page(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertNotIn("disks", state)
         self.assertNotIn("step", state)
-        self.assertIn("scan the code on the tv", state["error"])
+        self.assertEqual(state["error"], "Scan the code on your TV to start")
         status, state = self.ask_json(
             "GET", "/api/first", host="127.0.0.2", via="127.0.0.2", headers={"X-AgenTV-Token": "x" * 22}
         )
@@ -268,6 +268,21 @@ class Page(unittest.TestCase):
         status, state = self.ask_json("GET", "/api/first", host="127.0.0.2", via="127.0.0.2", headers=token)
         self.assertEqual((status, state["step"]), (200, 2))
 
+    def test_the_page_says_installing_agentv(self):
+        # The words a phone reads, in sentence case, and never Omarchy's name
+        # for what it installs.
+        page = (HERE / "phone.html").read_text()
+        for words in (
+            "<h1>Install AgenTV on</h1>",
+            "Everything on it will be erased",
+            "<h1>Installing AgenTV</h1>",
+            "Your TV restarts on its own. Keep this page open.",
+            "No disk found. Plug one in.",
+            "Scan the code on your TV to start",
+        ):
+            self.assertIn(words, page)
+        self.assertNotIn("omarchy", page.lower())
+
     def test_the_page_sends_its_token_when_it_asks_for_the_disks(self):
         page = (HERE / "phone.html").read_text()
         self.assertIn('fetch("/api/first", { cache: "no-store", headers: TOKEN ? { "X-AgenTV-Token": TOKEN } : {} })', page)
@@ -276,13 +291,13 @@ class Page(unittest.TestCase):
         ask = self.run_dir / "ask.json"
         status, answer = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda"})
         self.assertEqual(status, 403)
-        self.assertIn("scan the code on the tv", answer["error"])
+        self.assertEqual(answer["error"], "Scan the code on your TV to start")
         status, _ = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda", "token": "x" * 22})
         self.assertEqual(status, 403)
         self.assertFalse(ask.exists())
 
-        status, _ = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sdz", "token": self.phone.token})
-        self.assertEqual(status, 400)
+        status, answer = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sdz", "token": self.phone.token})
+        self.assertEqual((status, answer["error"]), (400, "Couldn't find that disk"))
         self.assertFalse(ask.exists())
 
         status, answer = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda", "token": self.phone.token})
@@ -290,8 +305,8 @@ class Page(unittest.TestCase):
         self.assertEqual(json.loads(ask.read_text()), {"install": "/dev/sda"})
 
         ask.unlink()
-        status, _ = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda", "token": self.phone.token})
-        self.assertEqual(status, 409)
+        status, answer = self.ask_json("POST", "/api/first/install", {"disk": "/dev/sda", "token": self.phone.token})
+        self.assertEqual((status, answer["error"]), (409, "Already installing"))
         self.assertFalse(ask.exists())
         status, _, page = self.ask("GET", "/")
         self.assertNotIn(self.phone.token, page)
