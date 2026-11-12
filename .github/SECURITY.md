@@ -12,7 +12,7 @@ Please don't open a public issue for it.
 
 - What you found, and what someone could do with it.
 - How to make it happen, step by step.
-- The release you're on. It's in _Settings > About_ on the TV, or run `agentv version` on the box.
+- The release you're on. It's in _Settings > This TV > About_ on the TV, or run `agentv version` on the box.
 - Your box, if it matters.
 
 Leave out keys, passwords and anything from your own accounts. I don't need them to fix it.
@@ -37,4 +37,4 @@ A problem in Omarchy itself goes to Omarchy, at [security@omarchy.org](mailto:se
 
 ## Not a security problem?
 
-[Open an issue](https://github.com/radomird/agentv-os/issues/new/choose) in agentv-os, where AgenTV's issues live.
+[Open an issue](https://github.com/radomird/agentv-iso/issues/new/choose).
