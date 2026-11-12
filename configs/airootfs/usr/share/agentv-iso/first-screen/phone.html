@@ -51,20 +51,20 @@
 </style>
 </head>
 <body>
-<div class="steps" aria-label="step of 12"><span id="count">1 of 12</span></div>
+<div class="steps" aria-label="Step 1 of 12"><span id="count">1 of 12</span></div>
 
 <main id="pick">
-  <h1>install agentv on</h1>
-  <div class="disks" id="disks" role="group" aria-label="disks"></div>
-  <p class="warn" id="erase">everything on it will be erased</p>
+  <h1>Install AgenTV on</h1>
+  <div class="disks" id="disks" role="group" aria-label="Disks"></div>
+  <p class="warn" id="erase">Everything on it will be erased</p>
   <p class="error" id="error" role="alert"></p>
 </main>
 <div class="grow"></div>
-<button class="go" id="go" disabled>erase and install</button>
+<button class="go" id="go" disabled>Erase and install</button>
 
 <main id="installing" hidden>
-  <h1>installing omarchy</h1>
-  <p>the tv restarts by itself, and this page carries on</p>
+  <h1>Installing AgenTV</h1>
+  <p>Your TV restarts on its own. Keep this page open.</p>
 </main>
 
 <script>
@@ -87,6 +87,7 @@
       row.prepend(block);
     }
     $("count").textContent = `${step} of 12`;
+    row.setAttribute("aria-label", `Step ${step} of 12`);
   }
 
   function draw() {
@@ -108,9 +109,9 @@
       return button;
     }));
     $("erase").hidden = disks.length === 0;
-    if (disks.length === 0 && !installing) $("error").textContent = "there's no disk to install agentv on";
+    if (disks.length === 0 && !installing) $("error").textContent = "No disk found. Plug one in.";
     $("go").disabled = !picked || !TOKEN;
-    if (!TOKEN && !installing) $("error").textContent = "scan the code on the tv to set it up from this phone";
+    if (!TOKEN && !installing) $("error").textContent = "Scan the code on your TV to start";
   }
 
   async function send(path, disk) {
@@ -120,7 +121,7 @@
       body: JSON.stringify({ disk, token: TOKEN }),
     });
     const answer = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(answer.error || "the tv didn't answer");
+    if (!response.ok) throw new Error(answer.error || "Couldn't reach your TV. Try again.");
   }
 
   async function pick(path) {
