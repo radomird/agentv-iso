@@ -65,7 +65,7 @@ check "the account note says a password is known" ssh_guest "jq -e '.passwordKno
 # desktop, where passwd asks for the one before.
 jq -Rc '{password: .}' <<<"$password again" |
   ssh_guest "curl -sS --max-time 60 -X PUT -H 'Content-Type: application/json' --data-binary @- $TV/api/desktop/password" >"$RUN_DIR/again.json" 2>&1 || true
-check "T7.4 the TV sets no second password" jq -e '.ok == false and (.error | test("update › password › user"))' "$RUN_DIR/again.json"
+check "T7.4 the TV sets no second password" jq -e '.ok == false and (.error | test("Update > Password > User"))' "$RUN_DIR/again.json"
 check "and the first one still holds" same_password
 check "and SSH's keys-only drop-in is gone" ssh_guest "! test -e /etc/ssh/sshd_config.d/05-agentv-no-password.conf"
 

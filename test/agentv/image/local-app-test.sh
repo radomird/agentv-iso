@@ -112,7 +112,7 @@ guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$
 cat "$RUN_DIR/install.log"
 check "ADR-039 agentv app install --local installs the app" grep -q "^exit=0" "$RUN_DIR/install.log"
 check "it said what the app can reach first" grep -q "It can reach 127.0.0.1:8768, and nothing else." "$RUN_DIR/install.log"
-check "it said what it installed, and where to find it" grep -q "^Installed Image check 1.0.0 ($id). It's in Apps on the TV" "$RUN_DIR/install.log"
+check "it said what it installed, and where to find it" grep -q "^Installed Image check 1.0.0. Open Apps on your TV to add it to home." "$RUN_DIR/install.log"
 check "agentv app list has it as a local app" listed "$id 1.0.0 local"
 # What's in its folder, as the box's own account reads it: owner, mode and
 # path of each, one a line, the folder itself last.
@@ -171,7 +171,7 @@ guest "agentv input key back" >"$RUN_DIR/input.log" 2>&1 || true
 wait "$asking" || true
 cat "$RUN_DIR/install-cancel.log"
 check "cancelled on the TV, nothing is installed" grep -q "^exit=1" "$RUN_DIR/install-cancel.log"
-check "and it says the PIN was needed" grep -q "Couldn't do it: that needs the adult PIN, so nothing was installed." "$RUN_DIR/install-cancel.log"
+check "and it says the PIN was needed" grep -q "That needs the adult PIN, so nothing was installed." "$RUN_DIR/install-cancel.log"
 check "the app is still 1.0.0" listed "$id 1.0.0 local"
 
 guest "agentv app install --local $work/app --yes --stand-in; echo exit=\$?" >"$RUN_DIR/install-pin.log" 2>&1 &

@@ -145,7 +145,7 @@ check "Music adds the share, mounted through gvfs" jq -e '.ok == true and .sourc
 printf 'not-it\n' | ssh_guest "bash -lc 'agentv music add-share smb://tv@10.0.2.2/private'" >"$RUN_DIR/add-wrong.json" 2>&1 || true
 cat "$RUN_DIR/add-wrong.json"
 check "ADR-038 a password the NAS turns down says so" \
-  jq -e '.ok == false and .error == "the NAS didn'"'"'t take that user name and password"' "$RUN_DIR/add-wrong.json"
+  jq -e '.ok == false and .error == "Wrong user name or password"' "$RUN_DIR/add-wrong.json"
 printf '%s\n' "$SHARE_PASSWORD" | ssh_guest "bash -lc 'agentv music add-share smb://tv@10.0.2.2/private'" >"$RUN_DIR/add-private.json" 2>&1 || true
 cat "$RUN_DIR/add-private.json"
 check "ADR-038 Music adds the share with a password, mounted by root under /mnt/agentv" \

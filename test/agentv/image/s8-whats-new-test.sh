@@ -156,7 +156,7 @@ ssh_guest "curl -fsS -X PUT -H 'Content-Type: application/json' -d '{\"layout\":
 guest "agentv screen home" >/dev/null 2>&1 || true
 api GET /api/tile/agentv.new/l "" tile
 check "S8.1 New this week's tile has this week's titles, each with its app and TMDB's poster" \
-  jq -e '[.tile.entries[] | "\(.label) \(.caption)"][:2] == ["night train kino", "copper hill lumen · season 3"] and (.tile.entries[0].image | startswith("https://image.tmdb.org/"))' "$RUN_DIR/tile.json"
+  jq -e '[.tile.entries[] | "\(.label) \(.caption)"][:2] == ["Night Train Kino", "Copper Hill Lumen · season 3"] and (.tile.entries[0].image | startswith("https://image.tmdb.org/"))' "$RUN_DIR/tile.json"
 check "S8.1 home's top rail shows a title new this week on one of the household's services (OCR)" ocr_finds success-s8-rail "night train" 60
 check "S8.1 with TMDB's and JustWatch's credit under it (OCR)" grep -Eqi "justwatch|tmdb" "$RUN_DIR/success-s8-rail.txt"
 
