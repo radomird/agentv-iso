@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# agentv:summary=Check the run that kept an ISO before it's published
+# agentv:args=<channel> <repo> <run-id> <name>
+
+# Publishing takes an ISO a workflow run kept. This looks at that run first,
+# before anything is fetched, signed or uploaded, and stops unless the ISO
+# is one a channel is meant to get:
+#
+#   stable, rc  agentv-iso's ISO workflow, started by the push of a release
+#               tag (v1.0.0 for stable, v1.0.0-rc1 for rc), with the tagged
+#               commit on the agentv branch, and the ISO named after that
+#               tag's version
+#   edge        agentv-os's Nightly workflow, started by the schedule on the
+#               agentv branch, and the ISO named the way edge's are
+#
+# Either way the run has to be the repo's own, finished and passed, and it
+# has to still have the ISO under that name.
+#
+# A run started by hand never counts. It can build another branch or commit
+# than the one it runs on, and the run's record doesn't say which it built.
+#
+# It asks GitHub with gh, and needs no more than a token that can read both
+# repos' runs. The owner comes from GitHub's own context.
+
+set -euo pipefail
+
+(( $# == 4 )) || { echo "usage: agentv-iso-kept <channel> <repo> <run-id> <name>" >&2; exit 2; }
+channel=$1 repo=$2 run=$3 name=$4
+owner="${GITHUB_REPOSITORY_OWNER:?}"
+BRANCH=agentv
+
+stop() {
+  echo "::error::$*" >&2
+  exit 1
+}
+
+[[ $channel =~ ^(edge|stable|rc)$ ]] || stop "the channel is edge, stable or rc"
+[[ $repo =~ ^agentv-(iso|os)$ ]] || stop "the repo is agentv-iso or agentv-os"
+[[ $run =~ ^[0-9]+$ ]] || stop "run-id is a run's number"
+[[ $name =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64$ ]] || stop "name is an ISO's name, such as agentv-1.0.0-x86_64"
+
+record=$(gh api "repos/$owner/$repo/actions/runs/$run") || stop "Couldn't read $repo's run $run."
+field() { jq -r "$1 // empty" <<<"$record"; }
+made_in=$(field .repository.full_name)
+code_from=$(field .head_repository.full_name)
+workflow=$(field .path)
+workflow=${workflow%%@*}
+event=$(field .event)
+ref=$(field .head_branch)
+commit=$(field .head_sha)
+status=$(field .status)
+conclusion=$(field .conclusion)
+
+[[ $made_in == "$owner/$repo" && $code_from == "$owner/$repo" ]] || stop "Run $run isn't $repo's own."
+[[ $commit =~ ^[0-9a-f]{40}$ ]] || stop "Run $run doesn't say which commit it ran on."
+[[ $status == "completed" && $conclusion == "success" ]] ||
+  stop "Run $run didn't pass (${status:-no status}, ${conclusion:-no conclusion}). Only an ISO from a run that passed is published."
+
+case $channel in
+  stable | rc)
+    [[ $repo == "agentv-iso" && $workflow == ".github/workflows/iso.yml" ]] ||
+      stop "A $channel ISO comes from agentv-iso's ISO workflow, and run $run is $repo's ${workflow:-(no workflow)}."
+    [[ $event == "push" ]] ||
+      stop "A $channel ISO comes from the run a release tag's push started, and run $run was started by ${event:-something else}."
+    if [[ $channel == "stable" ]]; then
+      [[ $ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || stop "Run $run ran on \`$ref\`, which isn't a release tag (v1.0.0)."
+    else
+      [[ $ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]] || stop "Run $run ran on \`$ref\`, which isn't a release candidate's tag (v1.0.0-rc1)."
+    fi
+    [[ $name == "agentv-${ref#v}-x86_64" ]] ||
+      stop "Run $run built $ref, so its ISO is agentv-${ref#v}-x86_64, not $name."
+    # The tag's name isn't enough: the commit it was on has to be one the
+    # agentv branch has.
+    reach=$(gh api "repos/$owner/$repo/compare/$commit...$BRANCH" | jq -r '.status // empty') ||
+      stop "Couldn't ask whether $BRANCH has $ref's commit ($commit)."
+    [[ $reach =~ ^(ahead|identical)$ ]] ||
+      stop "$ref is on $commit, which the $BRANCH branch doesn't have. A release is tagged on $BRANCH."
+    ;;
+  edge)
+    [[ $repo == "agentv-os" && $workflow == ".github/workflows/nightly.yml" ]] ||
+      stop "An edge ISO comes from agentv-os's Nightly workflow, and run $run is $repo's ${workflow:-(no workflow)}. A run started by hand can build a branch that isn't merged, so its ISO isn't published."
+    [[ $event == "schedule" && $ref == "$BRANCH" ]] ||
+      stop "An edge ISO comes from a night the schedule started on $BRANCH, and run $run was started by ${event:-something else} on \`$ref\`."
+    [[ $name =~ ^agentv-(edge-[0-9.]+-[0-9a-f]{7}|[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]+)-x86_64$ ]] ||
+      stop "$name isn't an edge ISO's name, such as agentv-0.2.0.r422.g155320d30-x86_64."
+    ;;
+esac
+
+kept=$(gh api --paginate "repos/$owner/$repo/actions/runs/$run/artifacts?per_page=100" |
+  jq -r '.artifacts[] | select(.expired == false) | .name') || stop "Couldn't list what run $run kept."
+grep -qxF -- "$name" <<<"$kept" || stop "Run $run has no ISO called $name. It kept none, or it's gone by now."
+
+echo "\`$name\` is the ISO $repo's run $run kept: ${workflow##*/}, started by $event on \`$ref\` (${commit::7}), and it passed."
