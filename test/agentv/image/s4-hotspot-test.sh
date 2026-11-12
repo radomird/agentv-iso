@@ -132,6 +132,13 @@ ap_mode() {
   ssh_guest "iw dev $box_if info" 2>/dev/null | grep -q "type AP"
 }
 check "the box's radio is an access point" ap_mode
+# The hotspot's own connection in NetworkManager. A network's name is 32
+# bytes at most and this is longer, so no home network can share it.
+HOTSPOT_CONNECTION=agentv-hotspot-this-tv-opens-itself
+hotspot_connection() {
+  ssh_guest "nmcli -g NAME connection show" 2>/dev/null | grep -qxF "$HOTSPOT_CONNECTION"
+}
+check "it opens on its own connection in NetworkManager" hotspot_connection
 saw_home() {
   ssh_guest "jq -e 'map(.ssid) | index(\"$HOME_SSID\") != null' /run/agentv-hotspot/networks.json" >/dev/null 2>&1
 }
@@ -258,7 +265,9 @@ check "and state.json says where" jq -e '.joined.address | startswith("192.168.7
 check "the hotspot is closed" closed
 check "its firewall holes are gone" bash -c "[[ $(holes) == 0 ]]"
 gone() {
-  ! ssh_guest "nmcli -g NAME connection show" 2>/dev/null | grep -qx agentv-setup &&
+  local names
+  names=$(ssh_guest "nmcli -g NAME connection show" 2>/dev/null) || return 1
+  ! grep -qxF "$HOTSPOT_CONNECTION" <<<"$names" &&
     ! ssh_guest "pgrep -f 'dnsmasq.*10.42.0.1'" >/dev/null 2>&1
 }
 check "and so are its network and its dnsmasq" gone
