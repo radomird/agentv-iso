@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# agentv:summary=Say which channel and version one of AgenTV's release tags is
+# agentv:args=<tag> | --names <version>
+
+# The one place this repo knows what a release tag looks like. The ISO
+# workflow, the publish workflow and bin/agentv-iso-kept all ask here.
+#
+#   agentv-v1.0.0      a release: the stable channel, version 1.0.0
+#   agentv-v1.0.0-rc1  a release candidate: the rc channel, version 1.0.0-rc1
+#   v0.2.0             a release from the 0.x days: stable, version 0.2.0
+#
+# The same names are used in agentv-os, which also carries Omarchy's own
+# v1.1.0 to v4.5.0 tags. So a plain v tag is AgenTV's only when it's v0.*,
+# here too, and from 1.0 on a tag says agentv. Anything else isn't a
+# release tag: v1.0.0, v0.3.0-rc1, agentv-1.0.0, a branch's name.
+#
+#   agentv-iso-tag <tag>
+#       Prints "<channel> <version>", like "rc 1.0.0-rc1". Fails, saying
+#       why, when the tag isn't one of AgenTV's.
+#   agentv-iso-tag --names <version>
+#       Prints the tags that version can have, a line each, the one to use
+#       first: agentv-v1.0.0, and for a 0.x release v0.2.0 after it.
+
+set -euo pipefail
+
+usage() {
+  echo "usage: agentv-iso-tag <tag> | --names <version>" >&2
+  exit 2
+}
+
+RELEASE='[0-9]+\.[0-9]+\.[0-9]+'
+
+if [[ ${1:-} == "--names" ]]; then
+  (( $# == 2 )) || usage
+  version=$2
+  if [[ ! $version =~ ^$RELEASE(-rc[0-9]+)?$ ]]; then
+    echo "agentv-iso-tag: '$version' isn't a version, like 1.0.0 or 1.0.0-rc1" >&2
+    exit 1
+  fi
+  echo "agentv-v$version"
+  if [[ $version =~ ^0\.[0-9]+\.[0-9]+$ ]]; then
+    echo "v$version"
+  fi
+  exit 0
+fi
+
+(( $# == 1 )) || usage
+tag=$1
+
+if [[ $tag =~ ^agentv-v($RELEASE)$ || $tag =~ ^v(0\.[0-9]+\.[0-9]+)$ ]]; then
+  echo "stable ${BASH_REMATCH[1]}"
+elif [[ $tag =~ ^agentv-v($RELEASE-rc[0-9]+)$ ]]; then
+  echo "rc ${BASH_REMATCH[1]}"
+else
+  echo "agentv-iso-tag: '$tag' isn't one of AgenTV's release tags. A release is agentv-v1.0.0, a candidate agentv-v1.0.0-rc1, and a 0.x release was v0.2.0." >&2
+  exit 1
+fi

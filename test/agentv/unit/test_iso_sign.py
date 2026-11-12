@@ -155,6 +155,10 @@ class WhoGetsTheKeys(unittest.TestCase):
         self.assertLess(found, asked)
         self.assertLess(asked, published)
         self.assertIn("/jobs?filter=latest", which)
+        # And a leg that didn't pass ends the step there: it's a skip, which
+        # exits, not something the step carries on from.
+        self.assertRegex(which, r'bin/agentv-iso-passed edge\) \|\|\n\s+skip "Nothing is published from')
+        self.assertRegex(which, r'skip\(\) \{ say "\$\*"; echo "publish=false" >>"\$GITHUB_OUTPUT"; exit 0; \}')
 
     def passed(self, *rows, leg="edge"):
         lines = "".join('{"name": "%s", "status": "%s", "conclusion": %s}\n' % (name, status, f'"{conclusion}"' if conclusion else "null") for name, status, conclusion in rows)
