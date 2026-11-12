@@ -355,6 +355,29 @@ class Keys(unittest.TestCase):
         self.assertFalse((work / "user_configuration.json").exists())
 
 
+class Tips(unittest.TestCase):
+    """The lines the install shows while it works (customize.sh)."""
+
+    def tips(self) -> list[str]:
+        script = (ROOT / "configs/airootfs/usr/share/agentv-iso/customize.sh").read_text()
+        return re.findall(r'^  "agentv\.tip\.\w+": "(.*)",?$', script, re.M)
+
+    def test_no_tip_reads_as_a_question_of_omarchys(self):
+        # The image checks take any of these words on the screen for one of
+        # Omarchy's questions (test/agentv/image/first-screen.sh).
+        checks = (ROOT / "test/agentv/image/first-screen.sh").read_text()
+        questions = re.search(r"^OMARCHY_QUESTIONS='(.*)'$", checks, re.M).group(1)
+        tips = self.tips()
+        self.assertEqual(len(tips), 8)
+        for tip in tips:
+            self.assertNotRegex(tip.lower(), questions)
+
+    def test_no_tip_says_how_the_tv_works(self):
+        for tip in self.tips():
+            for word in ("agent", "box", "snapshot", "boot menu"):
+                self.assertNotIn(word, tip.lower().replace("agentv", ""))
+
+
 class Handover(unittest.TestCase):
     def test_copies_the_files_with_their_modes(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as target:

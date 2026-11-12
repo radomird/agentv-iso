@@ -16,9 +16,9 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
 fi
 
 # What only Omarchy's questions say, and never AgenTV's first screen, its
-# install's tips or TV setup. "password" isn't one: a tip says "no password
-# at power on". OCR reads this console font's w as u at times, so no word
-# here depends on a w.
+# install's tips or TV setup. "password" isn't one: a tip says "No password
+# to type". OCR reads this console font's w as u at times, so no word here
+# depends on a w.
 OMARCHY_QUESTIONS='keyboard layout|username|hostname|timezone|select install disk|confirm over|look right|reboot no'
 
 # A 4 MB drive with cloud-init's files and nothing else. Prints its path.
