@@ -60,12 +60,14 @@ setup_post /api/setup/finish '{"step": "welcome", "keyboard": true}'
 setup_post /api/setup/ready '{"update": "none"}'
 setup_post /api/setup/finish '{"step": "ready"}'
 check "T3.2 setup's step after getting ready is your box" until_json /api/setup '.setup.step == "box"' 30
-check "T3.2 the TV says here's your box (OCR)" ocr_finds success-T3.2-box "your box" 30
+# "Here's your setup", or "here's your box" on a release before the words
+# changed.
+check "T3.2 the TV says here's your setup (OCR)" ocr_finds success-T3.2-box "your setup|your box" 30
 check "with the GPU's line (OCR)" ocr_finds success-T3.2-games "not for games" 10
 # The TV runs at its full resolution, so the 4K test runs at QEMU's 4K mode
 # on the step itself, where virtio's GPU can't keep it smooth.
 check "the 4K test ran at the TV's 4K mode, and the box didn't keep it smooth" until_json /api/box/smooth '.result.width == 3840 and .passed == false' 30
-check "and the box line says it's smoother at 1080p (OCR)" ocr_finds success-T3.2-smooth "smoother at 1080p" 15
+check "and the computer's line says it's better at 1080p (OCR)" ocr_finds success-T3.2-smooth "better at 1080p|smoother at 1080p" 15
 capture_console "success-T3.2-box"
 
 # One press of OK.

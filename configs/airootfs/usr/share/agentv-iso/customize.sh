@@ -140,13 +140,13 @@ fi
 # the tips while it installs, in place of Omarchy's.
 catalog "$iso_i18n/en.json" "AgenTV's own lines" '. + {
   "encryption.hintEncrypted": "Press Ctrl+C for encrypted install.",
-  "agentv.tip.tv": "AgenTV starts straight on the TV, with no password at power on",
-  "agentv.tip.phone": "TV setup will run from your phone",
-  "agentv.tip.agent": "AgenTV'"'"'s own agent will build the apps your TV is missing",
-  "agentv.tip.local": "Apps the agent builds stay on this box",
-  "agentv.tip.update": "agentv update takes a snapshot first, then updates in place",
-  "agentv.tip.back": "A bad update? Pick the snapshot before it from the boot menu",
-  "agentv.tip.selftest": "agentv selftest checks the boot and the Wi-Fi, and says pass or fail",
+  "agentv.tip.tv": "AgenTV starts straight on home. No password to type.",
+  "agentv.tip.phone": "Next, setup from your phone",
+  "agentv.tip.agent": "Missing an app? Ask, and your TV makes it",
+  "agentv.tip.local": "Apps you build stay on this TV",
+  "agentv.tip.update": "Every update saves a backup first",
+  "agentv.tip.back": "A bad update? Go back from Settings",
+  "agentv.tip.selftest": "Something off? Run agentv selftest",
   "agentv.tip.omarchy": "Omarchy is underneath: Super + Return still opens a terminal"
 }'
 # shellcheck disable=SC2016 # the single quotes hold perl
