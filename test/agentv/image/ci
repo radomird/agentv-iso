@@ -114,6 +114,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Arch's own container, which upstream's build (bin/omarchy-iso-make) makes
+# the ISO in and these checks run in, pinned to the last one with openssl 3.
+# Arch's image moved to openssl 4 on 2026-11-12, while Omarchy's mirror, which
+# both containers install from, still serves openssl 3.6.5, so pacman -Syu
+# stopped with "installing openssl (3.6.5-1) breaks dependency
+# 'libcrypto.so=4-64'". Docker never pulls a :latest it already has, and
+# omarchy-iso-make only asks it to with --no-cache, which this never passes,
+# so tagging the pinned one :latest here is enough, with none of upstream's
+# files changed. Empty it once Omarchy's mirror serves openssl 4.
+ARCH_PIN=ghcr.io/archlinux/archlinux@sha256:6f868a470dfd2d8a0aefc62a18ff189877c54442d0d57419986a9cd915154ee2 # base-20261110.0.623834
+if [[ -n $ARCH_PIN ]]; then
+  docker pull -q "$ARCH_PIN" >/dev/null
+  docker tag "$ARCH_PIN" ghcr.io/archlinux/archlinux:latest
+  pinned="The ISO is built, and the checks run, in Arch's container of 2026-11-10 (base-20261110.0.623834, openssl 3.6.5), pinned in test/agentv/image/ci until Omarchy's mirror serves openssl 4."
+  echo "$pinned"
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    echo "$pinned" >>"$GITHUB_STEP_SUMMARY"
+  fi
+fi
+
 if [[ -n $disk || -n $build ]]; then
   # The night's base image, or the one this run's build job handed on, where
   # upstream's harness looks for it: in a folder named after the ISO, which

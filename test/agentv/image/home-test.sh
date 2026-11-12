@@ -62,7 +62,7 @@ for key in down down down down left left left; do
 done
 sleep 1
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
-check "OK on the bar's apps opens the apps page (OCR)" screen_says "success-home-apps" "on your home" 15
+check "OK on the bar's apps opens the apps page (OCR)" screen_says "success-home-apps" "on home" 15
 guest "agentv input key back" >>"$RUN_DIR/input.log" 2>&1 || true
 check "back comes home again (OCR)" screen_says "success-home-back" "$HOME_TEXT" 15
 
