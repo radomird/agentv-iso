@@ -353,6 +353,77 @@ class IsoPublish(unittest.TestCase):
         self.assertEqual(self.calls("s3 cp"), [])
         self.assertEqual((self.bucket / "iso/agentv-1.0.0-x86_64.iso").read_bytes(), b"one")
 
+    def test_a_channels_file_that_isnt_one_stops_the_upload(self):
+        # It's there and it reads, but it doesn't say which ISO is live. That
+        # isn't "nothing published yet": the live ISO would be overwritten.
+        for garbage in (b"<html>busy</html>", b"[]", b'"agentv-1.0.0-x86_64.iso"', b"{}", b'{"file": 7}', b'{"file": "agentv-1.0.0-rc1-x86_64.iso"}', b""):
+            self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+            self.put("iso/stable.json", garbage)
+            self.log.write_text("")
+            iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"two")
+            result = self.run_publish("upload", "stable", str(iso), str(names))
+            self.assertNotEqual(result.returncode, 0, garbage)
+            self.assertIn("doesn't name a stable ISO", result.stderr)
+            self.assertEqual(self.calls("s3 cp"), [])
+            self.assertEqual(self.deleted(), [])
+            self.assertEqual((self.bucket / "iso/agentv-1.0.0-x86_64.iso").read_bytes(), b"one")
+            (self.bucket / "iso/stable.json").unlink()
+
+    def test_a_channel_only_moves_forward(self):
+        # An older release's run started again would put stable back on it,
+        # and the cleanup would then remove the newer ISO.
+        for channel, live, older in (
+            ("stable", "1.0.0", "0.2.0"),
+            ("stable", "1.0.10", "1.0.9"),
+            ("rc", "1.0.0-rc10", "1.0.0-rc9"),
+            ("rc", "1.1.0-rc1", "1.0.0-rc3"),
+            ("edge", "0.2.0.r540.gabcdef012", "0.2.0.r532.g38b376c64"),
+            ("edge", "1.0.0.r0.gabcdef012", "0.2.0.r900.g38b376c64"),
+        ):
+            self.publish(channel, f"agentv-{live}-x86_64", b"newer")
+            before = self.keys()
+            self.log.write_text("")
+            iso, names = self.named(channel, f"agentv-{older}-x86_64", b"older")
+            result = self.run_publish("upload", channel, str(iso), str(names))
+            self.assertNotEqual(result.returncode, 0, f"{channel}: {older} over {live}")
+            self.assertIn(f"is {live}, and {older} is older", result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(self.calls("s3 cp"), [])
+            self.assertEqual(self.pointer(channel)["version"], live)
+            self.assertEqual(self.keys(), before)
+            # And so the cleanup has nothing of the newer ISO to remove.
+            self.assertEqual(self.run_publish("clean", channel).returncode, 0)
+            self.assertEqual(self.keys(), before)
+            for key in before:
+                (self.bucket / key).unlink()
+
+    def test_going_back_is_a_run_that_says_so(self):
+        self.publish("stable", "agentv-1.0.1-x86_64", b"a bad one")
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"the one before")
+        result = self.run_publish("upload", "stable", str(iso), str(names), AGENTV_ISO_GO_BACK="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.pointer("stable")["version"], "1.0.0")
+        # Anything but "1" doesn't say so.
+        self.publish("stable", "agentv-1.0.2-x86_64", b"a newer one")
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"the one before")
+        for word in ("", "0", "true", "yes"):
+            result = self.run_publish("upload", "stable", str(iso), str(names), AGENTV_ISO_GO_BACK=word)
+            self.assertNotEqual(result.returncode, 0, word)
+        self.assertEqual(self.pointer("stable")["version"], "1.0.2")
+
+    def test_a_newer_version_moves_the_channel_as_before(self):
+        for channel, first, second in (
+            ("stable", "0.2.0", "1.0.0"),
+            ("rc", "1.0.0-rc1", "1.0.0-rc2"),
+            ("edge", "0.2.0.r532.g38b376c64", "0.2.0.r540.gabcdef012"),
+            # An edge build named by its day has no version to compare.
+            ("edge", "edge-2026.11.10-abc1234", "0.2.0.r1.gabcdef012"),
+            ("edge", "0.2.0.r540.gabcdef012", "edge-2026.11.10-abc1234"),
+        ):
+            self.publish(channel, f"agentv-{first}-x86_64", b"first")
+            self.publish(channel, f"agentv-{second}-x86_64", b"second")
+            self.assertEqual(self.pointer(channel)["version"], second)
+
     def test_upload_refuses_an_iso_that_isnt_the_checksums(self):
         iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"one")
         iso.write_bytes(b"something else")

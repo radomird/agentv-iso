@@ -46,6 +46,24 @@ fi
 trusted=$(ssh_guest "cut -d: -f1 /usr/share/pacman/keyrings/agentv-trusted | paste -sd' '" 2>/dev/null || true)
 check "AgenTV's keyring trusts the keys it should, and no other (it has: ${trusted:-none})" test "$trusted" = "$expected"
 check "agentv runs" ssh_guest "agentv version"
+# The box has the agentv package the ISO was built with, and says so. A
+# release's ISO is named after its version (agentv-1.0.0-x86_64.iso), so
+# what "agentv version" prints on a box installed from it has to be that
+# package's version. Checked wherever the packages the build read are still
+# beside this check: always in this repo's own ISO run, which is the one a
+# release tag starts. A job that was only handed the installed box doesn't
+# have them, and says it skipped this.
+carried=("$ROOT"/configs/airootfs/usr/share/agentv-iso/packages/agentv-[0-9]*-any.pkg.tar.zst)
+if [[ ${#carried[@]} == 1 && -f ${carried[0]} ]]; then
+  package=${carried[0]##*/agentv-}
+  package=${package%-any.pkg.tar.zst}
+  installed=$(ssh_guest "pacman -Q agentv" | cut -d' ' -f2)
+  check "the box has the agentv the ISO was built with ($package, and it has ${installed:-none})" test "$installed" = "$package"
+  said=$(ssh_guest "agentv version" | head -n 1 | cut -d' ' -f2)
+  check "and agentv version says so (${package%-*}, and it says ${said:-nothing})" test "$said" = "${package%-*}"
+else
+  log "The packages the ISO was built with aren't here, so the box's agentv isn't compared with them"
+fi
 # AgenTV's repository takes its package list only with the signature. A box
 # straight from the ISO has no list yet, and one that has refreshed has both.
 # A list alone would make pacman refuse every install that doesn't refresh.

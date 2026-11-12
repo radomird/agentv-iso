@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# agentv:summary=Write a release's notes for its ISO: the download, the checksum and how to check it
+# agentv:args=block <iso.sha256> <url> | into <iso.sha256> <url> <notes> | candidate <iso.sha256> <url>
+
+# The ISO lives in AgenTV's bucket, and the release's own page here is
+# where people find it. So once an ISO is published, its release's notes
+# get the download link, the checksum, and the lines that check a download
+# against AgenTV's key. The checksum on that page is a second place for it,
+# one the bucket's keys can't change.
+#
+#   block <iso.sha256> <url>
+#       Prints that part alone, between two marker lines.
+#   into <iso.sha256> <url> <notes>
+#       Prints the notes in <notes> with that part added at the end. The
+#       part an earlier publish put there is replaced, and so are the two
+#       lines releases up to 0.2.0 had instead.
+#   candidate <iso.sha256> <url>
+#       Prints whole notes for a release candidate's pre-release, when
+#       nobody has written any: what a candidate is, that a TV installed
+#       from it follows edge, and that part. With AGENTV_RUN_URL, a link to
+#       the run that built and checked the ISO.
+#
+# <iso.sha256> is the checksum file the publish signed, and <url> is where
+# the ISO is. The lines that check the signature are only there when the
+# signature is: <iso.sha256>.sig beside the checksum file. The key's
+# fingerprint is the one this repo pins, and the owner of agentv-pkgs comes
+# from AGENTV_OWNER. It prints, and changes nothing.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+START='<!-- iso -->'
+END='<!-- /iso -->'
+
+usage() {
+  echo "usage: agentv-iso-notes block <iso.sha256> <url> | into <iso.sha256> <url> <notes> | candidate <iso.sha256> <url>" >&2
+  exit 2
+}
+
+(( $# >= 3 )) || usage
+mode=$1 sum=$2 url=$3
+
+[[ -f $sum && $(wc -l <"$sum") == 1 ]] || { echo "agentv-iso-notes: $sum isn't one ISO's checksum file" >&2; exit 1; }
+read -r hash file <"$sum"
+file=${file#\*}
+if [[ ! $hash =~ ^[0-9a-f]{64}$ || ! $file =~ ^agentv-[A-Za-z0-9.]+(-[A-Za-z0-9.]+)*-x86_64\.iso$ ]]; then
+  echo "agentv-iso-notes: $sum isn't an AgenTV ISO's checksum" >&2
+  exit 1
+fi
+if [[ ! $url =~ ^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+)*/$file$ ]]; then
+  echo "agentv-iso-notes: $url isn't where $file would be" >&2
+  exit 1
+fi
+version=${file#agentv-}
+version=${version%-x86_64.iso}
+
+block() {
+  local pinned
+  echo "$START"
+  echo "Download the ISO: [$file]($url)"
+  echo
+  echo "SHA-256 of the ISO: \`$hash\`"
+  echo
+  if [[ -s $sum.sig ]]; then
+    : "${AGENTV_OWNER:?set AGENTV_OWNER to the GitHub owner of agentv-pkgs}"
+    pinned=$(tr -d '[:space:]' <"$ROOT/configs/airootfs/usr/share/agentv-iso/key-fingerprint" | sed 's/..../& /g; s/ $//')
+    echo "To check your download, run this in the folder with the ISO:"
+    echo
+    echo '```'
+    echo "curl -LO $url.sha256"
+    echo "curl -LO $url.sha256.sig"
+    echo "curl -LO https://raw.githubusercontent.com/$AGENTV_OWNER/agentv-pkgs/main/agentv-keyring/agentv.gpg"
+    echo "gpg --import agentv.gpg"
+    echo "gpg --verify $file.sha256.sig $file.sha256"
+    echo "sha256sum -c $file.sha256"
+    echo '```'
+    echo
+    echo "\`gpg --verify\` should say \"Good signature\", from the key \`$pinned\`. It also warns that you haven't told it to trust the key, and that's fine. \`sha256sum\` should say the ISO is OK."
+  else
+    echo "To check your download, run this in the folder with the ISO:"
+    echo
+    echo '```'
+    echo "curl -LO $url.sha256"
+    echo "sha256sum -c $file.sha256"
+    echo '```'
+    echo
+    echo "\`sha256sum\` should say the ISO is OK. This checksum isn't signed yet."
+  fi
+  echo "$END"
+}
+
+case $mode in
+  block)
+    (( $# == 3 )) || usage
+    block
+    ;;
+  into)
+    (( $# == 4 )) || usage
+    notes=$4
+    [[ -f $notes ]] || { echo "agentv-iso-notes: no notes at $notes" >&2; exit 1; }
+    # Without the part an earlier publish added, and the two lines the
+    # releases before it had. The shell drops the blank lines left at the
+    # end.
+    kept=$(awk -v start="$START" -v end="$END" '
+      $0 == start { inside = 1; next }
+      $0 == end { inside = 0; next }
+      inside { next }
+      /^Download the ISO: / || /^SHA-256 of the ISO: / { next }
+      { print }
+    ' "$notes")
+    if [[ -n $kept ]]; then
+      printf '%s\n\n' "$kept"
+    fi
+    block
+    ;;
+  candidate)
+    (( $# == 3 )) || usage
+    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)-rc[0-9]+$ ]] || { echo "agentv-iso-notes: $version isn't a release candidate's version" >&2; exit 1; }
+    release=${BASH_REMATCH[1]}
+    echo "AgenTV $version's installer, powered by Omarchy. It's a release candidate: what $release will be, unless trying it at home turns something up."
+    echo
+    echo "A TV installed from it gets every new build as it's made, not only the releases. To move it to the releases, run \`agentv channel stable\` on it, and then \`agentv update\`."
+    echo
+    if [[ -n ${AGENTV_RUN_URL:-} ]]; then
+      echo "[This tag's run]($AGENTV_RUN_URL) built it, installed it in a VM, booted it and ran its checks on it."
+      echo
+    fi
+    block
+    ;;
+  *) usage ;;
+esac

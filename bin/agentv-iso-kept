@@ -8,14 +8,19 @@
 # is one a channel is meant to get:
 #
 #   stable, rc  agentv-iso's ISO workflow, started by the push of a release
-#               tag (v1.0.0 for stable, v1.0.0-rc1 for rc), with the tagged
-#               commit on the agentv branch, and the ISO named after that
-#               tag's version
+#               tag (agentv-v1.0.0 for stable, agentv-v1.0.0-rc1 for rc, and
+#               v0.2.0 for a 0.x release: bin/agentv-iso-tag has the rule),
+#               with the tagged commit on the agentv branch, the whole run
+#               passed, and the ISO named after that tag's version
 #   edge        agentv-os's Nightly workflow, started by the schedule on the
-#               agentv branch, and the ISO named the way edge's are
+#               agentv branch, the ISO named the way edge's are, and the
+#               edge leg passed (bin/agentv-iso-passed). The night as a
+#               whole can have failed: its stable leg is another matter.
 #
-# Either way the run has to be the repo's own, finished and passed, and it
-# has to still have the ISO under that name.
+# Either way the run has to be the repo's own and finished, it has to still
+# have the ISO under that name, and that ISO has to be the only one it has.
+# A run that was started again from the top can have kept one each time,
+# and then nothing says which one the checks were for.
 #
 # A run started by hand never counts. It can build another branch or commit
 # than the one it runs on, and the run's record doesn't say which it built.
@@ -29,6 +34,7 @@ set -euo pipefail
 channel=$1 repo=$2 run=$3 name=$4
 owner="${GITHUB_REPOSITORY_OWNER:?}"
 BRANCH=agentv
+BIN=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 stop() {
   echo "::error::$*" >&2
@@ -54,8 +60,8 @@ conclusion=$(field .conclusion)
 
 [[ $made_in == "$owner/$repo" && $code_from == "$owner/$repo" ]] || stop "Run $run isn't $repo's own."
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || stop "Run $run doesn't say which commit it ran on."
-[[ $status == "completed" && $conclusion == "success" ]] ||
-  stop "Run $run didn't pass (${status:-no status}, ${conclusion:-no conclusion}). Only an ISO from a run that passed is published."
+didnt_pass="Run $run didn't pass (${status:-no status}, ${conclusion:-no conclusion}). Only an ISO from a run that passed is published."
+[[ $status == "completed" ]] || stop "$didnt_pass"
 
 case $channel in
   stable | rc)
@@ -63,13 +69,16 @@ case $channel in
       stop "A $channel ISO comes from agentv-iso's ISO workflow, and run $run is $repo's ${workflow:-(no workflow)}."
     [[ $event == "push" ]] ||
       stop "A $channel ISO comes from the run a release tag's push started, and run $run was started by ${event:-something else}."
+    [[ $conclusion == "success" ]] || stop "$didnt_pass"
+    # Which channel and version the tag is, by the one rule for tags.
+    read -r kind version < <("$BIN/agentv-iso-tag" "$ref" 2>/dev/null) || kind=""
     if [[ $channel == "stable" ]]; then
-      [[ $ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || stop "Run $run ran on \`$ref\`, which isn't a release tag (v1.0.0)."
+      [[ $kind == "stable" ]] || stop "Run $run ran on \`$ref\`, which isn't a release tag (agentv-v1.0.0)."
     else
-      [[ $ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]] || stop "Run $run ran on \`$ref\`, which isn't a release candidate's tag (v1.0.0-rc1)."
+      [[ $kind == "rc" ]] || stop "Run $run ran on \`$ref\`, which isn't a release candidate's tag (agentv-v1.0.0-rc1)."
     fi
-    [[ $name == "agentv-${ref#v}-x86_64" ]] ||
-      stop "Run $run built $ref, so its ISO is agentv-${ref#v}-x86_64, not $name."
+    [[ $name == "agentv-$version-x86_64" ]] ||
+      stop "Run $run built $ref, so its ISO is agentv-$version-x86_64, not $name."
     # The tag's name isn't enough: the commit it was on has to be one the
     # agentv branch has.
     reach=$(gh api "repos/$owner/$repo/compare/$commit...$BRANCH" | jq -r '.status // empty') ||
@@ -84,11 +93,23 @@ case $channel in
       stop "An edge ISO comes from a night the schedule started on $BRANCH, and run $run was started by ${event:-something else} on \`$ref\`."
     [[ $name =~ ^agentv-(edge-[0-9.]+-[0-9a-f]{7}|[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]+)-x86_64$ ]] ||
       stop "$name isn't an edge ISO's name, such as agentv-0.2.0.r422.g155320d30-x86_64."
+    # The leg that made the ISO has to have passed, on the run's latest
+    # try. A night whose stable leg failed can still have a good edge ISO.
+    if [[ $conclusion != "success" ]]; then
+      jobs=$(gh api --paginate "repos/$owner/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" | jq -c '.jobs[]') ||
+        stop "Couldn't read run $run's jobs."
+      passed=$("$BIN/agentv-iso-passed" edge <<<"$jobs") || stop "$didnt_pass ${passed:-The jobs of that run could not be read.}"
+    fi
     ;;
 esac
 
 kept=$(gh api --paginate "repos/$owner/$repo/actions/runs/$run/artifacts?per_page=100" |
   jq -r '.artifacts[] | select(.expired == false) | .name') || stop "Couldn't list what run $run kept."
 grep -qxF -- "$name" <<<"$kept" || stop "Run $run has no ISO called $name. It kept none, or it's gone by now."
+# One ISO, and it's this one. A run started again from the top keeps what
+# each try made, and the checks that passed were the last try's.
+isos=$(grep -E '^agentv-.+-x86_64$' <<<"$kept" | sort -u)
+[[ $isos == "$name" ]] ||
+  stop "Run $run kept more than one ISO ($(paste -sd' ' <<<"$isos")), so it isn't known which one its checks passed for. None is published from it."
 
 echo "\`$name\` is the ISO $repo's run $run kept: ${workflow##*/}, started by $event on \`$ref\` (${commit::7}), and it passed."

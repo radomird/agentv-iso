@@ -109,7 +109,7 @@ check "and Omarchy's background is the theme's own picture" until_true 30 backgr
 # omarchy-theme-set is done, a few seconds after the desktop shows it.
 looks() {
   ssh_guest "curl -fsS http://127.0.0.1:3000/api/themes" >"$RUN_DIR/themes.json" 2>&1 &&
-    jq -e '.current == "calm-forest" and ([.themes[] | select(.note == "made by your agent") | .id] == ["calm-forest"])' "$RUN_DIR/themes.json"
+    jq -e '.current == "calm-forest" and ([.themes[] | select(.note == "Made by you") | .id] == ["calm-forest"])' "$RUN_DIR/themes.json"
 }
 check "Look lists it after Omarchy's own, made by your agent" until_true 30 looks
 sleep 2
