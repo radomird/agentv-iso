@@ -60,7 +60,7 @@ check "the TV says to set it up from the phone (OCR)" wait_for_screen "from your
 capture_console "success-T1.4-home-code"
 home_page=$(ssh_live_root "curl -s --max-time 10 http://10.0.2.15/" 2>/dev/null || true)
 check "a phone on the home network gets the page, but not the token" \
-  bash -c '[[ $1 == *"erase and install"* && $1 == *"const TOKEN = \"\""* && $1 != *"$2"* ]]' _ "$home_page" "$token"
+  bash -c '[[ $1 == *"Erase and install"* && $1 == *"const TOKEN = \"\""* && $1 != *"$2"* ]]' _ "$home_page" "$token"
 home_post() {
   ssh_live_root "curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Content-Type: application/json' -d '$1' http://10.0.2.15/api/first/install" 2>/dev/null || true
 }
