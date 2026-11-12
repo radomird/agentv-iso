@@ -127,17 +127,17 @@ check "home takes over${took:+ (after $took s)}" test -n "$took"
 guest "OMARCHY_PATH=/usr/share/omarchy PATH=/usr/share/omarchy/bin:\$PATH omarchy-theme-set gruvbox" >>"$RUN_DIR/install.log" 2>&1 || true
 check "Omarchy's desktop moves on to gruvbox, and so does the TV" until_json /api/themes '.current == "gruvbox"' 30
 
-# Settings → Look, at aurora with the TV's keys: into the list, up to its
-# first row, which is Tokyo Night, then right, to aurora. That's Look as it
-# was before the looks, so the looks are switched off for it, as any box can
-# switch them off. The looks' own Themes and backgrounds is checked in a
-# browser and on the NUC.
+# Settings → Appearance → Theme, at aurora with the TV's keys: into the list,
+# up to its first row, which is Tokyo Night, then right, to aurora. That's the
+# theme list as it was before the looks, so the looks are switched off for
+# it, as any box can switch them off. The looks' own Appearance is checked in
+# a browser and on the NUC.
 guest "agentv feature off looks" >>"$RUN_DIR/input.log" 2>&1 || true
-check "the looks are off for Settings → Look" until_json /api/features '.looks == false' 10
-guest "agentv screen settings look" >>"$RUN_DIR/input.log" 2>&1 || true
+check "the looks are off for Settings → Appearance" until_json /api/features '.looks == false' 10
+guest "agentv screen settings theme" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 keys right up up up up up up right
-# Aurora's own box in Settings → Look: the list's first row, on the right,
+# Aurora's own box in the theme list: its first row, on the right,
 # since it sorts after Tokyo Night. Tesseract reads a name in the list only
 # on its own: the colour swatches beside each one throw a whole screen's
 # reading off, in dark themes and light. It reads JetBrains Mono's u as a v
@@ -170,7 +170,7 @@ aurora_box() {
   done
   return 1
 }
-check "Settings → Look shows aurora (OCR)" aurora_box 20
+check "Settings → Appearance → Theme shows aurora (OCR)" aurora_box 20
 capture_console "success-S5.7-settings"
 
 # Enter, timed on the box from the key to the TV's colours and Omarchy's

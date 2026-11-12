@@ -82,7 +82,7 @@ asking=$!
 wait_pad "success-pin-asked-again" 30 || true
 guest "agentv input key 0 0 0 0" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
-check "S4.5 a wrong PIN is refused on the pad (OCR)" says "success-pin-wrong" "not the pin"
+check "S4.5 a wrong PIN is refused on the pad (OCR)" says "success-pin-wrong" "wrong pin"
 guest "agentv input key 4 8 2 6" >>"$RUN_DIR/input.log" 2>&1 || true
 wait "$asking" || true
 check "the right PIN on the pad lets agentv-pin-check through" grep -q "exit=0" "$RUN_DIR/check-right.log"
