@@ -127,7 +127,7 @@
   async function send(path, disk) {
     // The same line whether the TV said no without a reason or didn't
     // answer at all, in place of the browser's own words for it.
-    const sorry = "Couldn't reach your TV. Try again.";
+    const sorry = "Couldn't reach your TV";
     let response;
     try {
       response = await fetch(path, {
