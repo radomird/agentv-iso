@@ -95,7 +95,7 @@ voice() {
 voice >"$RUN_DIR/voice-new.json"
 before=$(voice | jq -r '.last.clip // 0')
 say_it first
-check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/first.json"
+check "S7.3 a sentence that can't be routed is i didn't get that" jq -e '.said.outcome.say == "Didn'"'"'t get that"' "$RUN_DIR/first.json"
 
 if [[ $kind == "none" ]]; then
   check "T17.2 the daemon says the TV has no voice of its own" jq -e '.own == "missing" and .by == null' "$RUN_DIR/voice-new.json"
@@ -104,7 +104,7 @@ if [[ $kind == "none" ]]; then
   cat "$RUN_DIR/voice.json"
   check "T17.2 with no voice the answer is only shown: no clip is made" jq -e '.last == null and .by == null' "$RUN_DIR/voice.json"
   say_it second
-  check "T17.2 the next answer comes the same way" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/second.json"
+  check "T17.2 the next answer comes the same way" jq -e '.said.outcome.say == "Didn'"'"'t get that"' "$RUN_DIR/second.json"
 else
   check "the daemon has the TV's own voice ready on a new box" jq -e '.own == "ready" and .by == "own"' "$RUN_DIR/voice-new.json"
   started=$SECONDS
@@ -272,7 +272,7 @@ OLD
   voice >"$RUN_DIR/voice-after.json"
   check "T17.2 the daemon has no voice of its own again" jq -e '.own == "missing" and .by == null' "$RUN_DIR/voice-after.json"
   say_it after
-  check "T17.2 an answer still shows, and isn't said" jq -e '.said.outcome.say == "i didn'"'"'t get that"' "$RUN_DIR/after.json"
+  check "T17.2 an answer still shows, and isn't said" jq -e '.said.outcome.say == "Didn'"'"'t get that"' "$RUN_DIR/after.json"
   sleep 3
   voice >"$RUN_DIR/voice-after-say.json"
   check "T17.2 no clip is made for it" jq -e '.last == null' "$RUN_DIR/voice-after-say.json"

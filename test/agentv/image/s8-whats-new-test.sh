@@ -165,7 +165,7 @@ check "S8.1 with TMDB's and JustWatch's credit under it (OCR)" grep -Eqi "justwa
 api POST /api/whats-new/episode '{"query":"copper hill"}' episode
 # shellcheck disable=SC2016 # $next is jq's own variable
 check "S8.2 a new episode of a running show is yes, with the next air date" \
-  jq -e --arg next "$next" '.answer.yes == true and .answer.next.date == $next and (.answer.say | startswith("yes: copper hill s3 e1 came out"))' "$RUN_DIR/episode.json"
+  jq -e --arg next "$next" '.answer.yes == true and .answer.next.date == $next and (.answer.say | startswith("Yes, Copper Hill S3 E1 came out"))' "$RUN_DIR/episode.json"
 
 # --- Both from a sentence, through a stand-in for Anthropic's API --------------------
 
@@ -193,15 +193,15 @@ check "a key for claude is kept for the router" jq -e '.set == true and .provide
 sleep 3
 api POST /api/say '{"sentence":"what'"'"'s new this week"}' said-new
 check "S8.1 what's new from a sentence says this week's top three and offers them" \
-  jq -e '.said.outcome.kind == "choose" and .said.outcome.say == "new this week: night train, copper hill, season 3 and the long field" and ([.said.outcome.candidates[].name] == ["Kino", "Lumen", "Kino"])' "$RUN_DIR/said-new.json"
+  jq -e '.said.outcome.kind == "choose" and .said.outcome.say == "New this week: Night Train, Copper Hill, season 3 and The Long Field" and ([.said.outcome.candidates[].name] == ["Kino", "Lumen", "Kino"])' "$RUN_DIR/said-new.json"
 api POST /api/say '{"sentence":"is there a new episode of copper hill"}' said-episode
 check "S8.2 a new episode from a sentence is told, yes with the next air date" \
-  jq -e '.said.outcome.kind == "told" and (.said.outcome.say | startswith("yes: copper hill s3 e1 came out")) and (.said.outcome.say | contains("the next is s3 e2"))' "$RUN_DIR/said-episode.json"
+  jq -e '.said.outcome.kind == "told" and (.said.outcome.say | startswith("Yes, Copper Hill S3 E1 came out")) and (.said.outcome.say | contains("The next is S3 E2"))' "$RUN_DIR/said-episode.json"
 
 guest "agentv selftest S8.1 S8.2 --show 'Copper Hill'" >"$RUN_DIR/selftest.log" 2>&1 || true
 cat "$RUN_DIR/selftest.log"
 check "agentv selftest S8.1 passes" grep -q '^pass S8.1 4 titles new on Kino, Lumen in NL' "$RUN_DIR/selftest.log"
-check "agentv selftest S8.2 passes" grep -q '^pass S8.2 yes: copper hill s3 e1 came out' "$RUN_DIR/selftest.log"
+check "agentv selftest S8.2 passes" grep -q '^pass S8.2 Yes, Copper Hill S3 E1 came out' "$RUN_DIR/selftest.log"
 
 ssh_sudo "journalctl -b --no-pager -u agentv-daemon -u agentv-router -u agentv-key" >"$RUN_DIR/journal.log" 2>&1 || true
 not_logged() {
