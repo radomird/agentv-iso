@@ -180,7 +180,7 @@ check "ADR-042 add an app lists the official app that isn't on the box, from the
 
 # On the TV, with its keys: Apps, then add an app, then the stand-in game.
 guest "agentv screen apps" >>"$RUN_DIR/screen.log" 2>&1 || true
-check "ADR-042 Apps has add an app for an adult (OCR)" ocr_finds success-add-app-apps "add an|more apps" 30
+check "ADR-042 Apps has add an app for an adult (OCR)" ocr_finds success-add-app-apps "add an" 30
 capture_console "success-add-app-apps"
 guest "agentv screen apps add" >>"$RUN_DIR/screen.log" 2>&1 || true
 check "ADR-042 add an app shows the stand-in game, with its line (OCR)" ocr_finds success-add-app-list "stand-in game" 30
@@ -216,7 +216,7 @@ guest "agentv screen apps" >>"$RUN_DIR/screen.log" 2>&1 || true
 sleep 3
 ocr_finds success-add-app-child-apps "apps" 15 || true
 capture_console "success-add-app-child-apps"
-check "ADR-042 a child's profile has no add an app on Apps (OCR)" bash -c "! grep -Eqi 'add an|more apps' '$RUN_DIR/success-add-app-child-apps.txt'"
+check "ADR-042 a child's profile has no add an app on Apps (OCR)" bash -c "! grep -Eqi 'add an' '$RUN_DIR/success-add-app-child-apps.txt'"
 guest "agentv screen apps add" >>"$RUN_DIR/screen.log" 2>&1 || true
 sleep 3
 ocr_finds success-add-app-child-add "." 5 || true

@@ -4,7 +4,7 @@
 # install --local takes the app's folder, leaves out its fixtures, checks it
 # as a local app and installs it once an adult says yes. On an installed box:
 # with no PIN, --yes is the yes, and the app is in Apps on the TV within
-# seconds, made by your agent; its details' "on home" puts it on an arranged
+# seconds, made on this TV; its details' "On home" puts it on an arranged
 # home, and it opens from there. With the adult PIN set and no terminal, the
 # TV asks for the PIN, and only the PIN typed there installs it. A folder
 # that isn't a local app installs nothing, and agentv app remove takes the
@@ -69,7 +69,7 @@ maker() {
 # the TV.
 in_apps() {
   local started=$SECONDS
-  until [[ $(maker) == "made by your agent · on this tv only" ]]; do
+  until [[ $(maker) == "Made on this TV" ]]; do
     (( SECONDS - started < $1 )) || return 1
     sleep 0.5
   done
@@ -126,7 +126,7 @@ if (( FAILURES > before )); then
   log "What the box has in /var/lib/agentv/apps/$id:"
   cat "$listing"
 fi
-check "ADR-039 the TV has it in Apps within 10 s, made by your agent" in_apps 10
+check "ADR-039 the TV has it in Apps within 10 s, made on this TV" in_apps 10
 check "and it isn't on the arranged home yet" not_on_home
 
 # Its details' "on home" puts it on home, small in the first free cell.

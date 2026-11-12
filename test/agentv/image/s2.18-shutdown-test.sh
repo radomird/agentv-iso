@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Settings → Power → Shut down on an installed box (ADR-033, S2.18): the TV
-# opens Settings at Power, and keys choose Shut down and answer its question,
+# Settings → This TV → Shut down on an installed box (ADR-033, S2.18): the TV
+# opens Settings at This TV, and keys choose Shut down and answer its question,
 # as the remote would. It counts down 10 seconds, then the box turns off
 # through Omarchy's own command, and the VM is off within 20 s of choosing
 # Shut down, countdown included. When it takes longer, the box is started
@@ -30,7 +30,7 @@ for _ in $(seq 1 30); do
 done
 check "agentv screen settings opens Settings at Power" jq -e '.ok == true' "$RUN_DIR/settings.json"
 sleep 2
-# OK on Power goes into it, down to Shut down, and OK on it asks.
+# OK on This TV goes into it at Restart, down to Shut down, and OK on it asks.
 for key in enter down enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1
@@ -38,7 +38,8 @@ done
 sleep 1
 capture_console "success-shutdown-question"
 ocr_top "$RUN_DIR/success-shutdown-question.png" "$RUN_DIR/question.txt" || true
-check "Shut down asks first: shut down the box? (OCR)" grep -qi "shut down the box" "$RUN_DIR/question.txt"
+# The question's page: "tv power shutdown" over "shut down?".
+check "Shut down asks first: shut down? (OCR)" grep -Eqi "shut ?down" "$RUN_DIR/question.txt"
 
 # The answer starts the countdown.
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true

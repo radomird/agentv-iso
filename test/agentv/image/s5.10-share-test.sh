@@ -113,7 +113,7 @@ check "S5.10 the TV asks first, saying who sent what (OCR)" asks success-S5.10-n
 capture_console "success-S5.10-notice"
 key enter
 # Its own page, not the notice, which has the credit too.
-check "S5.10 Open shows the photo full screen, with its credit (OCR)" ocr_finds success-S5.10-photo "photo by the image check.*make it the background" 20
+check "S5.10 Open shows the photo full screen, with its credit (OCR)" ocr_finds success-S5.10-photo "photo by the image check.*use as background" 20
 capture_console "success-S5.10-photo"
 key enter
 # shellcheck disable=SC2016

@@ -171,10 +171,13 @@ ids=$(printf 'agentv.check-%s\n' "${APPS[@]}" | sort | jq -R . | jq -sc .)
 # shellcheck disable=SC2016 # $ids is jq's own
 check "T9.2 the starter pack is the six streaming apps in the index, and Streaming's own" \
   jq -e --argjson ids "$ids" '([.starter[].id] | sort) == $ids and .for == [] and .error == null' "$RUN_DIR/setup-apps.json"
-check "T9.2 the TV says the starter pack is ticked (OCR)" ocr_finds success-T9.2-apps "starter pack is ticked" 30
+# "The streaming apps are picked", or the line a release before the words
+# changed says.
+check "T9.2 the TV says the streaming apps are picked (OCR)" ocr_finds success-T9.2-apps "streaming apps are picked|starter pack is ticked" 30
 capture_console "success-T9.2-apps"
 
-# The focus starts on the pack, every app in it ticked: up to continue, and OK.
+# Every app in the pack is ticked, and the focus starts on continue, or on
+# the pack on a release before that: up reaches continue either way, and OK.
 for key in up enter; do
   guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
   sleep 1

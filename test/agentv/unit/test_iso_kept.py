@@ -1,7 +1,12 @@
 """bin/agentv-iso-kept: the run an ISO is taken from is looked at before the
 ISO is published. Which repo and workflow made it, what started it and on
-what, whether it passed, whether a release tag's commit is on agentv, and
-whether the ISO's name is the one that run was for.
+what, whether it passed, whether a release tag's commit is on agentv,
+whether the ISO's name is the one that run was for, and that it's the only
+ISO the run has.
+
+A release tag is agentv-v1.0.0, a candidate's agentv-v1.0.0-rc1, and a 0.x
+release was v0.2.0. No other v tag is AgenTV's. A night's edge ISO goes by
+its edge leg, not by the whole night.
 
 A stand-in for gh is first on PATH. It answers "gh api <path>" from a folder
 of files, one for each address, and writes down every call. Nothing here
@@ -83,16 +88,21 @@ class IsoKept(unittest.TestCase):
             {"artifacts": [{"name": name, "expired": False} for name in kept]},
         )
 
-    def a_tags_run(self, tag="v1.0.0", kept=None, on_agentv="ahead", **changes):
-        version = tag.removeprefix("v")
+    def a_tags_run(self, tag="agentv-v1.0.0", kept=None, on_agentv="ahead", **changes):
+        version = tag.removeprefix("agentv-").removeprefix("v")
         kept = [f"agentv-{version}-x86_64", f"agentv-{version}-x86_64.sha256"] if kept is None else kept
         record = {"path": ".github/workflows/iso.yml", "event": "push", "head_branch": tag, "head_sha": TAG_COMMIT, **changes}
         self.a_run("agentv-iso", 7, kept, **record)
         self.answer(f"repos/{OWNER}/agentv-iso/compare/{record['head_sha']}...agentv", {"status": on_agentv})
 
-    def a_night(self, kept=("agentv-0.2.0.r422.g155320d30-x86_64",), **changes):
+    def a_night(self, kept=("agentv-0.2.0.r422.g155320d30-x86_64",), jobs=None, **changes):
         record = {"path": ".github/workflows/nightly.yml", "event": "schedule", "head_branch": "agentv", "head_sha": NIGHT_COMMIT, **changes}
         self.a_run("agentv-os", 9, list(kept), **record)
+        answer = self.github / f"repos_{OWNER}_agentv-os_actions_runs_9_jobs_filter=latest&per_page=100"
+        if jobs is None:
+            answer.unlink(missing_ok=True)
+        else:
+            answer.write_text(json.dumps({"jobs": [{"name": name, "status": "completed", "conclusion": how} for name, how in jobs]}))
 
     def kept(self, channel, repo, run, name):
         return subprocess.run([str(KEPT), channel, repo, str(run), name], env=self.env, capture_output=True, text=True)
@@ -114,11 +124,30 @@ class IsoKept(unittest.TestCase):
         self.a_tags_run()
         said = self.passes("stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
         self.assertIn("agentv-1.0.0-x86_64", said)
-        self.assertIn("started by push on `v1.0.0`", said)
+        self.assertIn("started by push on `agentv-v1.0.0`", said)
 
     def test_a_release_candidates_run_is_rc(self):
-        self.a_tags_run("v1.0.0-rc2")
+        self.a_tags_run("agentv-v1.0.0-rc2")
         self.passes("rc", "agentv-iso", 7, "agentv-1.0.0-rc2-x86_64")
+
+    def test_a_0x_release_keeps_its_v_tag(self):
+        self.a_tags_run("v0.2.0")
+        self.passes("stable", "agentv-iso", 7, "agentv-0.2.0-x86_64")
+
+    def test_no_other_v_tag_is_a_release(self):
+        # From 1.0 on a tag says agentv. In agentv-os a v1 to v4 tag is
+        # Omarchy's, and the rule is the same here.
+        for tag in ("v1.0.0", "v4.5.0"):
+            self.a_tags_run(tag)
+            version = tag.removeprefix("v")
+            self.refused("isn't a release tag", "stable", "agentv-iso", 7, f"agentv-{version}-x86_64")
+        for tag in ("v1.0.0-rc1", "v0.3.0-rc1"):
+            self.a_tags_run(tag)
+            version = tag.removeprefix("v")
+            self.refused("isn't a release candidate's tag", "rc", "agentv-iso", 7, f"agentv-{version}-x86_64")
+        for tag in ("agentv-1.0.0", "agentv-v1.0", "agentv-v1.0.0-beta1", "agentv-v1.0.0x"):
+            self.a_tags_run(tag)
+            self.refused("isn't a release tag", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
 
     def test_a_tag_on_agentvs_newest_commit_counts(self):
         self.a_tags_run(on_agentv="identical")
@@ -132,7 +161,7 @@ class IsoKept(unittest.TestCase):
     def test_no_answer_about_the_tags_commit_is_refused(self):
         self.a_tags_run()
         (self.github / f"repos_{OWNER}_agentv-iso_compare_{TAG_COMMIT}...agentv").unlink()
-        self.refused("Couldn't ask whether agentv has v1.0.0's commit", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
+        self.refused("Couldn't ask whether agentv has agentv-v1.0.0's commit", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
 
     def test_a_run_started_by_hand_is_never_a_release(self):
         # On a tag too: it can build another ref than the one it runs on.
@@ -140,16 +169,19 @@ class IsoKept(unittest.TestCase):
         self.refused("was started by workflow_dispatch", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
 
     def test_the_tag_says_which_channel(self):
-        self.a_tags_run("v1.0.0-rc1")
+        self.a_tags_run("agentv-v1.0.0-rc1")
         self.refused("isn't a release tag", "stable", "agentv-iso", 7, "agentv-1.0.0-rc1-x86_64")
-        self.a_tags_run("v1.0.0")
+        self.a_tags_run("agentv-v1.0.0")
         self.refused("isn't a release candidate's tag", "rc", "agentv-iso", 7, "agentv-1.0.0-x86_64")
         self.a_tags_run("some-branch")
         self.refused("isn't a release tag", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
 
     def test_the_name_is_the_tags_version(self):
-        self.a_tags_run("v1.0.0", kept=["agentv-9.9.9-x86_64"])
+        self.a_tags_run("agentv-v1.0.0", kept=["agentv-9.9.9-x86_64"])
         self.refused("its ISO is agentv-1.0.0-x86_64, not agentv-9.9.9-x86_64", "stable", "agentv-iso", 7, "agentv-9.9.9-x86_64")
+        # The name carries the version, not the tag.
+        self.a_tags_run("agentv-v1.0.0", kept=["agentv-agentv-v1.0.0-x86_64"])
+        self.refused("its ISO is agentv-1.0.0-x86_64", "stable", "agentv-iso", 7, "agentv-agentv-v1.0.0-x86_64")
 
     def test_a_release_comes_from_the_iso_workflow_in_agentv_iso(self):
         self.a_tags_run(path=".github/workflows/other.yml")
@@ -193,8 +225,41 @@ class IsoKept(unittest.TestCase):
         for changes in ({"conclusion": "failure"}, {"conclusion": "cancelled"}, {"status": "in_progress", "conclusion": None}):
             self.a_tags_run(**changes)
             self.refused("didn't pass", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
+            # A night that isn't green, with no word on its jobs, is no better.
             self.a_night(**changes)
-            self.refused("didn't pass", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+            why = "didn't pass" if changes.get("status") else "Couldn't read run 9's jobs"
+            self.refused(why, "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    EDGE = "Install and test edge / "
+    STABLE = "Install and test stable / "
+
+    def test_a_nights_edge_iso_goes_by_its_edge_leg(self):
+        # The stable leg failed, so the night did. Edge passed every check.
+        passed = [(self.EDGE + "Get the box ready", "success"), (self.EDGE + "Checks 1 of 4", "success"), (self.EDGE + "Which image checks passed", "success")]
+        self.a_night(conclusion="failure", jobs=passed + [(self.STABLE + "Build the ISO, install it, boot it, check it", "failure")])
+        self.passes("edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_a_night_whose_edge_leg_failed_is_refused(self):
+        failed = [(self.EDGE + "Get the box ready", "success"), (self.EDGE + "Checks 1 of 4", "failure"), (self.EDGE + "Which image checks passed", "failure")]
+        self.a_night(conclusion="failure", jobs=failed)
+        self.refused("The edge leg didn't pass", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+        # Cancelled before its last job said every check passed.
+        self.a_night(conclusion="cancelled", jobs=[(self.EDGE + "Get the box ready", "success")])
+        self.refused("didn't pass", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+        # A night still running is never looked into.
+        self.a_night(status="in_progress", conclusion=None, jobs=[(self.EDGE + "Which image checks passed", "success")])
+        self.refused("didn't pass", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_a_run_with_more_than_one_iso_is_refused(self):
+        # Started again from the top, a run can have kept one each time.
+        two = ["agentv-0.2.0.r422.g155320d30-x86_64", "agentv-0.2.0.r430.gabcdef012-x86_64", "agentv-0.2.0.r422.g155320d30-x86_64.sha256"]
+        self.a_night(kept=two)
+        self.refused("kept more than one ISO", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+        self.a_tags_run(kept=["agentv-1.0.0-x86_64", "agentv-edge-abc1234-x86_64"])
+        self.refused("kept more than one ISO", "stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
+        # What isn't an ISO doesn't count.
+        self.a_tags_run(kept=["agentv-1.0.0-x86_64", "agentv-1.0.0-x86_64.sha256", "iso-test-7-1"])
+        self.passes("stable", "agentv-iso", 7, "agentv-1.0.0-x86_64")
 
     def test_a_run_from_another_repos_code_is_refused(self):
         self.a_tags_run(head_repository={"full_name": "someone-else/agentv-iso"})
@@ -262,11 +327,12 @@ class TheWorkflowAsksFirst(unittest.TestCase):
         # A pipe to the summary mustn't hide a refusal.
         self.assertIn("set -o pipefail", step)
 
-    def test_a_tags_run_and_a_run_by_hand_are_both_checked(self):
+    def test_every_way_it_starts_the_run_is_checked(self):
+        # A tag's run, a run named by hand, and the morning's night too.
         which = jobs()["which"]
         step = which[which.index("- name: Check the run that kept it"):]
         condition = re.search(r"^\s+if: (.+)$", step, re.M).group(1)
-        self.assertEqual(condition, "steps.which.outputs.publish == 'true' && github.event_name != 'schedule'")
+        self.assertEqual(condition, "steps.which.outputs.publish == 'true'")
 
     def test_every_job_with_a_key_waits_for_it(self):
         found = jobs()

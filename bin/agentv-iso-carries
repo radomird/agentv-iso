@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# agentv:summary=Check a release tag's ISO carries the packages that tag stands for
+# agentv:args=<tag> [<packages-dir>]
+
+# An ISO built for a release tag is named after the tag's version, and
+# that's the name people download. So before the long build, this checks
+# that the agentv package bin/agentv-iso-packages fetched is the one the
+# name promises:
+#
+#   a release, agentv-v1.0.0
+#       The package is 1.0.0, from the stable channel. Tagged before
+#       agentv-pkgs has published the release, the ISO would be called
+#       1.0.0 and install the release before it.
+#   a candidate, agentv-v1.0.0-rc1
+#       The package is edge's, which says the agentv-os commit it was built
+#       from, like 0.2.0.r540.g38b376c64. agentv-os has to have the same
+#       tag, on that commit. So a candidate is always a commit somebody
+#       tagged in both repos, and not whatever edge had moved on to by the
+#       time the ISO was built.
+#
+# It reads the package's version from its file name, and agentv-os's tag
+# with git. No keys. The owner comes from AGENTV_OWNER, as for
+# bin/agentv-iso-packages. AGENTV_OS_URL points at another agentv-os, for
+# the tests.
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+tag="${1:?usage: agentv-iso-carries <tag> [<packages-dir>]}"
+dir="${2:-$ROOT/configs/airootfs/usr/share/agentv-iso/packages}"
+
+stop() {
+  echo "::error::$*" >&2
+  exit 1
+}
+
+read -r channel version < <("$ROOT/bin/agentv-iso-tag" "$tag") || exit 1
+
+found=()
+for file in "$dir"/agentv-[0-9]*-any.pkg.tar.zst; do
+  [[ -f $file ]] || continue
+  name=${file##*/}
+  if [[ $name =~ ^agentv-(.+)-[0-9]+-any\.pkg\.tar\.zst$ ]]; then
+    found+=("${BASH_REMATCH[1]}")
+  fi
+done
+(( ${#found[@]} == 1 )) || stop "Expected one agentv package in $dir, found ${#found[@]}. Run bin/agentv-iso-packages first."
+package=${found[0]}
+
+if [[ $channel == "stable" ]]; then
+  [[ $package == "$version" ]] ||
+    stop "$tag is AgenTV $version, and the stable channel's package is agentv $package. So this ISO would be called $version and install $package. Wait until agentv-pkgs has published $version on stable, then run this again."
+  echo "The ISO for $tag carries agentv $package, the release itself."
+  exit 0
+fi
+
+# A candidate: edge's package, and the commit it names.
+[[ $package =~ ^[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g([0-9a-f]{7,40})$ ]] ||
+  stop "$tag is a candidate, which carries edge's package, and agentv $package doesn't say which agentv-os commit it's from."
+short=${BASH_REMATCH[1]}
+
+: "${AGENTV_OWNER:?set AGENTV_OWNER to the GitHub owner of agentv-os}"
+os=${AGENTV_OS_URL:-https://github.com/$AGENTV_OWNER/agentv-os.git}
+listed=$(git ls-remote "$os" "refs/tags/$tag" "refs/tags/$tag^{}") || stop "Couldn't list agentv-os's tags."
+# A tag with a message of its own is listed twice, and the line that ends
+# in ^{} has the commit.
+commit=$(awk -v tag="refs/tags/$tag" '$2 == tag "^{}" { peeled = $1 } $2 == tag { plain = $1 } END { print (peeled != "" ? peeled : plain) }' <<<"$listed")
+[[ $commit =~ ^[0-9a-f]{40}$ ]] ||
+  stop "agentv-os has no $tag tag. A candidate is tagged in agentv-os first, on the commit edge's package was built from (agentv $package is from $short), and then here."
+[[ ${commit:0:${#short}} == "$short" ]] ||
+  stop "agentv-os's $tag is on ${commit:0:${#short}}, and edge's package, agentv $package, was built from $short. So this ISO wouldn't be what was tagged. Edge has moved on, or the tag is on another commit: tag the commit edge is on, in both repos, as the next candidate."
+
+echo "The ISO for $tag carries agentv $package, built from the commit agentv-os tagged $tag (${commit:0:${#short}})."

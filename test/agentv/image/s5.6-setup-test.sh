@@ -75,7 +75,7 @@ else
   # which can be before OCR reads it: then the step after it is on the TV,
   # your box, where the TV is (ADR-055) on a release before it, or the AI
   # step on one before that.
-  check "getting ready is on the TV, or the step it moved on to (OCR)" ocr_finds success-S5.6-getting-ready "getting ready|your box|where is this tv|which ai do you use" 30
+  check "getting ready is on the TV, or the step it moved on to (OCR)" ocr_finds success-S5.6-getting-ready "getting ready|your setup|your box|another location|where is this tv|pick your ai|which ai do you use" 30
 fi
 # Said here, so a failed run's log has what the TV showed in its place.
 grep -Eqi "getting ready" "$RUN_DIR/success-S5.6-getting-ready.txt" 2>/dev/null ||
@@ -133,10 +133,11 @@ else
 fi
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup" >"$RUN_DIR/setup-next.json" 2>&1 || true
 next=$(jq -r '.setup.step // ""' "$RUN_DIR/setup-next.json")
-# Each step after getting ready has its own headline: your box says "here's
-# your box", where the TV is asks so (ADR-055), the AI provider's and the
-# goal's are "pick one", who watches says so.
-NEXT_TEXT="your box|where is this tv|pick the country|pick one|which ai|who watches|what is this tv for"
+# Each step after getting ready has its own words: your setup says "here's
+# your setup", the location offers "another location" or asks you to pick
+# yours (ADR-055), the AI's says "pick your AI", who's watching says so. The
+# rest are what a release before the words changed says.
+NEXT_TEXT="your setup|another location|pick your location|pick your ai|who.?s watching|what.?s it for|your box|where is this tv|pick the country|pick one|which ai|who watches|what is this tv for"
 check "the step after getting ready ($next) is on the TV (OCR)" ocr_finds success-S5.6-next "$NEXT_TEXT" 30
 capture_console "success-S5.6-next"
 

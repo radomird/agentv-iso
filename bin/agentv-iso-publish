@@ -39,6 +39,10 @@
 #       The ISO <channel>.json points at is never replaced: the same ISO
 #       again keeps its bytes and only gets its checksum and signature
 #       again, and a different ISO under that name is refused.
+#       A channel only moves forward: an ISO older than the one
+#       <channel>.json points at is refused, unless AGENTV_ISO_GO_BACK=1
+#       says going back is meant. And a <channel>.json that's there but
+#       doesn't name one of the channel's ISOs stops the upload.
 #   stale <channel>
 #       Prints what clean would remove, one key a line, and removes nothing.
 #   clean <channel>
@@ -109,6 +113,15 @@ r2() {
   endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
 }
 
+# Is version $1 older than $2? Versions sort the way sort -V sorts them:
+# 0.2.0 before 1.0.0, 1.0.0-rc2 before 1.0.0-rc10, 0.2.0.r532.g... before
+# 0.2.0.r540.g... and that before 1.0.0.r0.g... An edge build named by its
+# day and commit has no version to compare, so it's never called older.
+older() {
+  [[ $1 != "$2" && $1 != edge-* && $2 != edge-* ]] || return 1
+  [[ $(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1) == "$1" ]]
+}
+
 # Reads one ISO's checksum file into the caller's $hash and $file, or stops.
 read_sum() {
   local sum=$1
@@ -156,7 +169,7 @@ same_size() {
 }
 
 upload() {
-  local channel=$1 iso=$2 dir=$3 hash file version item live
+  local channel=$1 iso=$2 dir=$3 hash file version item live live_file live_version
   local -a sums files
   channel_ok "$channel"
   : "${ISO_URL:?set ISO_URL to the public address of the bucket}"
@@ -190,10 +203,29 @@ upload() {
   live=""
   if aws s3api get-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$PREFIX$channel.json" "$WORK/live.json" \
     >/dev/null 2>"$WORK/live.err"; then
-    if [[ $(jq -r 'if type == "object" then .file else "" end' "$WORK/live.json" 2>/dev/null || true) == "$file" ]]; then
+    # The file is there, so it has to say which ISO the channel is on. One
+    # that can't be read that way isn't "nothing published yet": it's not
+    # knowing what people download, and stale stops on it too.
+    live_file=$(jq -r 'if type == "object" and (.file | type) == "string" then .file else "" end' "$WORK/live.json" 2>/dev/null || true)
+    if ! channel_iso "$channel" "$live_file"; then
+      echo "agentv-iso-publish: the bucket's $PREFIX$channel.json doesn't name a $channel ISO, so it isn't known which ISO people download now, and nothing is uploaded. Look at the bucket first." >&2
+      exit 1
+    fi
+    if [[ $live_file == "$file" ]]; then
       live=$(jq -r '.sha256 | strings' "$WORK/live.json")
       if [[ $live != "$hash" ]]; then
         echo "agentv-iso-publish: $file is the $channel ISO people download now, with sha256 ${live:-(none)}, and this one's is $hash. A published ISO isn't replaced under the same name, so nothing is uploaded. Publish this one as a new version." >&2
+        exit 1
+      fi
+    else
+      # A channel only moves forward. An older release's run started again
+      # would otherwise put the channel back on it, and the cleanup would
+      # then remove the newer ISO. Going back on purpose is a run by hand
+      # that says so (AGENTV_ISO_GO_BACK=1).
+      live_version=${live_file#agentv-}
+      live_version=${live_version%-x86_64.iso}
+      if older "$version" "$live_version" && [[ ${AGENTV_ISO_GO_BACK:-} != "1" ]]; then
+        echo "agentv-iso-publish: the $channel ISO people download now is $live_version, and $version is older, so nothing is uploaded. A channel only moves forward. To go back on purpose, run the publish by hand and say so." >&2
         exit 1
       fi
     fi

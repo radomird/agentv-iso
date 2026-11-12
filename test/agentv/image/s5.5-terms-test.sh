@@ -58,7 +58,7 @@ guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 check "S5.5 picking Claude and a plan shows the terms for a plan" until_json /api/ai '.provider == "claude" and .path == "plan" and .accepted == null' 30
 check "S5.5 they're Anthropic's consumer terms, its usage policy and Claude Code's legal notes" \
   until_json /api/ai '[.offers.claude.terms.plan[].id] == ["anthropic-consumer-terms", "anthropic-usage-policy", "claude-code-legal"]' 10
-check "S5.5 the terms are on the TV (OCR)" ocr_finds success-S5.5-terms "consumer terms|the terms first" 30
+check "S5.5 the terms are on the TV (OCR)" ocr_finds success-S5.5-terms "consumer terms|first, the terms|the terms first" 30
 capture_console "success-S5.5-terms"
 sleep 20
 check "S5.5 nothing installs while they wait for an adult" until_json /api/ai '.cli == null' 5
