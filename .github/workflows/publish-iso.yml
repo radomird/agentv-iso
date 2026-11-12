@@ -146,8 +146,10 @@ jobs:
               # The second lock, which doesn't lean on that last job: a run
               # that was cancelled, or never got as far as taking its ISO
               # back, still has one. The edge leg has to have passed.
+              # No apostrophe inside the ${...:-...} below: bash would read
+              # it as the start of a quoted string, and stop this whole step.
               passed=$(gh api "repos/$OWNER/agentv-os/actions/runs/$run/jobs?filter=latest&per_page=100" --paginate --jq '.jobs[]' | bin/agentv-iso-passed edge) ||
-                skip "Nothing is published from agentv-os's newest nightly run ($run), though it kept an edge ISO. ${passed:-Its jobs couldn't be read.}"
+                skip "Nothing is published from agentv-os's newest nightly run ($run), though it kept an edge ISO. ${passed:-The jobs of that run could not be read.}"
               # Published already?
               version=${name#agentv-}
               version=${version%-x86_64}
