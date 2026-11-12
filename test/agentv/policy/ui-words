@@ -1,0 +1,19 @@
+# Words people on the couch never read (the agentv-copy skill's "Never say").
+# One perl pattern a line, matched without case. What to say instead is in the
+# comment after it.
+\bagents?\b                                 # your TV, or no noun at all
+\bdaemon\b                                  # AgenTV, or your TV
+\brecipes?\b                                # a game, an app
+\bbuilder\b                                 # your TV
+\b(?:the|this|your|a|my|that) box(?:es)?\b  # your TV, this TV
+\bproviders?\b                              # its name (Claude), or your AI
+\bsandbox(?:ed)?\b                          # safely
+\bmanifests?\b                              # (nothing: say what it means)
+\bsnapshots?\b                              # backup
+\bsafeguards?\b                             # extra safety checks
+\bambient\b                                 # screen saver
+\bcountr(?:y|ies)\b                         # location
+\btype (?:it )?here\b                       # an example in the field
+\x{21B5}                                    # a key in a button's words: Install now
+\besc\b                                     # a key in the words: Back is the remote's
+\bmount(?:ed|ing|s)?\b                      # Connecting…, Couldn't open that folder

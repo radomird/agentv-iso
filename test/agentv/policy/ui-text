@@ -1,0 +1,5 @@
+# Files with words people read on the USB stick and its phone page, which
+# bin/agentv-check holds to AgenTV's voice (ui-words). In customize.sh,
+# only the tips the installer shows.
+configs/airootfs/usr/share/agentv-iso/first-screen/
+configs/airootfs/usr/share/agentv-iso/customize.sh only:"agentv\.tip\.
