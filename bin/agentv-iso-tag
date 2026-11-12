@@ -29,17 +29,21 @@ usage() {
   exit 2
 }
 
-RELEASE='[0-9]+\.[0-9]+\.[0-9]+'
+# A number has no leading zero: agentv-v01.0.0 would be the same version
+# as agentv-v1.0.0 to pacman, and two tags can't be one release.
+N='(0|[1-9][0-9]*)'
+RELEASE="$N\\.$N\\.$N"
+RC='rc[1-9][0-9]*'
 
 if [[ ${1:-} == "--names" ]]; then
   (( $# == 2 )) || usage
   version=$2
-  if [[ ! $version =~ ^$RELEASE(-rc[0-9]+)?$ ]]; then
+  if [[ ! $version =~ ^$RELEASE(-$RC)?$ ]]; then
     echo "agentv-iso-tag: '$version' isn't a version, like 1.0.0 or 1.0.0-rc1" >&2
     exit 1
   fi
   echo "agentv-v$version"
-  if [[ $version =~ ^0\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ $version =~ ^0\.$N\.$N$ ]]; then
     echo "v$version"
   fi
   exit 0
@@ -48,9 +52,9 @@ fi
 (( $# == 1 )) || usage
 tag=$1
 
-if [[ $tag =~ ^agentv-v($RELEASE)$ || $tag =~ ^v(0\.[0-9]+\.[0-9]+)$ ]]; then
+if [[ $tag =~ ^agentv-v($RELEASE)$ || $tag =~ ^v(0\.$N\.$N)$ ]]; then
   echo "stable ${BASH_REMATCH[1]}"
-elif [[ $tag =~ ^agentv-v($RELEASE-rc[0-9]+)$ ]]; then
+elif [[ $tag =~ ^agentv-v($RELEASE-$RC)$ ]]; then
   echo "rc ${BASH_REMATCH[1]}"
 else
   echo "agentv-iso-tag: '$tag' isn't one of AgenTV's release tags. A release is agentv-v1.0.0, a candidate agentv-v1.0.0-rc1, and a 0.x release was v0.2.0." >&2

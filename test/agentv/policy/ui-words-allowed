@@ -1,0 +1,2 @@
+# Strings in the UI text that may use a word from ui-words, each with why.
+# A path, then a perl pattern the whole string matches (without case).

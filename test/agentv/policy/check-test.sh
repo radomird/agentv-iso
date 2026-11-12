@@ -205,6 +205,42 @@ output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a plain c
 pass "a plain check mark is not an emoji"
 reset_fork
 
+# The voice: the repo's own lists of UI files and of words, as each repo
+# keeps them.
+voice_lists() {
+  mkdir -p setup
+  printf 'setup/\n' >test/agentv/policy/ui-text
+  cp "$ROOT/test/agentv/policy/ui-words" test/agentv/policy/ui-words
+  printf '# none\n' >test/agentv/policy/ui-words-allowed
+}
+
+voice_lists
+printf 'line("Your agent is making it in the background");\n' >setup/make.ts
+expect_fail "a word the TV never says, in UI text, fails" "UI text is in AgenTV's voice"
+
+voice_lists
+printf 'h("button", {}, "\xe2\x86\xb5 Join");\n' >setup/join.ts
+expect_fail "a key in a button's words fails" "UI text is in AgenTV's voice"
+
+voice_lists
+printf 'line("Pick your country");\n' >setup/where.ts
+expect_fail "country, where people read location, fails" "UI text is in AgenTV's voice"
+
+voice_lists
+printf '// Asks the agent, through the daemon.\nh("div", { class: "agent tile" }, "Build your own");\nconst match = /the box didn.t answer/;\n' >setup/make.ts
+mkdir -p setup/tests
+printf 'assert.match(text, "your agent built it");\n' >setup/tests/make.test.ts
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "the words in a comment, a class name, a regex or a test pass" "$output"
+pass "the words in a comment, a class name, a regex or a test pass"
+reset_fork
+
+voice_lists
+printf 'line("Accept your AI provider\x27s terms");\n' >setup/terms.ts
+printf 'setup/terms.ts ^Accept your AI provider.s terms$\n' >test/agentv/policy/ui-words-allowed
+output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a string in ui-words-allowed passes" "$output"
+pass "a string in ui-words-allowed passes"
+reset_fork
+
 printf 'Just AgenTV.\n' >.github/README.md
 expect_fail "a README without Powered by Omarchy fails" "Omarchy's attribution is present"
 

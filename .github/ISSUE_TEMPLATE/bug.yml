@@ -29,7 +29,7 @@ body:
     attributes:
       label: AgenTV release
       description: The number in the ISO's file name.
-      placeholder: e.g. 0.2.0
+      placeholder: e.g. 1.0.0
     validations:
       required: true
 
