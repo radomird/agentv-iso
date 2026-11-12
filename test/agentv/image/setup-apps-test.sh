@@ -69,7 +69,7 @@ check "the official apps for photos come from the signed index, in the goal's or
 ssh_guest "curl -fsS http://127.0.0.1:3000/api/setup/apps" >"$RUN_DIR/setup-apps.json" 2>&1 || true
 log "the goal's apps: $(jq -c '[.for[].id]' "$RUN_DIR/setup-apps.json" 2>/dev/null)"
 check "Steam and the built-in Music are under more" jq -e '[.more[].id] | index("agentv.steam") != null and index("agentv.music") != null' "$RUN_DIR/setup-apps.json"
-check "the apps step is on the TV (OCR)" ocr_finds success-setup-apps "pick your apps|add your own" 30
+check "the apps step is on the TV (OCR)" ocr_finds success-setup-apps "pick your apps|build your own|add your own" 30
 capture_console "success-setup-apps"
 
 # The goal's second app ticked with the remote's keys, then continue, above
@@ -81,9 +81,10 @@ for key in right enter up enter; do
   sleep 1
 done
 # A server's app, such as Plex, then asks where its server is, from what
-# the box finds on the network. There's none in the VM, so "set it up
-# later", under "type an address on your phone", carries on.
-if ocr_finds setup-apps-server "set it up later" 15; then
+# the box finds on the network. There's none in the VM, so "Later", under
+# "Type its address", carries on. A release before the words changed says
+# "set it up later".
+if ocr_finds setup-apps-server "type its address|set it up later" 15; then
   capture_console "success-setup-apps-server"
   for key in down enter; do
     guest "agentv input key $key" >>"$RUN_DIR/input.log" 2>&1 || true
