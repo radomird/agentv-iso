@@ -77,6 +77,12 @@
   let picked = null;
   let installing = false;
   let away = 0;
+  // What decides the line under the disks: whether the TV's list has come
+  // once, whether the TV turned this phone's code down (a code from before
+  // it last started), and why the last tap didn't go through.
+  let heard = false;
+  let stale = false;
+  let failed = "";
 
   function steps(step) {
     const row = document.querySelector(".steps");
@@ -109,38 +115,50 @@
       return button;
     }));
     $("erase").hidden = disks.length === 0;
-    if (disks.length === 0 && !installing) $("error").textContent = "No disk found. Plug one in.";
     $("go").disabled = !picked || !TOKEN;
-    if (!TOKEN && !installing) $("error").textContent = "Scan the code on your TV to start";
+    // One line at most: what the page itself has to say, or else why the
+    // last tap didn't go through.
+    let line = failed;
+    if (heard && disks.length === 0) line = "No disk found. Plug one in.";
+    if (!TOKEN || stale) line = "Scan the code on your TV to start";
+    $("error").textContent = installing ? "" : line;
   }
 
   async function send(path, disk) {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ disk, token: TOKEN }),
-    });
+    // The same line whether the TV said no without a reason or didn't
+    // answer at all, in place of the browser's own words for it.
+    const sorry = "Couldn't reach your TV. Try again.";
+    let response;
+    try {
+      response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disk, token: TOKEN }),
+      });
+    } catch {
+      throw new Error(sorry);
+    }
     const answer = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(answer.error || "Couldn't reach your TV. Try again.");
+    if (!response.ok) throw new Error(answer.error || sorry);
   }
 
   async function pick(path) {
     picked = path;
-    $("error").textContent = "";
+    failed = "";
     draw();
     if (TOKEN) send("/api/first/pick", path).catch(() => {});
   }
 
   $("go").onclick = async () => {
     $("go").disabled = true;
+    failed = "";
     try {
       await send("/api/first/install", picked);
       installing = true;
-      draw();
     } catch (error) {
-      $("error").textContent = error.message;
-      $("go").disabled = false;
+      failed = error.message;
     }
+    draw();
   };
 
   // The TV's list, every two seconds. Once the box restarts, this page goes
@@ -155,6 +173,8 @@
       }
       const state = await response.json();
       away = 0;
+      heard = true;
+      stale = response.status === 403;
       disks = state.disks || [];
       if (!disks.some((d) => d.path === picked)) picked = state.selected || (disks[0] && disks[0].path) || null;
       if (state.step === 2) installing = true;
