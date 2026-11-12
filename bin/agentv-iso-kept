@@ -12,18 +12,23 @@
 #               v0.2.0 for a 0.x release: bin/agentv-iso-tag has the rule),
 #               with the tagged commit on the agentv branch, the whole run
 #               passed, and the ISO named after that tag's version
-#   edge        agentv-os's Nightly workflow, started by the schedule on the
-#               agentv branch, the ISO named the way edge's are, and the
-#               edge leg passed (bin/agentv-iso-passed). The night as a
-#               whole can have failed: its stable leg is another matter.
+#   edge        agentv-os's Nightly workflow on the agentv branch, the ISO
+#               named the way edge's are, and the edge leg passed
+#               (bin/agentv-iso-passed). The night as a whole can have
+#               failed: its stable leg is another matter. Started by the
+#               schedule, or by hand on a commit that has NIGHTLY_RULE:
+#               from that commit on, a night started by hand keeps an ISO
+#               only when nobody typed in an agentv-iso ref of their own,
+#               so it checked with what's merged, as a scheduled one does.
 #
 # Either way the run has to be the repo's own and finished, it has to still
 # have the ISO under that name, and that ISO has to be the only one it has.
 # A run that was started again from the top can have kept one each time,
 # and then nothing says which one the checks were for.
 #
-# A run started by hand never counts. It can build another branch or commit
-# than the one it runs on, and the run's record doesn't say which it built.
+# Any other run started by hand never counts. It can build another branch
+# or commit than the one it runs on, and the run's record doesn't say which
+# it built.
 #
 # It asks GitHub with gh, and needs no more than a token that can read both
 # repos' runs. The owner comes from GitHub's own context.
@@ -35,6 +40,10 @@ channel=$1 repo=$2 run=$3 name=$4
 owner="${GITHUB_REPOSITORY_OWNER:?}"
 BRANCH=agentv
 BIN=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# agentv-os's merge of the change that made a Nightly started by hand with
+# its own agentv-iso ref keep no ISO (nightly.yml: keep-iso only when the
+# checks input is empty). Before it, such a run kept one.
+NIGHTLY_RULE=98f46c5de20a1c42b19336d6d881e080b6ecec60
 
 stop() {
   echo "::error::$*" >&2
@@ -89,8 +98,17 @@ case $channel in
   edge)
     [[ $repo == "agentv-os" && $workflow == ".github/workflows/nightly.yml" ]] ||
       stop "An edge ISO comes from agentv-os's Nightly workflow, and run $run is $repo's ${workflow:-(no workflow)}. A run started by hand can build a branch that isn't merged, so its ISO isn't published."
-    [[ $event == "schedule" && $ref == "$BRANCH" ]] ||
-      stop "An edge ISO comes from a night the schedule started on $BRANCH, and run $run was started by ${event:-something else} on \`$ref\`."
+    [[ $ref == "$BRANCH" && $event =~ ^(schedule|workflow_dispatch)$ ]] ||
+      stop "An edge ISO comes from a night on $BRANCH, started by the schedule or by hand, and run $run was started by ${event:-something else} on \`$ref\`."
+    if [[ $event == "workflow_dispatch" ]]; then
+      # Started by hand: only a night whose own nightly.yml keeps no ISO
+      # when someone typed in an agentv-iso ref, that is one on a commit
+      # that has NIGHTLY_RULE.
+      has=$(gh api "repos/$owner/$repo/compare/$NIGHTLY_RULE...$commit" | jq -r '.status // empty') ||
+        stop "Couldn't ask whether run $run's commit ($commit) is one that keeps no ISO from a ref typed in by hand."
+      [[ $has =~ ^(ahead|identical)$ ]] ||
+        stop "Run $run was started by hand on $commit, from before a night started by hand stopped keeping an ISO when an agentv-iso ref is typed in. So it isn't known what its checks were, and its ISO isn't published."
+    fi
     [[ $name =~ ^agentv-(edge-[0-9.]+-[0-9a-f]{7}|[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]+)-x86_64$ ]] ||
       stop "$name isn't an edge ISO's name, such as agentv-0.2.0.r422.g155320d30-x86_64."
     # The leg that made the ISO has to have passed, on the run's latest
