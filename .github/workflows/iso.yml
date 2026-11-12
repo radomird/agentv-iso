@@ -316,11 +316,12 @@ jobs:
         run: |
           # A release tag's own run is named for the tag's version. Any
           # other run, one started by hand on a tag too, is named for the
-          # commit it built, which isn't always the one it runs on.
+          # packages it carries and the commit it built, which isn't always
+          # the one it runs on. Nothing publishes those.
           if [[ -n $RELEASE_TAG ]]; then
             name="agentv-$ISO_VERSION-x86_64"
           else
-            name="agentv-edge-$(git rev-parse HEAD | cut -c1-7)-x86_64"
+            name="agentv-$CHANNEL-$(git rev-parse HEAD | cut -c1-7)-x86_64"
           fi
           mv release/*.iso "release/$name.iso"
           (cd release && sha256sum "$name.iso" >"$name.iso.sha256")

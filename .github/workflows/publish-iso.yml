@@ -83,8 +83,13 @@ on:
 permissions:
   contents: read
 
+# GitHub keeps one run waiting in a group and cancels the one waiting
+# before it. So a release tag's publish, which comes once, has a group of
+# its own, and the morning's or one started by hand can't cancel it while
+# it waits. A publish only ever touches its own channel's files, and a tag
+# is a candidate's or a release's, never edge's.
 concurrency:
-  group: publish-iso
+  group: publish-iso-${{ github.event_name == 'workflow_run' && 'tag' || 'other' }}
   cancel-in-progress: false
 
 jobs:

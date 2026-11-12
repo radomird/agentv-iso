@@ -197,11 +197,43 @@ class IsoKept(unittest.TestCase):
         self.a_night(kept=["agentv-edge-2026.11.10-abc1234-x86_64"])
         self.passes("edge", "agentv-os", 9, "agentv-edge-2026.11.10-abc1234-x86_64")
 
-    def test_a_night_started_by_hand_or_on_another_branch_is_refused(self):
+    RULE = "98f46c5de20a1c42b19336d6d881e080b6ecec60"
+
+    def test_a_night_on_another_branch_is_refused(self):
+        for event in ("schedule", "workflow_dispatch"):
+            self.a_night(event=event, head_branch="some-branch")
+            self.refused("on `some-branch`", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+        self.a_night(event="push")
+        self.refused("was started by push", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_a_night_started_by_hand_after_the_rule_is_edge(self):
+        # From that commit on, a night started by hand keeps an ISO only
+        # when nobody typed in an agentv-iso ref.
+        for status in ("ahead", "identical"):
+            self.a_night(event="workflow_dispatch")
+            self.answer(f"repos/{OWNER}/agentv-os/compare/{self.RULE}...{NIGHT_COMMIT}", {"status": status})
+            self.passes("edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_a_night_started_by_hand_before_the_rule_is_refused(self):
+        # Then, one started with a branch of agentv-iso typed in kept its ISO.
+        for status in ("behind", "diverged"):
+            self.a_night(event="workflow_dispatch")
+            self.answer(f"repos/{OWNER}/agentv-os/compare/{self.RULE}...{NIGHT_COMMIT}", {"status": status})
+            self.refused("from before a night started by hand stopped keeping an ISO", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
         self.a_night(event="workflow_dispatch")
-        self.refused("was started by workflow_dispatch", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
-        self.a_night(head_branch="some-branch")
-        self.refused("on `some-branch`", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+        (self.github / f"repos_{OWNER}_agentv-os_compare_{self.RULE}...{NIGHT_COMMIT}").unlink()
+        self.refused("Couldn't ask whether run 9's commit", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_a_night_started_by_hand_still_needs_its_edge_leg(self):
+        failed = [("Install and test edge / Get the box ready", "success"), ("Install and test edge / Which image checks passed", "failure")]
+        self.a_night(event="workflow_dispatch", conclusion="failure", jobs=failed)
+        self.answer(f"repos/{OWNER}/agentv-os/compare/{self.RULE}...{NIGHT_COMMIT}", {"status": "ahead"})
+        self.refused("The edge leg didn't pass", "edge", "agentv-os", 9, "agentv-0.2.0.r422.g155320d30-x86_64")
+
+    def test_the_rule_is_agentv_os_merge_of_the_change(self):
+        # The commit is named, not guessed: it has to be a whole one.
+        text = KEPT.read_text()
+        self.assertIn(f"NIGHTLY_RULE={self.RULE}\n", text)
 
     def test_another_workflows_iso_is_never_edge(self):
         self.a_night(path=".github/workflows/image.yml", event="workflow_dispatch")
