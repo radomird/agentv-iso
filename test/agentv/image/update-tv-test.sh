@@ -130,7 +130,7 @@ check "S2.12 Install now starts the update" \
 sleep 5
 ocr_screen >"$RUN_DIR/success-update-tv-updating.txt" 2>/dev/null || true
 capture_console "success-update-tv-updating"
-check "S2.12 the TV shows the Updating screen (OCR)" grep -qi "updating to agentv" "$RUN_DIR/success-update-tv-updating.txt"
+check "S2.12 the TV shows the Updating screen (OCR)" grep -qiE "updating (to )?agentv" "$RUN_DIR/success-update-tv-updating.txt"
 
 # While it runs, the owner has no more sudo than before: no rule of AgenTV's
 # in /etc/sudoers.d at any moment, and sudo still asks the owner for a

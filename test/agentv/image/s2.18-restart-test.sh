@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Settings → Power → Restart on an installed box (ADR-033, S2.18): the TV
-# opens Settings at Power, and keys choose Restart and answer its question,
+# Settings → This TV → Restart on an installed box (ADR-033, S2.18): the TV
+# opens Settings at This TV, and keys choose Restart and answer its question,
 # as the remote would. The box restarts through Omarchy's own command and
 # comes back to home. The boot it left says nothing held it up: no stop job
 # waited, and it was down within seconds of Restart.
@@ -29,7 +29,9 @@ guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 capture_console "success-restart-question"
 ocr_top "$RUN_DIR/success-restart-question.png" "$RUN_DIR/question.txt" || true
-check "Restart asks first: restart the box? (OCR)" grep -qi "restart the box" "$RUN_DIR/question.txt"
+# The question's page: "tv power restart" over "restart?". Settings' own top
+# has neither, since Restart is further down its rows.
+check "Restart asks first: restart? (OCR)" grep -qi "restart" "$RUN_DIR/question.txt"
 
 # The answer: it goes at once.
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true

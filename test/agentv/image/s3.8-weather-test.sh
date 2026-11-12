@@ -24,16 +24,16 @@ tile() {
   ssh_guest "curl -fsS --max-time 10 http://127.0.0.1:3000/api/tile/agentv.weather/$1" 2>/dev/null || true
 }
 
-check "in UTC, the weather tile says to pick a city" test "$(tile s | jq -r '.tile.headline.label // ""')" = "no city yet"
+check "in UTC, the weather tile says to pick a city" test "$(tile s | jq -r '.tile.headline.label // ""')" = "No city yet"
 
 ssh_sudo "timedatectl set-timezone Europe/Oslo" >"$RUN_DIR/timezone.log" 2>&1 || true
-check "the box is in Oslo's time zone" test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/weather" | jq -r '.zone + " " + .name')" = "Europe/Oslo oslo"
+check "the box is in Oslo's time zone" test "$(ssh_guest "curl -fsS --max-time 3 http://127.0.0.1:3000/api/weather" | jq -r '.zone + " " + .name')" = "Europe/Oslo Oslo"
 
 # MET Norway, from the box: the small tile, then the medium and the large.
 until_label() {
   local started=$SECONDS
   while (( SECONDS - started < 60 )); do
-    [[ $(tile s | jq -r '.tile.headline.label // ""') == oslo* ]] && return 0
+    [[ $(tile s | jq -r '.tile.headline.label // ""') == Oslo* ]] && return 0
     sleep 3
   done
   return 1
