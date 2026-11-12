@@ -223,7 +223,7 @@ check "S2.14 the check after the update passed ($(jq -c '[.checks[] | select(.ok
 # The update broke the app, as one might, and the check runs again.
 ssh_sudo "echo 'export default {' >/var/lib/agentv/apps/local.clock/app.ts"
 ssh_sudo "agentv-update-after" >"$RUN_DIR/check-again.txt" 2>&1 || true
-check "S2.14 the check finds the app that won't load" grep -qx "not ok - Clock: Clock won't load" "$RUN_DIR/check-again.txt"
+check "S2.14 the check finds the app that won't open" grep -qx "not ok - Clock: Clock won't open" "$RUN_DIR/check-again.txt"
 
 screen_off() {
   ocr_screen >"$RUN_DIR/$1.txt" 2>/dev/null || true
