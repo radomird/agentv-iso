@@ -17,7 +17,9 @@ name: Publish ISO
 # It starts three ways. When the ISO workflow finishes a release tag's run,
 # it publishes that run's ISO as stable or rc. Every morning it looks for
 # the edge ISO the night's run in agentv-os kept, and publishes it when it's
-# a new one. And by hand, for any ISO a run kept.
+# a new one. And by hand, for an ISO one of those two kinds of run kept: a
+# release tag's, or a scheduled night's. Never one from a run started by
+# hand, which can build a branch that isn't merged.
 #
 # It always runs from the agentv branch, never from the tag or the branch
 # that built the ISO, so the build never has the bucket's keys or the
@@ -74,6 +76,10 @@ jobs:
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # To read the run a release tag or a run by hand takes the ISO from.
+      actions: read
     outputs:
       publish: ${{ steps.which.outputs.publish }}
       channel: ${{ steps.which.outputs.channel }}
@@ -169,6 +175,25 @@ jobs:
             echo "name=$name"
           } >>"$GITHUB_OUTPUT"
           say "Publishing \`$name\` from $repo's run $run as the $channel ISO."
+
+      # A release tag's run, and a run named by hand, are looked at before
+      # anything is fetched, signed or uploaded (bin/agentv-iso-kept): which
+      # repo and workflow made it, what started it and on what, whether it
+      # passed, and whether the ISO's name is the one that run was for. A
+      # release tag's commit has to be on agentv too.
+      # A scheduled night is asked about above, by its edge leg. The script
+      # is in the checkout this job starts with.
+      - name: Check the run that kept it
+        if: steps.which.outputs.publish == 'true' && github.event_name != 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ steps.which.outputs.channel }}
+          REPO: ${{ steps.which.outputs.repo }}
+          RUN_ID: ${{ steps.which.outputs.run-id }}
+          NAME: ${{ steps.which.outputs.name }}
+        run: |
+          set -o pipefail
+          bin/agentv-iso-kept "$CHANNEL" "$REPO" "$RUN_ID" "$NAME" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The checksum the build left beside its ISO, checked: it has to name an
   # ISO of this channel. The ISO keeps that name. No secrets here.

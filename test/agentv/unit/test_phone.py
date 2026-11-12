@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = ROOT / "configs/airootfs/usr/share/agentv-iso/first-screen"
@@ -186,6 +187,50 @@ class Page(unittest.TestCase):
                 self.assertFalse(phone_side.in_hotspot_network(address), address)
         finally:
             phone_side.ADDRESS = saved
+
+    def test_dnsmasq_hands_out_addresses_from_the_hotspots_own_network(self):
+        saved = phone_side.ADDRESS, phone_side.PREFIX
+        try:
+            for address, prefix, wanted in (
+                ("10.42.0.1", 24, "10.42.0.10,10.42.0.250,255.255.255.0"),
+                ("192.168.77.1", 24, "192.168.77.10,192.168.77.250,255.255.255.0"),
+                ("172.20.4.1", 22, "172.20.4.10,172.20.7.250,255.255.252.0"),
+                ("10.9.8.1", 28, "10.9.8.1,10.9.8.14,255.255.255.240"),
+            ):
+                phone_side.ADDRESS, phone_side.PREFIX = address, prefix
+                first, last, _ = phone_side.dhcp_range().split(",")
+                self.assertEqual(phone_side.dhcp_range(), wanted)
+                # What it hands out is what the page takes for a phone on the hotspot.
+                self.assertTrue(phone_side.in_hotspot_network(first), first)
+                self.assertTrue(phone_side.in_hotspot_network(last), last)
+        finally:
+            phone_side.ADDRESS, phone_side.PREFIX = saved
+
+    def test_the_hotspot_starts_dnsmasq_with_that_range(self):
+        # The access point's own start, with every command it runs stood in for.
+        started = []
+
+        class Started:
+            returncode = None
+
+            def __init__(self, args, **_):
+                started.append(args)
+
+            def poll(self):
+                return None
+
+        with (
+            mock.patch.object(phone_side, "ADDRESS", "192.168.77.1"),
+            mock.patch.object(phone_side, "NETWORKD", self.run_dir / "networkd" / "hotspot.network"),
+            mock.patch.object(phone_side, "netdev_of", lambda phy: "wlan0"),
+            mock.patch.object(phone_side, "run", lambda args, timeout=20: "type AP" if args[:2] == ["iw", "dev"] else ""),
+            mock.patch.object(phone_side.subprocess, "Popen", Started),
+            mock.patch.object(phone_side.time, "sleep", lambda seconds: None),
+        ):
+            self.assertTrue(phone_side.Hotspot().start("phy0"))
+        dnsmasq = next(args for args in started if args[0] == "dnsmasq")
+        self.assertIn("--dhcp-range=192.168.77.10,192.168.77.250,255.255.255.0,10m", dnsmasq)
+        self.assertEqual([arg for arg in dnsmasq if "10.42." in arg], [])
 
     def test_every_other_name_on_the_hotspot_goes_to_the_page(self):
         status, location, _ = self.ask("GET", "/hotspot-detect.html", host="captive.apple.com")

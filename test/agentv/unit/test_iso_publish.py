@@ -72,6 +72,8 @@ elif command == "s3api list-objects-v2":
             count = len(keys)
     print(json.dumps({"keys": keys or None, "truncated": truncated, "count": count}))
 elif command == "s3api get-object":
+    if os.environ.get("FAKE_GET_FAILS"):
+        sys.exit("An error occurred (InternalError)")
     path = bucket / flag("--key")
     if not path.is_file():
         sys.exit("An error occurred (NoSuchKey)")
@@ -110,7 +112,7 @@ class IsoPublish(unittest.TestCase):
             "ISO_URL": "https://downloads.example.invalid/",
         }
         for name in (
-            "FAKE_SHORT", "FAKE_CP_FAILS", "FAKE_LIST_FAILS", "FAKE_LIST_GARBAGE", "FAKE_LIST_WHOLE_BUCKET",
+            "FAKE_SHORT", "FAKE_CP_FAILS", "FAKE_GET_FAILS", "FAKE_LIST_FAILS", "FAKE_LIST_GARBAGE", "FAKE_LIST_WHOLE_BUCKET",
             "FAKE_LIST_TRUNCATED", "FAKE_LIST_HIDES", "FAKE_LIST_KEEPS_COUNT", "AGENTV_ISO_STALE_MAX",
         ):
             self.env.pop(name, None)
@@ -284,18 +286,72 @@ class IsoPublish(unittest.TestCase):
         self.assertNotIn("iso/stable.json", self.keys())
         self.assertEqual([call for call in self.calls("s3 cp") if call.endswith(".json")], [])
 
-    def test_publishing_the_same_version_again_replaces_it(self):
+    def test_a_different_iso_under_the_live_name_is_refused(self):
         self.publish("stable", "agentv-1.0.0-x86_64", b"one")
-        self.publish("stable", "agentv-1.0.0-x86_64", b"two")
-        self.assertEqual((self.bucket / "iso/agentv-1.0.0-x86_64.iso").read_bytes(), b"two")
-        self.assertEqual(self.pointer("stable")["sha256"], hashlib.sha256(b"two").hexdigest())
-        self.assertEqual(len(self.keys()), 4)
+        before = {key: (self.bucket / key).read_bytes() for key in self.keys()}
+        self.log.write_text("")
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"two")
+        result = self.run_publish("upload", "stable", str(iso), str(names))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("isn't replaced under the same name", result.stderr)
+        self.assertEqual(result.stdout, "")
+        # Nothing went up and nothing went away.
+        self.assertEqual({key: (self.bucket / key).read_bytes() for key in self.keys()}, before)
+        self.assertEqual(self.calls("s3 cp"), [])
+        self.assertEqual(self.deleted(), [])
+
+    def test_the_same_iso_again_keeps_the_live_bytes(self):
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one", signed=False)
+        self.assertNotIn("iso/agentv-1.0.0-x86_64.iso.sha256.sig", self.keys())
+        before = (self.bucket / "iso/stable.json").read_bytes()
+        self.log.write_text("")
+        # Again, now that there's a signature to go with it.
+        result = self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        self.assertEqual(result.stdout.strip(), "https://downloads.example.invalid/iso/agentv-1.0.0-x86_64.iso")
+        self.assertEqual([call for call in self.calls("s3 cp") if call.endswith("/iso/agentv-1.0.0-x86_64.iso")], [])
+        self.assertEqual(self.deleted(), [])
+        self.assertEqual(self.keys(), sorted(self.files("agentv-1.0.0-x86_64") + ["iso/stable.json"]))
+        self.assertEqual((self.bucket / "iso/stable.json").read_bytes(), before)
+        # Its size is still asked for, so a live ISO that's gone short stops it.
+        self.assertTrue(any("--key iso/agentv-1.0.0-x86_64.iso " in call for call in self.calls("s3api head-object")))
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"one")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_SHORT="agentv-1.0.0-x86_64.iso")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_the_same_iso_again_without_a_signature_keeps_the_one_it_has(self):
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one", signed=False)
+        self.assertIn("iso/agentv-1.0.0-x86_64.iso.sha256.sig", self.keys())
+        self.assertEqual(self.deleted(), [])
+
+    def test_a_name_that_isnt_live_can_be_uploaded_again(self):
+        # A publish that stopped before the channel's file moved left an ISO
+        # nobody is pointed at. The next try replaces it.
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        iso, names = self.named("stable", "agentv-1.0.1-x86_64", b"two")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_CP_FAILS="agentv-1.0.1-x86_64.iso.sha256")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.bucket / "iso/agentv-1.0.1-x86_64.iso").read_bytes(), b"two")
+        self.publish("stable", "agentv-1.0.1-x86_64", b"three")
+        self.assertEqual((self.bucket / "iso/agentv-1.0.1-x86_64.iso").read_bytes(), b"three")
+        self.assertEqual(self.pointer("stable")["sha256"], hashlib.sha256(b"three").hexdigest())
 
     def test_without_a_signature_one_left_under_that_name_goes(self):
-        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        # Left by a publish that never became the channel's ISO.
+        self.put("iso/agentv-1.0.0-x86_64.iso.sha256.sig", b"an older signature")
         self.publish("stable", "agentv-1.0.0-x86_64", b"two", signed=False)
         self.assertNotIn("iso/agentv-1.0.0-x86_64.iso.sha256.sig", self.keys())
         self.assertEqual(self.deleted(), ["iso/agentv-1.0.0-x86_64.iso.sha256.sig"])
+
+    def test_a_channels_file_that_cant_be_read_stops_the_upload(self):
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        self.log.write_text("")
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"two")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_GET_FAILS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("couldn't read the bucket's iso/stable.json", result.stderr)
+        self.assertEqual(self.calls("s3 cp"), [])
+        self.assertEqual((self.bucket / "iso/agentv-1.0.0-x86_64.iso").read_bytes(), b"one")
 
     def test_upload_refuses_an_iso_that_isnt_the_checksums(self):
         iso, names = self.named("stable", "agentv-1.0.0-x86_64", b"one")
