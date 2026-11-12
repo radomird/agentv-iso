@@ -71,6 +71,7 @@ class TheTag(unittest.TestCase):
         # and names that only look the part.
         for tag in (
             "v1.1.0", "v4.5.0", "v1.0.0", "v4.5.0-rc1", "v1.0.0-rc1", "v0.3.0-rc1", "v0.2", "v0.2.0.1", "v0.2.0x",
+            "agentv-v01.0.0", "agentv-v1.00.0", "agentv-v1.0.00", "v0.02.0", "v00.2.0", "agentv-v1.0.0-rc01", "agentv-v1.0.0-rc0",
             "agentv-1.0.0", "agentv-v1.0", "agentv-v1.0.0-beta1", "agentv-v1.0.0-rc", "agentv-v1.0.0-rc1x", "agentv-v1.0.0rc1",
             "xagentv-v1.0.0", "agentv-v1.0.0 x", "agentv", "tested", "some/branch", "",
         ):
@@ -91,7 +92,7 @@ class TheTag(unittest.TestCase):
             # Each of them reads back as that version.
             for name in names:
                 self.assertEqual(self.tag(name).stdout.split()[1], version)
-        for version in ("1.0", "v1.0.0", "0.2.0.r5.gabc1234", "edge", ""):
+        for version in ("1.0", "v1.0.0", "0.2.0.r5.gabc1234", "edge", "", "01.0.0", "1.0.0-rc01"):
             self.assertNotEqual(run(BIN / "agentv-iso-tag", "--names", version).returncode, 0)
 
 
@@ -277,7 +278,7 @@ class TheIsoWorkflow(unittest.TestCase):
         # A pipe to the summary mustn't hide a refusal.
         self.assertIn("set -o pipefail", body)
 
-    def name(self, tag="", version=""):
+    def name(self, tag="", version="", channel="edge"):
         repo = self.work / "repo"
         if not repo.exists():
             (repo / "release").mkdir(parents=True)
@@ -290,7 +291,7 @@ class TheIsoWorkflow(unittest.TestCase):
         out = self.work / "out"
         out.write_text("")
         env = {
-            **os.environ, "RELEASE_TAG": tag, "ISO_VERSION": version, "GITHUB_SHA": "f" * 40,
+            **os.environ, "RELEASE_TAG": tag, "ISO_VERSION": version, "CHANNEL": channel, "GITHUB_SHA": "f" * 40,
             "GITHUB_REF": "refs/tags/agentv-v9.9.9", "GITHUB_REF_NAME": "agentv-v9.9.9",
             "GITHUB_OUTPUT": str(out), "GITHUB_STEP_SUMMARY": os.devnull,
         }
@@ -312,6 +313,9 @@ class TheIsoWorkflow(unittest.TestCase):
         # that ref is on: a run by hand can build another.
         name, built = self.name()
         self.assertEqual(name, f"agentv-edge-{built[:7]}-x86_64")
+        # And for the packages it carries: a run by hand with stable's isn't
+        # called edge.
+        self.assertEqual(self.name(channel="stable")[0], f"agentv-stable-{built[:7]}-x86_64")
 
     def test_it_has_no_keys(self):
         code = "\n".join(line for line in self.text.splitlines() if not line.lstrip().startswith("#"))
@@ -358,6 +362,12 @@ class ThePublishWorkflow(unittest.TestCase):
 
     def test_another_repos_run_publishes_nothing(self):
         self.assertEqual(self.which("agentv-v1.0.0", repo="someone-else/agentv-iso"), {"publish": "false"})
+
+    def test_a_tags_publish_waits_in_a_group_of_its_own(self):
+        # GitHub cancels a waiting run when another one joins its group.
+        text = (WORKFLOWS / "publish-iso.yml").read_text()
+        self.assertIn("  group: publish-iso-${{ github.event_name == 'workflow_run' && 'tag' || 'other' }}\n", text)
+        self.assertIn("  cancel-in-progress: false\n", text)
 
     def test_only_a_run_by_hand_can_go_back(self):
         text = (WORKFLOWS / "publish-iso.yml").read_text()
