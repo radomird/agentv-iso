@@ -48,8 +48,8 @@ screen.LOGO = ROOT / "configs/airootfs/usr/share/agentv-iso/logo.ansi"
 handover = load("agentv_handover", HERE / "agentv_handover.py")
 
 DISKS = [
-    screen.Disk("/dev/nvme0n1", 500107862016, "samsung ssd 970 evo"),
-    screen.Disk("/dev/sda", 2000398934016, "wd blue hdd"),
+    screen.Disk("/dev/nvme0n1", 500107862016, "Samsung SSD 970 EVO"),
+    screen.Disk("/dev/sda", 2000398934016, "WD Blue HDD"),
 ]
 HOTSPOT = {
     "mode": "hotspot",
@@ -161,16 +161,31 @@ write_user_files
 
 class Disks(unittest.TestCase):
     def test_sizes_read_the_way_the_box_says(self):
-        self.assertEqual(screen.size_label(500107862016), "500 gb")
-        self.assertEqual(screen.size_label(2000398934016), "2 tb")
-        self.assertEqual(screen.size_label(1500301910016), "1.5 tb")
-        self.assertEqual(screen.size_label(42949672960), "43 gb")
+        self.assertEqual(screen.size_label(500107862016), "500 GB")
+        self.assertEqual(screen.size_label(2000398934016), "2 TB")
+        self.assertEqual(screen.size_label(1500301910016), "1.5 TB")
+        self.assertEqual(screen.size_label(42949672960), "43 GB")
 
     def test_names_join_vendor_and_model_like_the_configurator(self):
-        self.assertEqual(screen.model_label("ATA     ", "WDC WD20EZRZ"), "ata wdc wd20ezrz")
-        self.assertEqual(screen.model_label("Samsung", "Samsung SSD 970 EVO 500GB"), "samsung ssd 970 evo 500gb")
-        self.assertEqual(screen.model_label("", "Samsung SSD 970 EVO"), "samsung ssd 970 evo")
+        self.assertEqual(screen.model_label("ATA     ", "WDC WD20EZRZ"), "ATA WDC WD20EZRZ")
+        self.assertEqual(screen.model_label("Samsung", "Samsung SSD 970 EVO 500GB"), "Samsung SSD 970 EVO 500GB")
+        self.assertEqual(screen.model_label("SAMSUNG", "Samsung SSD 970 EVO"), "Samsung SSD 970 EVO")
+        self.assertEqual(screen.model_label("", "Samsung SSD 970 EVO"), "Samsung SSD 970 EVO")
         self.assertEqual(screen.model_label("0x1af4", ""), "")
+
+    def test_the_phone_gets_a_disk_in_its_own_capitals(self):
+        with tempfile.TemporaryDirectory() as work:
+            old = screen.RUN
+            screen.RUN = Path(work)
+            try:
+                screen.tell_phone(DISKS, 0)
+            finally:
+                screen.RUN = old
+            told = json.loads(Path(work, "screen.json").read_text())
+        self.assertEqual(
+            told["disks"][0],
+            {"path": "/dev/nvme0n1", "name": "nvme0n1", "model": "Samsung SSD 970 EVO", "size": "500 GB"},
+        )
 
 
 class Drawing(unittest.TestCase):
@@ -184,7 +199,13 @@ class Drawing(unittest.TestCase):
         self.assertIn("everything on it will be erased", text)
         self.assertIn("enter install", text)
         self.assertIn("↑ ↓ pick a disk", text)
-        self.assertIn("ctrl+c omarchy's own installer", text)
+        self.assertIn("ctrl+c omarchy's installer", text)
+
+    def test_the_console_is_lower_case(self):
+        # It's a terminal. A disk's own capitals are for the phone's page.
+        for disks in (DISKS, []):
+            text = plain(screen.render(disks, 0, 120, 33))
+            self.assertEqual(text, text.lower())
 
     def test_no_omarchy_question(self):
         text = plain(screen.render(DISKS, 1, 120, 33)).lower()
@@ -202,9 +223,10 @@ class Drawing(unittest.TestCase):
 
     def test_no_disk(self):
         text = plain(screen.render([], 0, 120, 33))
-        self.assertIn("there's no disk to install agentv on", text)
+        self.assertIn("no disk found", text)
+        self.assertIn("plug one in and it shows up here", text)
         self.assertNotIn("enter install", text)
-        self.assertIn("ctrl+c omarchy's own installer", text)
+        self.assertIn("ctrl+c omarchy's installer", text)
 
     def test_the_phones_code_beside_the_disks(self):
         for cols, rows in ((160, 50), (120, 33), (240, 67)):
@@ -217,7 +239,7 @@ class Drawing(unittest.TestCase):
 
     def test_a_console_too_small_for_the_code_says_it_in_words(self):
         text = plain(screen.render(DISKS, 0, 80, 25, HOTSPOT))
-        self.assertIn("or set it up from your phone: wi-fi AgenTV-1a2b, password abcdefghjk", text)
+        self.assertIn("or set it up from your phone: Wi-Fi AgenTV-1a2b, password abcdefghjk", text)
 
     def test_no_code_without_a_way_in(self):
         text = plain(screen.render(DISKS, 0, 160, 50, {"mode": "none", "qr": None}))
