@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>The installer for AgenTV, the world's first open-source agentic TV OS.</b><br>
+  <b>The USB installer for AgenTV, the world's first open-source agentic TV OS.</b><br>
   Powered by <a href="https://omarchy.org">Omarchy</a>.
 </p>
 
@@ -14,11 +14,15 @@
 
 This is where the AgenTV USB stick comes from.
 
-It's Omarchy's own installer, set up to install AgenTV instead of plain Omarchy. You get the same questions, with AgenTV's logo at the top. When it's done, your box reboots into AgenTV, and TV setup starts on the TV. Scan its code with your phone, and setup takes it from there.
+Put the ISO on a stick and start your box from it. The TV shows a code. Scan it with your phone, pick the disk and tap "Erase and install". That's the only question. The box installs AgenTV, restarts by itself, and your phone carries on with setup.
+
+No phone to hand? Pick the disk with the keyboard and press Enter. Want every question Omarchy's own installer asks? Press Ctrl+C on the first screen.
+
+It's for x86_64 PCs, and installing erases the disk you pick. [agentv-os's README](https://github.com/radomird/agentv-os#install-it) walks you through all of it, from the download to home.
 
 ## Getting the ISO
 
-The stable ISO is on [the releases page](https://github.com/radomird/agentv-iso/releases), in the newest release. Its notes have the download link and the ISO's checksum. The file is named after its version, like `agentv-1.0.0-x86_64.iso`, and it's about 6.7 GB. [agentv-os's README](https://github.com/radomird/agentv-os#installing-it) walks you through putting it on a USB stick and installing.
+The stable ISO is on [the releases page](https://github.com/radomird/agentv-iso/releases), in the newest release. Its notes have the download link and the ISO's checksum. The file is named after its version, like `agentv-1.0.0-x86_64.iso`, and it's about 6.7 GB.
 
 To check your download, grab its checksum and the checksum's signature too. They're at the ISO's address with `.sha256` and `.sha256.sig` on the end. Put them in the folder with the ISO and run this, with your ISO's version in place of `1.0.0`:
 
@@ -39,12 +43,18 @@ The ISO is too big for GitHub's release files, so it lives on Cloudflare R2. Sin
 
 Every release tag builds the ISO here. Before you see it, it has to pass a test run in GitHub Actions: a VM installs it by itself, then boots what it installed into AgenTV's TV session. Then its checksum gets signed and the ISO goes to R2 (`bin/agentv-iso-publish`).
 
+## Something went wrong?
+
+[Tell me what happened](https://github.com/radomird/agentv-iso/issues/new/choose): how far it got, and what the TV showed when it stopped. For a security problem, please [tell me privately](https://github.com/radomird/agentv-iso/security/advisories/new) first.
+
 ## Support AgenTV
 
 AgenTV is free and open source. If you'd like to help, you can [chip in through Stripe](https://buy.stripe.com/7sY4gzeMjdZs1oo7Wbgfu00) and pick the amount yourself. Thank you!
 
 ## Powered by Omarchy
 
-This repo is a fork of [omacom/omarchy-iso](https://github.com/omacom/omarchy-iso), pinned to an upstream commit. I never edit Omarchy's files here. AgenTV only adds its own: the build workflow, the settings that point the build at [`agentv-os`](https://github.com/radomird/agentv-os), and the installer logo. Omarchy's own README, with how to build and test an ISO yourself, is at [`../README.md`](../README.md).
+This repo is a fork of [omacom/omarchy-iso](https://github.com/omacom/omarchy-iso), pinned to an upstream commit. I never edit Omarchy's files here. AgenTV only adds its own: the first screen, the build workflow, the settings that point the build at [`agentv-os`](https://github.com/radomird/agentv-os), and the installer logo. Omarchy's own README, with how to build and test an ISO yourself, is at [`../README.md`](../README.md).
 
-Omarchy and its installer are MIT-licensed, and the [licence](../LICENSE) stays as it is. AgenTV isn't made or endorsed by the Omarchy project.
+Omarchy and its installer are MIT-licensed, and the [licence](../LICENSE) stays as it is. AgenTV's additions are copyright Radomir Drndarski and use the same licence. AgenTV isn't made or endorsed by the Omarchy project.
+
+Some files here are about other machines Omarchy supports, such as an ARM laptop. They're Omarchy's. AgenTV is x86_64 only.
