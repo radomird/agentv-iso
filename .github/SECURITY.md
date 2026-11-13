@@ -12,7 +12,7 @@ Please don't open a public issue for it.
 
 - What you found, and what someone could do with it.
 - How to make it happen, step by step.
-- The release you're on. It's in _Settings > This TV > About_ on the TV, or run `agentv version` on the box.
+- The release you're on. It's in _Settings > System > About_ on the TV, or run `agentv version` on the box.
 - Your box, if it matters.
 
 Leave out keys, passwords and anything from your own accounts. I don't need them to fix it.
