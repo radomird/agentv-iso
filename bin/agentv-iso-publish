@@ -64,6 +64,18 @@
 # R2 speaks S3, so the AWS CLI on GitHub's runners does the work. The bucket
 # and its keys come from the environment, which CI fills from the repo's
 # secrets and variables. None of them is in the repo.
+#
+# An ISO goes up in 64 MiB parts, four at a time, so a 6.7 GB ISO is about
+# a hundred parts instead of eight hundred. R2 wants every part but the
+# last to be the same size, and the CLI's classic uploader does that. A file
+# that fails to upload is tried again, three tries in all
+# (AGENTV_ISO_TRIES), with a wait between them that grows by
+# AGENTV_ISO_RETRY_WAIT (30) seconds each time. After a failed try, any
+# upload of that key the bucket still has open is aborted, so its parts
+# don't sit there. Trying again is safe: an ISO isn't live until
+# <channel>.json names it, and that only moves once every file is up. The
+# log gets the CLI's version and every part it had to retry, with the
+# reply it got, and nothing else from its debug output.
 
 set -euo pipefail
 
@@ -110,7 +122,82 @@ r2() {
   export AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=auto
   # R2 doesn't take the checksums newer AWS CLIs add to every upload.
   export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+  # The CLI's own defaults are 8 MiB parts, ten at a time: about 800 parts
+  # for an ISO. On 2026-11-13 three uploads in a row ended with a part R2
+  # couldn't find, all with the AWS CLI 2.40.0 the runners had just got,
+  # which retries a failed part much sooner than 2.39 did. Bigger parts and
+  # fewer at a time mean far fewer requests, and fewer of them retried.
+  # This file is the only config the CLI reads here, so nothing on the
+  # runner changes it.
+  export AWS_CONFIG_FILE=$WORK/aws-config
+  cat >"$AWS_CONFIG_FILE" <<'EOF'
+[default]
+s3 =
+  preferred_transfer_client = classic
+  multipart_threshold = 64MB
+  multipart_chunksize = 64MB
+  max_concurrent_requests = 4
+EOF
   endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+}
+
+# Aborts every upload of key $1 the bucket still has open, after a failed
+# try. Only that exact key: no other file's upload is touched. Not being
+# able to is a warning, not a stop. R2 drops an open upload by itself after
+# seven days.
+abort_open() {
+  local key=$1 listing id parts
+  local -a ids
+  if ! listing=$(aws s3api list-multipart-uploads --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --prefix "$key" --output json); then
+    echo "agentv-iso-publish: couldn't list the open uploads of $key, so any it left stay until R2 drops them" >&2
+    return 0
+  fi
+  mapfile -t ids < <(jq -r --arg key "$key" '(.Uploads // [])[] | select(.Key == $key) | .UploadId | strings' <<<"$listing" 2>/dev/null)
+  for id in "${ids[@]}"; do
+    [[ -n $id ]] || continue
+    # How far it got, for whoever reads the log.
+    parts=$(aws s3api list-parts --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$key" --upload-id "$id" --output json 2>/dev/null |
+      jq '(.Parts // []) | length' 2>/dev/null || true)
+    parts=${parts:-an unknown number of}
+    if aws s3api abort-multipart-upload --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$key" --upload-id "$id" >&2; then
+      echo "Aborted the open upload of $key (parts in the bucket: $parts)." >&2
+    else
+      echo "agentv-iso-publish: couldn't abort the open upload of $key, so it stays until R2 drops it" >&2
+    fi
+  done
+}
+
+# The CLI's debug log, cut down to what says why a part went wrong: the
+# CLI's version, each retry and its wait, a request that got no answer,
+# and a reply of 4xx or 5xx (that line names the part). Nothing else of it
+# is kept, so no request, header or signature reaches the log. A clean
+# upload prints one line here, the version.
+retries_only() {
+  grep -E --line-buffered \
+    -e ' - awscli\.clidriver - DEBUG - CLI version' \
+    -e ' - botocore\.retries\.[a-z]+ - DEBUG - (Retry needed|Max attempts)' \
+    -e ' - botocore\.endpoint - DEBUG - (Exception received|Response received to retry)' \
+    -e ' - urllib3\.connectionpool - DEBUG - .*" [45][0-9]{2} ' \
+    -e '^(upload failed|fatal error|An error occurred|aws: |warning: )' || true
+}
+
+# Uploads file $1 as key $2 under iso/. A failed try aborts what it left
+# open, waits, and goes again, up to AGENTV_ISO_TRIES (3) tries in all.
+put() {
+  local from=$1 key=$PREFIX$2 try=1 tries=${AGENTV_ISO_TRIES:-3} wait=${AGENTV_ISO_RETRY_WAIT:-30}
+  [[ $tries =~ ^[1-9][0-9]*$ ]] || { echo "agentv-iso-publish: AGENTV_ISO_TRIES is a number above 0" >&2; exit 1; }
+  [[ $wait =~ ^[0-9]+$ ]] || { echo "agentv-iso-publish: AGENTV_ISO_RETRY_WAIT is a number of seconds" >&2; exit 1; }
+  until aws s3 cp --debug --endpoint-url "$endpoint" --only-show-errors "$from" "s3://$R2_BUCKET/$key" 2> >(retries_only >&2) >&2; do
+    abort_open "$key"
+    if (( try >= tries )); then
+      echo "agentv-iso-publish: $key didn't upload in $tries tries, so nothing moves" >&2
+      exit 1
+    fi
+    echo "agentv-iso-publish: $key didn't upload on try $try of $tries. Trying again in $((wait * try)) seconds." >&2
+    sleep $((wait * try))
+    try=$((try + 1))
+  done
+  (( try == 1 )) || echo "$key went up on try $try." >&2
 }
 
 # Is version $1 older than $2? Versions sort the way sort -V sorts them:
@@ -250,7 +337,7 @@ upload() {
       echo "$file is the $channel ISO already, with the same sha256, so it isn't uploaded again." >&2
       continue
     fi
-    aws s3 cp --endpoint-url "$endpoint" --only-show-errors "${item%%:*}" "s3://$R2_BUCKET/$PREFIX${item##*:}" >&2
+    put "${item%%:*}" "${item##*:}"
   done
   # The live ISO's signature is this checksum's too, so it stays.
   if [[ ! -s $dir/$file.sha256.sig && -z $live ]]; then
@@ -268,7 +355,7 @@ upload() {
   jq -n --arg channel "$channel" --arg version "$version" --arg file "$file" --arg sha256 "$hash" \
     --arg url "${ISO_URL%/}/$PREFIX$file" \
     '{channel: $channel, version: $version, file: $file, sha256: $sha256, url: $url}' >"$WORK/$channel.json"
-  aws s3 cp --endpoint-url "$endpoint" --only-show-errors "$WORK/$channel.json" "s3://$R2_BUCKET/$PREFIX$channel.json" >&2
+  put "$WORK/$channel.json" "$channel.json"
   same_size "$WORK/$channel.json" "$channel.json"
 
   echo "${ISO_URL%/}/$PREFIX$file"
