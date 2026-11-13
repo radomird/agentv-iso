@@ -257,6 +257,7 @@ if grep -q '^daemon/ only:' "$ROOT/test/agentv/policy/ui-text"; then
   expect_fail "a string the daemon returns, with a word the TV never says, fails" "UI text is in AgenTV's voice"
 
   daemon_lists
+  # shellcheck disable=SC2016 # the ${id} is TypeScript's, not this script's
   printf 'throw new AppError("refused", `${id} isn\x27t on this box`);\n' >daemon/why.ts
   expect_fail "an error the daemon throws, starting with a value, fails" "UI text is in AgenTV's voice"
 fi
