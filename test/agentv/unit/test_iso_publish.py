@@ -3,8 +3,10 @@ its version, a small file per channel that says which ISO that is, and a
 clean-up that can only ever take out the ISO a channel had before.
 
 A stand-in for the AWS CLI is first on PATH. It keeps a folder as the
-bucket, writes down every call, and can be told to fail an upload or to
-give a listing that's failed, garbled, cut short or missing a key."""
+bucket, writes down every call, and can be told to fail an upload (every
+time, or only the first few times, leaving an open upload behind the way
+R2 does) or to give a listing that's failed, garbled, cut short or missing
+a key."""
 
 import hashlib
 import json
@@ -20,7 +22,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 PUBLISH = ROOT / "bin" / "agentv-iso-publish"
 
-# The stand-in: FAKE_BUCKET is the bucket, FAKE_LOG every call it got.
+# The stand-in: FAKE_BUCKET is the bucket, FAKE_LOG every call it got, and
+# FAKE_STATE what it remembers between calls: how many times each key was
+# tried, and the multipart uploads left open.
 AWS = r'''#!{python}
 import json, os, shutil, sys
 from pathlib import Path
@@ -29,6 +33,11 @@ args = sys.argv[1:]
 bucket = Path(os.environ["FAKE_BUCKET"])
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(" ".join(args) + "\n")
+state_file = Path(os.environ["FAKE_STATE"])
+state = json.loads(state_file.read_text()) if state_file.exists() else {"tries": {}, "open": []}
+
+def save():
+    state_file.write_text(json.dumps(state))
 
 def flag(name):
     return args[args.index(name) + 1]
@@ -36,11 +45,55 @@ def flag(name):
 command = " ".join(args[:2])
 if command == "s3 cp":
     key = args[-1].split("/", 3)[3]
+    tries = state["tries"][key] = state["tries"].get(key, 0) + 1
+    # The config the CLI would read, as it was for this upload.
+    config = os.environ.get("AWS_CONFIG_FILE")
+    if config and os.path.isfile(config):
+        with open(os.environ["FAKE_CONFIG_SEEN"], "a") as seen:
+            seen.write(Path(config).read_text())
+    # What --debug writes: a little worth keeping, much that isn't.
+    if "--debug" in args:
+        stamp = "2026-11-13 14:50:00,001 - ThreadPoolExecutor-0_1 - "
+        for line in (
+            "2026-11-13 14:50:00,000 - MainThread - awscli.clidriver - DEBUG - CLI version: aws-cli/2.40.0",
+            stamp + "botocore.endpoint - DEBUG - Sending http request: <AWSPreparedRequest headers={'Authorization': b'AWS4-HMAC-SHA256 Credential=id'}>",
+            stamp + "botocore.auth - DEBUG - StringToSign:",
+            "AWS4-HMAC-SHA256",
+            stamp + 'urllib3.connectionpool - DEBUG - https://r2.example.invalid:443 "PUT /bucket/' + key + '?partNumber=7&uploadId=u HTTP/1.1" 503 0',
+            stamp + "botocore.retries.standard - DEBUG - Retry needed, retrying request after delay of: 0.031",
+            stamp + 'urllib3.connectionpool - DEBUG - https://r2.example.invalid:443 "PUT /bucket/' + key + '?partNumber=8&uploadId=u HTTP/1.1" 200 0',
+            stamp + "botocore.retries.standard - DEBUG - Not retrying request.",
+        ):
+            print(line, file=sys.stderr)
     fails = os.environ.get("FAKE_CP_FAILS")
-    if fails and key.endswith(fails):
-        sys.exit("upload failed")
+    failing = bool(fails and key.endswith(fails))
+    # "<end of the key>:<n>" fails that key's first n tries.
+    first = os.environ.get("FAKE_CP_FAILS_FIRST")
+    if first:
+        end, times = first.rsplit(":", 1)
+        failing = failing or (key.endswith(end) and tries <= int(times))
+    if failing:
+        # R2 keeps the parts that went up until the upload is aborted.
+        state["open"].append({"Key": key, "UploadId": f"upload-{key}-{tries}", "Parts": 3})
+        save()
+        sys.exit(
+            f"upload failed: {args[-2]} to {args[-1]} An error occurred (InvalidPart) when calling the "
+            "CompleteMultipartUpload operation: One or more of the specified parts could not be found."
+        )
+    save()
     (bucket / key).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(args[-2], bucket / key)
+elif command == "s3api list-multipart-uploads":
+    if os.environ.get("FAKE_UPLOADS_LIST_FAILS"):
+        sys.exit("An error occurred (InternalError)")
+    uploads = [{"Key": u["Key"], "UploadId": u["UploadId"]} for u in state["open"] if u["Key"].startswith(flag("--prefix"))]
+    print(json.dumps({"Uploads": uploads} if uploads else {}))
+elif command == "s3api list-parts":
+    upload = next(u for u in state["open"] if u["UploadId"] == flag("--upload-id") and u["Key"] == flag("--key"))
+    print(json.dumps({"Parts": [{"PartNumber": n + 1} for n in range(upload["Parts"])]}))
+elif command == "s3api abort-multipart-upload":
+    state["open"] = [u for u in state["open"] if not (u["UploadId"] == flag("--upload-id") and u["Key"] == flag("--key"))]
+    save()
 elif command == "s3api head-object":
     path = bucket / flag("--key")
     if not path.is_file():
@@ -95,6 +148,8 @@ class IsoPublish(unittest.TestCase):
         self.bucket.mkdir()
         self.log = self.work / "aws.log"
         self.log.write_text("")
+        self.state = self.work / "aws-state.json"
+        self.config_seen = self.work / "aws-config-seen"
         bin_dir = self.work / "bin"
         bin_dir.mkdir()
         aws = bin_dir / "aws"
@@ -105,6 +160,10 @@ class IsoPublish(unittest.TestCase):
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "FAKE_BUCKET": str(self.bucket),
             "FAKE_LOG": str(self.log),
+            "FAKE_STATE": str(self.state),
+            "FAKE_CONFIG_SEEN": str(self.config_seen),
+            # No waiting between tries here.
+            "AGENTV_ISO_RETRY_WAIT": "0",
             "R2_ACCOUNT_ID": "account",
             "R2_ACCESS_KEY_ID": "id",
             "R2_SECRET_ACCESS_KEY": "secret",
@@ -114,6 +173,7 @@ class IsoPublish(unittest.TestCase):
         for name in (
             "FAKE_SHORT", "FAKE_CP_FAILS", "FAKE_GET_FAILS", "FAKE_LIST_FAILS", "FAKE_LIST_GARBAGE", "FAKE_LIST_WHOLE_BUCKET",
             "FAKE_LIST_TRUNCATED", "FAKE_LIST_HIDES", "FAKE_LIST_KEEPS_COUNT", "AGENTV_ISO_STALE_MAX",
+            "FAKE_CP_FAILS_FIRST", "FAKE_UPLOADS_LIST_FAILS", "AGENTV_ISO_TRIES", "AWS_CONFIG_FILE",
         ):
             self.env.pop(name, None)
 
@@ -167,6 +227,9 @@ class IsoPublish(unittest.TestCase):
 
     def deleted(self):
         return [line.split("--key ")[1] for line in self.calls("s3api delete-object")]
+
+    def open_uploads(self):
+        return json.loads(self.state.read_text())["open"] if self.state.exists() else []
 
     # --- names -------------------------------------------------------------
 
@@ -268,6 +331,107 @@ class IsoPublish(unittest.TestCase):
         # And the ISO before is still there to download.
         for key in self.files("agentv-1.0.0-x86_64"):
             self.assertIn(key, self.keys())
+
+    # --- trying an upload again -------------------------------------------
+
+    def test_an_upload_that_fails_once_goes_up_on_the_next_try(self):
+        # What happened to rc2 on 2026-11-13: R2 couldn't find a part when the
+        # upload was put together, and the CLI gave up on the whole file.
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        self.log.write_text("")
+        iso, names = self.named("stable", "agentv-1.0.1-x86_64", b"two")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_CP_FAILS_FIRST="agentv-1.0.1-x86_64.iso:1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("InvalidPart", result.stderr)
+        self.assertIn("try 1 of 3", result.stderr)
+        self.assertEqual(result.stdout.strip(), "https://downloads.example.invalid/iso/agentv-1.0.1-x86_64.iso")
+        self.assertEqual(self.pointer("stable")["file"], "agentv-1.0.1-x86_64.iso")
+        self.assertEqual((self.bucket / "iso/agentv-1.0.1-x86_64.iso").read_bytes(), b"two")
+        # Two tries of the ISO, and the open upload the first one left is aborted.
+        calls = self.log.read_text().splitlines()
+        tries = [i for i, call in enumerate(calls) if call.startswith("s3 cp") and call.endswith("/iso/agentv-1.0.1-x86_64.iso")]
+        self.assertEqual(len(tries), 2)
+        aborts = [i for i, call in enumerate(calls) if call.startswith("s3api abort-multipart-upload")]
+        self.assertEqual(len(aborts), 1)
+        self.assertIn("--key iso/agentv-1.0.1-x86_64.iso ", calls[aborts[0]])
+        self.assertIn("--upload-id upload-iso/agentv-1.0.1-x86_64.iso-1", calls[aborts[0]])
+        self.assertTrue(tries[0] < aborts[0] < tries[1])
+        self.assertIn("(parts in the bucket: 3)", result.stderr)
+        self.assertEqual(self.open_uploads(), [])
+        # The channel's file still goes up last, after the second try.
+        json_up = next(i for i, call in enumerate(calls) if call.startswith("s3 cp") and call.endswith("/iso/stable.json"))
+        self.assertGreater(json_up, tries[1])
+
+    def test_an_upload_that_keeps_failing_stops_after_three_tries(self):
+        self.publish("stable", "agentv-1.0.0-x86_64", b"one")
+        before = (self.bucket / "iso/stable.json").read_bytes()
+        self.log.write_text("")
+        iso, names = self.named("stable", "agentv-1.0.1-x86_64", b"two")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_CP_FAILS="agentv-1.0.1-x86_64.iso")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("didn't upload in 3 tries", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len([c for c in self.calls("s3 cp") if c.endswith("/iso/agentv-1.0.1-x86_64.iso")]), 3)
+        # Nothing moved, nothing after the ISO went up, and nothing is left open.
+        self.assertEqual((self.bucket / "iso/stable.json").read_bytes(), before)
+        self.assertEqual([c for c in self.calls("s3 cp") if not c.endswith("/iso/agentv-1.0.1-x86_64.iso")], [])
+        self.assertEqual(len(self.calls("s3api abort-multipart-upload")), 3)
+        self.assertEqual(self.open_uploads(), [])
+
+    def test_the_number_of_tries_can_be_set(self):
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_CP_FAILS="agentv-1.0.0-x86_64.iso", AGENTV_ISO_TRIES="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.calls("s3 cp")), 1)
+        for tries in ("0", "two"):
+            result = self.run_publish("upload", "stable", str(iso), str(names), AGENTV_ISO_TRIES=tries)
+            self.assertNotEqual(result.returncode, 0, tries)
+        self.assertNotIn("iso/stable.json", self.keys())
+
+    def test_only_that_keys_open_uploads_are_aborted(self):
+        # Another file's open upload, and one whose key only starts the same.
+        other = [
+            {"Key": "iso/agentv-1.0.0-x86_64.iso.sha256", "UploadId": "theirs", "Parts": 1},
+            {"Key": "iso/agentv-1.0.0-x86_64.iso.part", "UploadId": "longer", "Parts": 1},
+        ]
+        self.state.write_text(json.dumps({"tries": {}, "open": other}))
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64")
+        result = self.run_publish("upload", "stable", str(iso), str(names), FAKE_CP_FAILS_FIRST="agentv-1.0.0-x86_64.iso:2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("went up on try 3", result.stderr)
+        self.assertEqual(self.open_uploads(), other)
+        for call in self.calls("s3api abort-multipart-upload"):
+            self.assertIn("--key iso/agentv-1.0.0-x86_64.iso ", call)
+
+    def test_not_being_able_to_list_open_uploads_doesnt_stop_the_next_try(self):
+        iso, names = self.named("stable", "agentv-1.0.0-x86_64")
+        result = self.run_publish(
+            "upload", "stable", str(iso), str(names), FAKE_CP_FAILS_FIRST="agentv-1.0.0-x86_64.iso:1", FAKE_UPLOADS_LIST_FAILS="1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("couldn't list the open uploads", result.stderr)
+        self.assertEqual(self.pointer("stable")["file"], "agentv-1.0.0-x86_64.iso")
+
+    def test_the_log_says_why_a_part_was_retried_and_nothing_more(self):
+        result = self.publish("stable", "agentv-1.0.0-x86_64")
+        self.assertTrue(all("--debug" in call for call in self.calls("s3 cp")))
+        for kept in ("CLI version: aws-cli/2.40.0", "partNumber=7&uploadId=u HTTP/1.1\" 503", "Retry needed, retrying request after delay of: 0.031"):
+            self.assertIn(kept, result.stderr)
+        for dropped in ("Authorization", "StringToSign", "AWS4-HMAC-SHA256", "partNumber=8", "Not retrying"):
+            self.assertNotIn(dropped, result.stderr)
+
+    def test_an_iso_goes_up_in_big_parts_a_few_at_a_time(self):
+        # R2 wants every part but the last the same size. The classic
+        # uploader does that, with these settings and nothing from the runner.
+        self.publish("stable", "agentv-1.0.0-x86_64")
+        seen = self.config_seen.read_text()
+        for line in (
+            "preferred_transfer_client = classic",
+            "multipart_threshold = 64MB",
+            "multipart_chunksize = 64MB",
+            "max_concurrent_requests = 4",
+        ):
+            self.assertIn(line, seen)
 
     def test_a_failed_size_check_leaves_the_channels_file_where_it_was(self):
         self.publish("stable", "agentv-1.0.0-x86_64", b"one")

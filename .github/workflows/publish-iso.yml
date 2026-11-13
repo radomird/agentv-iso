@@ -393,7 +393,10 @@ jobs:
 
       # Checks the ISO against the checksum first, then asks the bucket for
       # each file's size after. Only then does the channel's .json file move
-      # to this ISO.
+      # to this ISO. A file that fails to upload is tried again by itself,
+      # three tries in all, with what the failed try left open aborted. So
+      # one upload that R2 turns down doesn't stop the publish, and nobody
+      # has to start a new run for it.
       - name: Upload it
         id: upload
         env:
