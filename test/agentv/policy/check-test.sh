@@ -241,6 +241,26 @@ output=$(bin/agentv-check ${ci_flag[@]+"${ci_flag[@]}"} 2>&1) || fail "a string 
 pass "a string in ui-words-allowed passes"
 reset_fork
 
+# The daemon, where most strings go to a log, is read only on the lines its
+# ui-text entry names. A string it returns or throws often ends on screen, so
+# those are read too, even when the string starts with a value. A repo whose
+# ui-text has no such entry skips this.
+daemon_lists() {
+  voice_lists
+  mkdir -p daemon
+  grep '^daemon/ only:' "$ROOT/test/agentv/policy/ui-text" >>test/agentv/policy/ui-text
+}
+
+if grep -q '^daemon/ only:' "$ROOT/test/agentv/policy/ui-text"; then
+  daemon_lists
+  printf 'export function why(): string {\n  return "The daemon stopped";\n}\n' >daemon/why.ts
+  expect_fail "a string the daemon returns, with a word the TV never says, fails" "UI text is in AgenTV's voice"
+
+  daemon_lists
+  printf 'throw new AppError("refused", `${id} isn\x27t on this box`);\n' >daemon/why.ts
+  expect_fail "an error the daemon throws, starting with a value, fails" "UI text is in AgenTV's voice"
+fi
+
 printf 'Just AgenTV.\n' >.github/README.md
 expect_fail "a README without Powered by Omarchy fails" "Omarchy's attribution is present"
 
