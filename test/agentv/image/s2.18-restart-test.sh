@@ -28,10 +28,11 @@ sleep 1
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true
 sleep 2
 capture_console "success-restart-question"
-ocr_top "$RUN_DIR/success-restart-question.png" "$RUN_DIR/question.txt" || true
-# The question's page: "tv power restart" over "restart?". Settings' own top
-# has neither, since Restart is further down its rows.
-check "Restart asks first: restart? (OCR)" grep -qi "restart" "$RUN_DIR/question.txt"
+ocr_read "$RUN_DIR/success-restart-question.png" "$RUN_DIR/question.txt" || true
+# The question's own words: "Restart?" over "Apps close, then you're back on
+# home". Settings' Power page has a Restart row, but never the question
+# mark or that line, so either one means the question is on screen.
+check "Restart asks first: restart? (OCR)" grep -qiE "restart ?\?|apps close|back on home" "$RUN_DIR/question.txt"
 
 # The answer: it goes at once.
 guest "agentv input key enter" >>"$RUN_DIR/input.log" 2>&1 || true

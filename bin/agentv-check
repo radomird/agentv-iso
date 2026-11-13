@@ -362,15 +362,16 @@ if [[ -f $POLICY_DIR/ui-text ]]; then
         # A docstring is for whoever reads the code.
         my $quotes = () = $line =~ /"""|\x27\x27\x27/g;
         if ($doc || $quotes) { $doc = !$doc if $quotes % 2; next }
-        # Comments, imports and what goes to a log are for whoever reads the code.
-        next if $line =~ m{^\s*(?://|/?\*|\#(?!\s*\S+\s*["\x27`])|<!--|import\s)};
+        # Comments (in Lua too, after two dashes), imports and what goes to a
+        # log are for whoever reads the code.
+        next if $line =~ m{^\s*(?://|/?\*|\#(?!\s*\S+\s*["\x27`])|<!--|--(?:\s|$)|import\s)};
         next if $line =~ /\bconsole\.\w+\(|\blog\(|\.debug\(|journal/;
         next if $only && $line !~ $only;
         # A class name, a data attribute, a test id and a regex are not
         # words anyone reads.
         $line =~ s/\b(?:class|id|for|key|action|kind|type)\s*[:=]\s*(?:"[^"]*"|`[^`]*`|\x27[^\x27]*\x27)//g;
         $line =~ s/"(?:data|aria-hidden)[\w-]*"\s*:\s*(?:"[^"]*"|`[^`]*`)//g;
-        $line =~ s{(?<=[(,=:\[|&!]\s|[(,=:\[|&!])/(?![/*\s])(?:[^/\\\n]|\\.)+/[dgimsuy]*}{ }g;
+        $line =~ s{(?:(?<=[(,=:\[|&!]\s)|(?<=[(,=:\[|&!]))/(?![/*\s])(?:[^/\\\n]|\\.)+/[dgimsuy]*}{ }g;
         my @text;
         if ($json) {
           push @text, $1 while $line =~ /"(?:name|description|label|title|line|note)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
@@ -379,11 +380,12 @@ if [[ -f $POLICY_DIR/ui-text ]]; then
           if ($html) { (my $bare = $line) =~ s/<[^>]*>/ /g; $bare =~ s/"[^"]*"//g; push @text, $bare if $bare =~ /\pL{3}/ }
         }
         for my $text (@text) {
+          # An address, a path, a selector or a list of class names is not
+          # something people read, even after a value: ${base}/api is a path,
+          # and ${name} has no key is a sentence.
+          next if $text =~ m~^\s*(?:\$\{[^\}]*\}\s*)*[/.\#\[@]|://|=>~;
           $text =~ s/\$\{[^}]*\}/ ... /g;
           next unless $text =~ /\pL/;
-          # An address, a path, a selector or a list of class names is not
-          # something people read.
-          next if $text =~ m{^\s*[/.\#\[@]|://|=>} ;
           next if $text !~ /\p{Lu}/ && $text =~ /\b\pL+-\pL/ && $text !~ /[\x27\x{2019}.,?!:]/;
           next unless $text =~ /\s/ || $text =~ /^\p{Lu}/;
           for my $word (@words) {
